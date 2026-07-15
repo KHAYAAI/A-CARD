@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Platform, signWebhook } from "@acard/core";
 import { createApp } from "../src/app.js";
 
@@ -164,5 +165,103 @@ describe("API end to end", () => {
       headers: { authorization: `Bearer ${other.api_key}` },
     });
     expect(res.status).toBe(404);
+  });
+
+  it("enforces the free plan's monthly card cap", async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await authed("/v1/cards", { method: "POST", body: JSON.stringify({ label: `c${i}` }) });
+      expect(res.status).toBe(201);
+    }
+    const res = await authed("/v1/cards", { method: "POST", body: JSON.stringify({ label: "over cap" }) });
+    expect(res.status).toBe(402);
+    expect((await json(res)).error.code).toBe("plan_limit_exceeded");
+  });
+});
+
+describe("Paystack billing", () => {
+  const paystackSecret = "sk_test_123";
+  const webhookSecret = "whsec_paystack_test";
+  let billingApp: ReturnType<typeof createApp>;
+  let billingKey: string;
+  let billingHolderId: string;
+
+  beforeEach(async () => {
+    billingApp = createApp({
+      platform: new Platform(),
+      issuerWebhookSecret: SECRET,
+      paystack: { secretKey: paystackSecret, webhookSecret },
+    });
+    const res = await billingApp.request("/v1/signup", {
+      method: "POST",
+      body: JSON.stringify({ email: "billing@example.co.za", name: "Billing" }),
+      headers: { "content-type": "application/json" },
+    });
+    const body = await json(res);
+    billingKey = body.api_key;
+    billingHolderId = body.account_holder.id;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("starts a Paystack checkout for a paid tier", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            status: true,
+            message: "ok",
+            data: { authorization_url: "https://checkout.paystack.com/abc", access_code: "abc", reference: "ref_1" },
+          }),
+        ),
+      ),
+    );
+
+    const res = await billingApp.request("/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ tier: "basic" }),
+      headers: { authorization: `Bearer ${billingKey}`, "content-type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.checkout_url).toBe("https://checkout.paystack.com/abc");
+  });
+
+  it("upgrades the account tier on a verified charge.success webhook", async () => {
+    const payload = JSON.stringify({
+      event: "charge.success",
+      id: "evt_1",
+      data: { reference: "ref_1", metadata: { accountHolderId: billingHolderId, tier: "pro" } },
+    });
+    const signature = createHmac("sha512", webhookSecret).update(payload).digest("hex");
+
+    const res = await billingApp.request("/webhooks/paystack", {
+      method: "POST",
+      body: payload,
+      headers: { "x-paystack-signature": signature },
+    });
+    expect(res.status).toBe(200);
+
+    // Confirm the upgrade actually raised the plan limit (pro = 100 cards/month).
+    for (let i = 0; i < 6; i++) {
+      const cardRes = await billingApp.request("/v1/cards", {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { authorization: `Bearer ${billingKey}`, "content-type": "application/json" },
+      });
+      expect(cardRes.status).toBe(201);
+    }
+  });
+
+  it("rejects a Paystack webhook with a bad signature", async () => {
+    const payload = JSON.stringify({ event: "charge.success", data: {} });
+    const res = await billingApp.request("/webhooks/paystack", {
+      method: "POST",
+      body: payload,
+      headers: { "x-paystack-signature": "not-a-real-signature" },
+    });
+    expect(res.status).toBe(401);
   });
 });

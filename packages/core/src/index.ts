@@ -8,4 +8,5 @@ export * from "./approvals.js";
 export * from "./apikeys.js";
 export * from "./idempotency.js";
 export * from "./webhooks.js";
+export * from "./billing.js";
 export * from "./platform.js";

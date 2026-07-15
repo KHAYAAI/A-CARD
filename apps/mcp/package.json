@@ -9,10 +9,14 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
+    "dev:http": "tsx watch src/index-http.ts",
+    "start:http": "tsx src/index-http.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "hono": "^4.6.0",
     "zod": "^3.23.0"
   }
 }

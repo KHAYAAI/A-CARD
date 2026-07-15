@@ -57,8 +57,27 @@ export function createLedgerStore(): LedgerStore {
   return { accounts: new Map(), transactions: new Map() };
 }
 
+export interface SerializedLedgerStore {
+  accounts: Account[];
+  transactions: LedgerTransaction[];
+}
+
+export function serializeLedgerStore(store: LedgerStore): SerializedLedgerStore {
+  return {
+    accounts: [...store.accounts.values()],
+    transactions: [...store.transactions.values()],
+  };
+}
+
+export function hydrateLedgerStore(data: SerializedLedgerStore): LedgerStore {
+  return {
+    accounts: new Map(data.accounts.map((a) => [a.id, a])),
+    transactions: new Map(data.transactions.map((t) => [t.id, t])),
+  };
+}
+
 export class Ledger {
-  constructor(private readonly store: LedgerStore) {}
+  constructor(readonly store: LedgerStore) {}
 
   createAccount(input: {
     name: string;

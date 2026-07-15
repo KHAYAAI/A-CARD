@@ -4,9 +4,17 @@ import { createCard, redactCard, type Card, type CreateCardInput } from "./cards
 import { DomainError, InsufficientFundsError, InvalidStateError, NotFoundError } from "./errors.js";
 import { newId } from "./ids.js";
 import { IdempotencyStore } from "./idempotency.js";
-import { createLedgerStore, Ledger, type LedgerTransaction } from "./ledger.js";
+import {
+  createLedgerStore,
+  hydrateLedgerStore,
+  Ledger,
+  serializeLedgerStore,
+  type LedgerTransaction,
+  type SerializedLedgerStore,
+} from "./ledger.js";
 import type { Currency } from "./money.js";
 import { evaluateRules, type AuthorizationContext } from "./rules.js";
+import { currentBillingPeriod, SUBSCRIPTION_TIERS, type SubscriptionTier } from "./billing.js";
 
 /**
  * The platform service: everything the API, MCP server, and CLI need, backed
@@ -21,6 +29,7 @@ export interface AccountHolder {
   name: string;
   currency: Currency;
   walletAccountId: string;
+  subscriptionTier: SubscriptionTier;
   createdAt: string;
 }
 
@@ -66,6 +75,18 @@ export interface PlatformEvent {
   data: Record<string, unknown>;
 }
 
+export interface PlatformSnapshot {
+  ledger: SerializedLedgerStore;
+  approvals: ApprovalRequest[];
+  apiKeys: ReturnType<ApiKeyService["serialize"]>;
+  accountHolders: AccountHolder[];
+  cards: Card[];
+  transactions: CardTransaction[];
+  openHolds: Array<[string, { ledgerTxId: string; transactionId: string }]>;
+  events: PlatformEvent[];
+  settlementAccounts: Array<[Currency, string]>;
+}
+
 export class Platform {
   readonly ledger = new Ledger(createLedgerStore());
   readonly approvals = new ApprovalService();
@@ -80,6 +101,42 @@ export class Platform {
   private readonly events: PlatformEvent[] = [];
   /** Platform settlement account per currency (double-entry counterparty). */
   private readonly settlementAccounts = new Map<Currency, string>();
+
+  /**
+   * Whole-platform state as a plain JSON object, for durability across
+   * process restarts (see `apps/api/src/persistence.ts`). This is a
+   * single-writer snapshot model, not a distributed ledger — correct for one
+   * API instance, and the documented next step before scaling to several.
+   */
+  serialize(): PlatformSnapshot {
+    return {
+      ledger: serializeLedgerStore(this.ledger.store),
+      approvals: this.approvals.serialize(),
+      apiKeys: this.apiKeys.serialize(),
+      accountHolders: [...this.accountHolders.values()],
+      cards: [...this.cards.values()],
+      transactions: [...this.transactions.values()],
+      openHolds: [...this.openHolds.entries()],
+      events: this.events,
+      settlementAccounts: [...this.settlementAccounts.entries()],
+    };
+  }
+
+  static hydrate(snapshot: PlatformSnapshot): Platform {
+    const platform = new Platform();
+    (platform as { ledger: Ledger }).ledger = new Ledger(hydrateLedgerStore(snapshot.ledger));
+    (platform as { approvals: ApprovalService }).approvals = ApprovalService.hydrate(snapshot.approvals);
+    (platform as { apiKeys: ApiKeyService }).apiKeys = ApiKeyService.hydrate(snapshot.apiKeys);
+    for (const holder of snapshot.accountHolders) platform.accountHolders.set(holder.id, holder);
+    for (const card of snapshot.cards) platform.cards.set(card.id, card);
+    for (const tx of snapshot.transactions) platform.transactions.set(tx.id, tx);
+    for (const [authId, hold] of snapshot.openHolds) platform.openHolds.set(authId, hold);
+    platform.events.push(...snapshot.events);
+    for (const [currency, accountId] of snapshot.settlementAccounts) {
+      platform.settlementAccounts.set(currency, accountId);
+    }
+    return platform;
+  }
 
   // ---- account holders & wallets ------------------------------------------
 
@@ -101,6 +158,7 @@ export class Platform {
       name: input.name,
       currency,
       walletAccountId: wallet.id,
+      subscriptionTier: "free",
       createdAt: new Date().toISOString(),
     };
     this.accountHolders.set(holder.id, holder);
@@ -111,6 +169,14 @@ export class Platform {
   getAccountHolder(id: string): AccountHolder {
     const holder = this.accountHolders.get(id);
     if (!holder) throw new NotFoundError("account holder", id);
+    return holder;
+  }
+
+  /** Called by the Paystack webhook once a subscription payment settles. */
+  setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): AccountHolder {
+    const holder = this.getAccountHolder(accountHolderId);
+    holder.subscriptionTier = tier;
+    this.emit("subscription.updated", { accountHolderId, tier });
     return holder;
   }
 
@@ -156,6 +222,18 @@ export class Platform {
     const currency = input.currency ?? holder.currency;
     if (currency !== holder.currency) {
       throw new DomainError("currency_mismatch", `wallet is ${holder.currency}; multi-currency cards need a ${currency} wallet`);
+    }
+    const tierLimit = SUBSCRIPTION_TIERS[holder.subscriptionTier].cardsPerMonth;
+    const period = currentBillingPeriod();
+    const createdThisPeriod = [...this.cards.values()].filter(
+      (c) => c.accountHolderId === holder.id && currentBillingPeriod(new Date(c.createdAt)) === period,
+    ).length;
+    if (createdThisPeriod >= tierLimit) {
+      throw new DomainError(
+        "plan_limit_exceeded",
+        `${holder.subscriptionTier} plan allows ${tierLimit} cards/month; upgrade to create more`,
+        402,
+      );
     }
     const card = createCard({ ...input, currency, walletAccountId: holder.walletAccountId });
     this.cards.set(card.id, card);
@@ -399,7 +477,16 @@ export class Platform {
     return { approved: false, declineReason: reason, transaction };
   }
 
+  private readonly listeners: Array<(event: PlatformEvent) => void> = [];
+
+  /** Subscribe to platform events (e.g. to forward `approval.requested` to Slack). Not persisted. */
+  onEvent(listener: (event: PlatformEvent) => void): void {
+    this.listeners.push(listener);
+  }
+
   private emit(type: string, data: Record<string, unknown>): void {
-    this.events.push({ id: newId("evt"), type, createdAt: new Date().toISOString(), data });
+    const event: PlatformEvent = { id: newId("evt"), type, createdAt: new Date().toISOString(), data };
+    this.events.push(event);
+    for (const listener of this.listeners) listener(event);
   }
 }

@@ -30,6 +30,19 @@ export class ApiKeyService {
   private readonly keys = new Map<string, ApiKey>();
   private readonly byHash = new Map<string, ApiKey>();
 
+  serialize(): ApiKey[] {
+    return [...this.keys.values()];
+  }
+
+  static hydrate(data: ApiKey[]): ApiKeyService {
+    const service = new ApiKeyService();
+    for (const key of data) {
+      service.keys.set(key.id, key);
+      service.byHash.set(key.hashedSecret, key);
+    }
+    return service;
+  }
+
   issue(accountHolderId: string, name: string): IssuedApiKey {
     const secret = `ak_live_${randomBytes(24).toString("base64url")}`;
     const key: ApiKey = {

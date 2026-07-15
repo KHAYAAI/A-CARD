@@ -2,14 +2,18 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import {
+  currentBillingPeriod,
   DomainError,
   Platform,
   redactCard,
   signWebhook,
+  SUBSCRIPTION_TIERS,
   verifyWebhook,
   type AccountHolder,
   type Currency,
+  type SubscriptionTier,
 } from "@acard/core";
+import { PaystackClient, subscriptionReference } from "./paystack.js";
 
 /**
  * A-CARD REST API.
@@ -23,6 +27,12 @@ export interface AppConfig {
   platform: Platform;
   /** Shared secret with the (mock) issuer for webhook signatures. */
   issuerWebhookSecret: string;
+  /** Called after any request that might have mutated platform state (persistence hook). */
+  onMutation?: () => void;
+  /** Paystack integration for ZAR subscription billing (optional — omit to run unmetered). */
+  paystack?: { secretKey: string; webhookSecret: string };
+  /** Where Paystack should send the customer back after checkout. */
+  dashboardUrl?: string;
 }
 
 type Env = { Variables: { holder: AccountHolder } };
@@ -74,10 +84,18 @@ const issuerEventSchema = z.object({
 });
 
 export function createApp(config: AppConfig) {
-  const { platform, issuerWebhookSecret } = config;
+  const { platform, issuerWebhookSecret, onMutation, dashboardUrl } = config;
+  const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
   const app = new Hono<Env>();
 
   app.use("*", cors());
+
+  // Persist after any request that could have changed state — cheap, and the
+  // snapshot writer already coalesces bursts (see apps/api/src/persistence.ts).
+  app.use("*", async (c, next) => {
+    await next();
+    if (onMutation && c.req.method !== "GET" && c.res.status < 400) onMutation();
+  });
 
   app.get("/health", (c) => c.json({ ok: true, service: "acard-api" }));
 
@@ -242,6 +260,50 @@ export function createApp(config: AppConfig) {
     const body = z.object({ name: z.string().default("api key") }).parse(await c.req.json().catch(() => ({})));
     const issued = platform.apiKeys.issue(holder.id, body.name);
     return c.json({ api_key: issued.secret, api_key_id: issued.key.id }, 201);
+  });
+
+  // ---- billing (freemium tiers, ZAR collection via Paystack) ------------------------
+
+  app.get("/v1/billing/plans", (c) => c.json({ plans: SUBSCRIPTION_TIERS }));
+
+  app.post("/v1/billing/checkout", async (c) => {
+    if (!paystack) {
+      return c.json({ error: { code: "billing_not_configured", message: "Paystack is not configured on this deployment" } }, 501);
+    }
+    const holder = c.get("holder");
+    const { tier } = z.object({ tier: z.enum(["basic", "pro"]) }).parse(await c.req.json());
+    const plan = SUBSCRIPTION_TIERS[tier as SubscriptionTier];
+    const reference = subscriptionReference(holder.id, currentBillingPeriod());
+    const checkout = await paystack.initializeTransaction({
+      email: holder.email,
+      amountMinorUnits: plan.priceZarCents,
+      reference,
+      callbackUrl: dashboardUrl,
+      metadata: { accountHolderId: holder.id, tier },
+    });
+    return c.json({ checkout_url: checkout.authorizationUrl, reference: checkout.reference });
+  });
+
+  app.post("/webhooks/paystack", async (c) => {
+    if (!paystack) return c.json({ error: { code: "billing_not_configured", message: "Paystack is not configured" } }, 501);
+    const rawBody = await c.req.text();
+    if (!paystack.verifyWebhookSignature(rawBody, c.req.header("x-paystack-signature"))) {
+      return c.json({ error: { code: "invalid_signature", message: "bad Paystack signature" } }, 401);
+    }
+    const event = JSON.parse(rawBody) as {
+      event: string;
+      id?: string;
+      data: { reference?: string; metadata?: { accountHolderId?: string; tier?: SubscriptionTier } };
+    };
+    const eventId = String(event.id ?? event.data.reference ?? "");
+    if (eventId && !platform.idempotency.markEvent(`paystack:${eventId}`)) {
+      return c.json({ received: true, duplicate: true });
+    }
+    if (event.event === "charge.success") {
+      const { accountHolderId, tier } = event.data.metadata ?? {};
+      if (accountHolderId && tier) platform.setSubscriptionTier(accountHolderId, tier);
+    }
+    return c.json({ received: true });
   });
 
   // ---- issuer webhook (the real-time authorization hot path) ------------------------

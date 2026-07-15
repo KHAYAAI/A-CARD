@@ -33,6 +33,16 @@ export interface ApprovalRequest {
 export class ApprovalService {
   private readonly requests = new Map<string, ApprovalRequest>();
 
+  serialize(): ApprovalRequest[] {
+    return [...this.requests.values()];
+  }
+
+  static hydrate(data: ApprovalRequest[]): ApprovalService {
+    const service = new ApprovalService();
+    for (const request of data) service.requests.set(request.id, request);
+    return service;
+  }
+
   open(input: {
     cardId: string;
     accountHolderId: string;
