@@ -1,0 +1,28 @@
+{
+  "name": "acard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A-CARD — virtual cards for AI agents (Agentcard-style platform, South Africa first)",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/core && tsc -p apps/api && tsc -p apps/mcp && tsc -p apps/cli",
+    "dev:api": "npm run dev -w @acard/api",
+    "dev:mcp": "npm run dev -w @acard/mcp",
+    "dev:dashboard": "npm run dev -w @acard/dashboard"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

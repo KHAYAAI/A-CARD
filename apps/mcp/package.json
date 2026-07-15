@@ -1,0 +1,18 @@
+{
+  "name": "@acard/mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A-CARD MCP server — virtual cards for AI agents",
+  "bin": {
+    "acard-mcp": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  }
+}

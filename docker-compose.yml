@@ -1,0 +1,23 @@
+# Infrastructure for moving beyond the in-memory sandbox:
+#   - Postgres: durable store for the ledger/platform state (adapter TODO)
+#   - Redis: BullMQ job queue backing (webhook retries, notifications)
+#   - Blnk: drop-in double-entry ledger service (alternative to the built-in ledger)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: acard
+      POSTGRES_PASSWORD: acard
+      POSTGRES_DB: acard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

@@ -1,0 +1,17 @@
+{
+  "name": "@acard/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A-CARD CLI — virtual cards for AI agents",
+  "bin": {
+    "acard": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "commander": "^12.0.0"
+  }
+}
