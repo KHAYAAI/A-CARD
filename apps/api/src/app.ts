@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   currentBillingPeriod,
   DomainError,
-  Platform,
   redactCard,
   signWebhook,
   SUBSCRIPTION_TIERS,
@@ -14,6 +13,7 @@ import {
   type SubscriptionTier,
 } from "@acard/core";
 import { PaystackClient, subscriptionReference } from "./paystack.js";
+import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
 
 /**
  * A-CARD REST API.
@@ -21,18 +21,27 @@ import { PaystackClient, subscriptionReference } from "./paystack.js";
  * Auth model: `Authorization: Bearer <api key secret>` for /v1 routes.
  * Signup is unauthenticated and returns the first API key. The issuer
  * webhook is authenticated by HMAC signature, not API key.
+ *
+ * The API depends only on the async `PlatformService` port, so it runs
+ * unchanged against the in-memory sandbox or the Postgres multi-writer store.
  */
 
 export interface AppConfig {
-  platform: Platform;
+  /** The async platform service. A raw in-memory `Platform` is auto-wrapped. */
+  platform: PlatformService | import("@acard/core").Platform;
   /** Shared secret with the (mock) issuer for webhook signatures. */
   issuerWebhookSecret: string;
-  /** Called after any request that might have mutated platform state (persistence hook). */
+  /** Called after any request that might have mutated platform state (snapshot persistence hook). */
   onMutation?: () => void;
   /** Paystack integration for ZAR subscription billing (optional — omit to run unmetered). */
   paystack?: { secretKey: string; webhookSecret: string };
   /** Where Paystack should send the customer back after checkout. */
   dashboardUrl?: string;
+}
+
+function asService(platform: AppConfig["platform"]): PlatformService {
+  // A bare `Platform` (has `serialize`) is wrapped; a `PlatformService` passes through.
+  return "serialize" in platform ? new InMemoryPlatformService(platform) : platform;
 }
 
 type Env = { Variables: { holder: AccountHolder } };
@@ -84,7 +93,8 @@ const issuerEventSchema = z.object({
 });
 
 export function createApp(config: AppConfig) {
-  const { platform, issuerWebhookSecret, onMutation, dashboardUrl } = config;
+  const { issuerWebhookSecret, onMutation, dashboardUrl } = config;
+  const platform = asService(config.platform);
   const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
   const app = new Hono<Env>();
 
@@ -103,13 +113,13 @@ export function createApp(config: AppConfig) {
 
   app.post("/v1/signup", async (c) => {
     const body = signupSchema.parse(await c.req.json());
-    const holder = platform.signup(body);
-    const issued = platform.apiKeys.issue(holder.id, "default");
+    const holder = await platform.signup(body);
+    const issued = await platform.issueApiKey(holder.id, "default");
     return c.json(
       {
         account_holder: holder,
         api_key: issued.secret,
-        api_key_id: issued.key.id,
+        api_key_id: issued.id,
       },
       201,
     );
@@ -121,9 +131,9 @@ export function createApp(config: AppConfig) {
     if (c.req.path === "/v1/signup") return next();
     const header = c.req.header("authorization") ?? "";
     const secret = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const key = platform.apiKeys.authenticate(secret);
-    if (!key) return c.json({ error: { code: "unauthorized", message: "invalid API key" } }, 401);
-    c.set("holder", platform.getAccountHolder(key.accountHolderId));
+    const holder = await platform.authenticateApiKey(secret);
+    if (!holder) return c.json({ error: { code: "unauthorized", message: "invalid API key" } }, 401);
+    c.set("holder", holder);
     return next();
   });
 
@@ -136,10 +146,10 @@ export function createApp(config: AppConfig) {
     const holder = c.get("holder");
     const scoped = `${holder?.id ?? "anon"}:${c.req.path}:${key}`;
     const payload = await c.req.raw.clone().text();
-    const hash = platform.idempotency.hashRequest(payload);
-    const lookup = platform.idempotency.get(scoped, hash);
+    const hash = hashRequestPayload(payload);
+    const lookup = await platform.idempotencyGet(scoped, hash);
     if (lookup.hit) {
-      return c.json(lookup.response.body as object, lookup.response.status as 200);
+      return c.json(lookup.body as object, lookup.status as 200);
     }
     if (lookup.conflict) {
       return c.json(
@@ -150,22 +160,22 @@ export function createApp(config: AppConfig) {
     await next();
     if (c.res.status < 500) {
       const responseBody = await c.res.clone().json().catch(() => null);
-      platform.idempotency.put(scoped, hash, c.res.status, responseBody);
+      await platform.idempotencyPut(scoped, hash, c.res.status, responseBody);
     }
   });
 
   // ---- wallet ----------------------------------------------------------------
 
-  app.get("/v1/wallet", (c) => {
+  app.get("/v1/wallet", async (c) => {
     const holder = c.get("holder");
-    return c.json({ wallet: platform.walletBalance(holder.id) });
+    return c.json({ wallet: await platform.walletBalance(holder.id) });
   });
 
   app.post("/v1/wallet/fund", async (c) => {
     const holder = c.get("holder");
     const body = fundSchema.parse(await c.req.json());
-    const tx = platform.fundWallet(holder.id, body.amount, body.reference);
-    return c.json({ ledger_transaction: tx, wallet: platform.walletBalance(holder.id) }, 201);
+    const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.reference);
+    return c.json({ ledger_transaction: ledgerTransaction, wallet }, 201);
   });
 
   // ---- cards -----------------------------------------------------------------
@@ -173,7 +183,7 @@ export function createApp(config: AppConfig) {
   app.post("/v1/cards", async (c) => {
     const holder = c.get("holder");
     const body = createCardSchema.parse(await c.req.json().catch(() => ({})));
-    const card = platform.createCard({
+    const card = await platform.createCard({
       accountHolderId: holder.id,
       label: body.label,
       singleUse: body.single_use,
@@ -194,63 +204,63 @@ export function createApp(config: AppConfig) {
     return c.json({ card }, 201);
   });
 
-  app.get("/v1/cards", (c) => {
+  app.get("/v1/cards", async (c) => {
     const holder = c.get("holder");
-    return c.json({ cards: platform.listCards(holder.id).map(redactCard) });
+    return c.json({ cards: (await platform.listCards(holder.id)).map(redactCard) });
   });
 
-  app.get("/v1/cards/:id", (c) => {
+  app.get("/v1/cards/:id", async (c) => {
     const holder = c.get("holder");
-    const card = platform.getCard(c.req.param("id"));
-    if (card.accountHolderId !== holder.id) {
+    const card = await platform.getCard(c.req.param("id"));
+    if (!card || card.accountHolderId !== holder.id) {
       return c.json({ error: { code: "not_found", message: "card not found" } }, 404);
     }
     return c.json({ card: redactCard(card) });
   });
 
-  app.post("/v1/cards/:id/close", (c) => {
+  app.post("/v1/cards/:id/close", async (c) => {
     const holder = c.get("holder");
-    const card = platform.getCard(c.req.param("id"));
-    if (card.accountHolderId !== holder.id) {
+    const card = await platform.getCard(c.req.param("id"));
+    if (!card || card.accountHolderId !== holder.id) {
       return c.json({ error: { code: "not_found", message: "card not found" } }, 404);
     }
-    return c.json({ card: redactCard(platform.closeCard(card.id)) });
+    return c.json({ card: redactCard(await platform.closeCard(card.id)) });
   });
 
   // ---- transactions ------------------------------------------------------------
 
-  app.get("/v1/transactions", (c) => {
+  app.get("/v1/transactions", async (c) => {
     const holder = c.get("holder");
     const cardId = c.req.query("card_id");
     return c.json({
-      transactions: platform.listTransactions({ accountHolderId: holder.id, cardId: cardId || undefined }),
+      transactions: await platform.listTransactions({ accountHolderId: holder.id, cardId: cardId || undefined }),
     });
   });
 
   // ---- approvals ----------------------------------------------------------------
 
-  app.get("/v1/approvals", (c) => {
+  app.get("/v1/approvals", async (c) => {
     const holder = c.get("holder");
     const status = c.req.query("status") as "pending" | undefined;
-    return c.json({ approvals: platform.approvals.list({ accountHolderId: holder.id, status }) });
+    return c.json({ approvals: await platform.listApprovals({ accountHolderId: holder.id, status }) });
   });
 
-  app.post("/v1/approvals/:id/approve", (c) => {
+  app.post("/v1/approvals/:id/approve", async (c) => {
     const holder = c.get("holder");
-    const approval = platform.approvals.get(c.req.param("id"));
-    if (approval.accountHolderId !== holder.id) {
+    const approval = await platform.getApproval(c.req.param("id"));
+    if (!approval || approval.accountHolderId !== holder.id) {
       return c.json({ error: { code: "not_found", message: "approval not found" } }, 404);
     }
-    return c.json({ approval: platform.decideApproval(approval.id, "approved", holder.email) });
+    return c.json({ approval: await platform.decideApproval(approval.id, "approved", holder.email) });
   });
 
-  app.post("/v1/approvals/:id/deny", (c) => {
+  app.post("/v1/approvals/:id/deny", async (c) => {
     const holder = c.get("holder");
-    const approval = platform.approvals.get(c.req.param("id"));
-    if (approval.accountHolderId !== holder.id) {
+    const approval = await platform.getApproval(c.req.param("id"));
+    if (!approval || approval.accountHolderId !== holder.id) {
       return c.json({ error: { code: "not_found", message: "approval not found" } }, 404);
     }
-    return c.json({ approval: platform.decideApproval(approval.id, "denied", holder.email) });
+    return c.json({ approval: await platform.decideApproval(approval.id, "denied", holder.email) });
   });
 
   // ---- API keys -------------------------------------------------------------------
@@ -258,8 +268,8 @@ export function createApp(config: AppConfig) {
   app.post("/v1/keys", async (c) => {
     const holder = c.get("holder");
     const body = z.object({ name: z.string().default("api key") }).parse(await c.req.json().catch(() => ({})));
-    const issued = platform.apiKeys.issue(holder.id, body.name);
-    return c.json({ api_key: issued.secret, api_key_id: issued.key.id }, 201);
+    const issued = await platform.issueApiKey(holder.id, body.name);
+    return c.json({ api_key: issued.secret, api_key_id: issued.id }, 201);
   });
 
   // ---- billing (freemium tiers, ZAR collection via Paystack) ------------------------
@@ -296,12 +306,12 @@ export function createApp(config: AppConfig) {
       data: { reference?: string; metadata?: { accountHolderId?: string; tier?: SubscriptionTier } };
     };
     const eventId = String(event.id ?? event.data.reference ?? "");
-    if (eventId && !platform.idempotency.markEvent(`paystack:${eventId}`)) {
+    if (eventId && !(await platform.markEvent(`paystack:${eventId}`))) {
       return c.json({ received: true, duplicate: true });
     }
     if (event.event === "charge.success") {
       const { accountHolderId, tier } = event.data.metadata ?? {};
-      if (accountHolderId && tier) platform.setSubscriptionTier(accountHolderId, tier);
+      if (accountHolderId && tier) await platform.setSubscriptionTier(accountHolderId, tier);
     }
     return c.json({ received: true });
   });
@@ -328,7 +338,7 @@ export function createApp(config: AppConfig) {
         })
         .parse(event.data);
       // Idempotent by authorization id inside platform.authorize.
-      const decision = platform.authorize({
+      const decision = await platform.authorize({
         authorizationId: data.authorization_id,
         cardId: data.card_id,
         amount: data.amount,
@@ -343,7 +353,7 @@ export function createApp(config: AppConfig) {
     }
 
     // Non-authorization events are settled at-most-once by event id.
-    if (!platform.idempotency.markEvent(event.id)) {
+    if (!(await platform.markEvent(event.id))) {
       return c.json({ received: true, duplicate: true });
     }
 
@@ -351,13 +361,13 @@ export function createApp(config: AppConfig) {
       const data = z
         .object({ authorization_id: z.string(), final_amount: z.number().int().positive().optional() })
         .parse(event.data);
-      platform.capture(data.authorization_id, data.final_amount);
+      await platform.capture(data.authorization_id, data.final_amount);
       return c.json({ received: true });
     }
 
     // authorization.reversal
     const data = z.object({ authorization_id: z.string() }).parse(event.data);
-    platform.reverse(data.authorization_id);
+    await platform.reverse(data.authorization_id);
     return c.json({ received: true });
   });
 
@@ -369,8 +379,8 @@ export function createApp(config: AppConfig) {
   app.post("/v1/simulate/purchase", async (c) => {
     const holder = c.get("holder");
     const body = simulateAuthSchema.parse(await c.req.json());
-    const card = platform.getCard(body.card_id);
-    if (card.accountHolderId !== holder.id) {
+    const card = await platform.getCard(body.card_id);
+    if (!card || card.accountHolderId !== holder.id) {
       return c.json({ error: { code: "not_found", message: "card not found" } }, 404);
     }
 
@@ -415,7 +425,7 @@ export function createApp(config: AppConfig) {
       approved: decision.approved,
       decline_reason: decision.decline_reason,
       approval_id: decision.approval_id,
-      wallet: platform.walletBalance(holder.id),
+      wallet: await platform.walletBalance(holder.id),
     });
   });
 

@@ -1,4 +1,9 @@
-import type { Platform } from "@acard/core";
+import type { PlatformEvent } from "@acard/core";
+
+/** Anything that emits platform events — the in-memory `Platform` or a `PlatformService`. */
+interface EventSource {
+  onEvent(listener: (event: PlatformEvent) => void): void;
+}
 
 /**
  * Push approval requests to Slack via an Incoming Webhook — the same
@@ -6,7 +11,7 @@ import type { Platform } from "@acard/core";
  * (one POST, no bot token, no OAuth) so it can be wired up in minutes:
  * see the "external dependencies" list for how to create one.
  */
-export function attachSlackNotifications(platform: Platform, webhookUrl: string, dashboardUrl?: string): void {
+export function attachSlackNotifications(platform: EventSource, webhookUrl: string, dashboardUrl?: string): void {
   platform.onEvent((event) => {
     if (event.type !== "approval.requested") return;
     const { approvalId, cardId, amount } = event.data as { approvalId: string; cardId: string; amount: number };
