@@ -1,5 +1,6 @@
 import { ApprovalService, type ApprovalRequest } from "./approvals.js";
 import { ApiKeyService } from "./apikeys.js";
+import { AuthService, type Membership, type Session, type User } from "./auth.js";
 import { createCard, redactCard, type Card, type CreateCardInput } from "./cards.js";
 import { DomainError, InsufficientFundsError, InvalidStateError, NotFoundError } from "./errors.js";
 import { newId } from "./ids.js";
@@ -79,6 +80,7 @@ export interface PlatformSnapshot {
   ledger: SerializedLedgerStore;
   approvals: ApprovalRequest[];
   apiKeys: ReturnType<ApiKeyService["serialize"]>;
+  auth?: { users: User[]; memberships: Membership[]; sessions: Session[] };
   accountHolders: AccountHolder[];
   cards: Card[];
   transactions: CardTransaction[];
@@ -91,6 +93,7 @@ export class Platform {
   readonly ledger = new Ledger(createLedgerStore());
   readonly approvals = new ApprovalService();
   readonly apiKeys = new ApiKeyService();
+  readonly auth = new AuthService();
   readonly idempotency = new IdempotencyStore();
 
   private readonly accountHolders = new Map<string, AccountHolder>();
@@ -113,6 +116,7 @@ export class Platform {
       ledger: serializeLedgerStore(this.ledger.store),
       approvals: this.approvals.serialize(),
       apiKeys: this.apiKeys.serialize(),
+      auth: this.auth.serialize(),
       accountHolders: [...this.accountHolders.values()],
       cards: [...this.cards.values()],
       transactions: [...this.transactions.values()],
@@ -127,6 +131,7 @@ export class Platform {
     (platform as { ledger: Ledger }).ledger = new Ledger(hydrateLedgerStore(snapshot.ledger));
     (platform as { approvals: ApprovalService }).approvals = ApprovalService.hydrate(snapshot.approvals);
     (platform as { apiKeys: ApiKeyService }).apiKeys = ApiKeyService.hydrate(snapshot.apiKeys);
+    if (snapshot.auth) (platform as { auth: AuthService }).auth = AuthService.hydrate(snapshot.auth);
     for (const holder of snapshot.accountHolders) platform.accountHolders.set(holder.id, holder);
     for (const card of snapshot.cards) platform.cards.set(card.id, card);
     for (const tx of snapshot.transactions) platform.transactions.set(tx.id, tx);

@@ -1,8 +1,10 @@
-import { Platform, type PlatformEvent } from "@acard/core";
+import { Platform, publicUser, type PlatformEvent, type Role } from "@acard/core";
 import type {
   CreateCardParams,
   IdempotencyLookup,
+  MemberView,
   PlatformService,
+  RegisterResult,
   WalletBalance,
 } from "./types.js";
 
@@ -20,6 +22,14 @@ export class InMemoryPlatformService implements PlatformService {
 
   async signup(input: { email: string; name: string; currency?: import("@acard/core").Currency }) {
     return this.platform.signup(input);
+  }
+
+  async getAccountHolder(id: string) {
+    try {
+      return this.platform.getAccountHolder(id);
+    } catch {
+      return undefined;
+    }
   }
 
   async issueApiKey(accountHolderId: string, name: string) {
@@ -110,6 +120,45 @@ export class InMemoryPlatformService implements PlatformService {
 
   async markEvent(eventId: string) {
     return this.platform.idempotency.markEvent(eventId);
+  }
+
+  async registerAccount(input: { email: string; name: string; password: string; currency?: import("@acard/core").Currency }): Promise<RegisterResult> {
+    const user = this.platform.auth.registerUser(input);
+    const accountHolder = this.platform.signup({ email: input.email, name: input.name, currency: input.currency });
+    const membership = this.platform.auth.addMembership(user.id, accountHolder.id, "owner");
+    const { token, context } = this.platform.auth.openSession(user, membership);
+    return { user: publicUser(user), accountHolder, sessionToken: token, context };
+  }
+
+  async login(input: { email: string; password: string; accountHolderId?: string }) {
+    const { token, context } = this.platform.auth.login(input);
+    return { sessionToken: token, context };
+  }
+
+  async resolveSession(token: string) {
+    return this.platform.auth.resolveSession(token);
+  }
+
+  async logout(token: string) {
+    this.platform.auth.revokeSession(token);
+  }
+
+  async addMember(input: { accountHolderId: string; email: string; name?: string; password?: string; role: Role }): Promise<MemberView> {
+    let user = this.platform.auth.getUserByEmail(input.email);
+    if (!user) {
+      if (!input.password) throw new (await import("@acard/core")).DomainError("password_required", "a starting password is required to invite a new user");
+      user = this.platform.auth.registerUser({ email: input.email, name: input.name ?? input.email, password: input.password });
+    }
+    const membership = this.platform.auth.addMembership(user.id, input.accountHolderId, input.role);
+    return { user: publicUser(user), role: membership.role, createdAt: membership.createdAt };
+  }
+
+  async listMembers(accountHolderId: string): Promise<MemberView[]> {
+    return this.platform.auth.membersOf(accountHolderId).map((m) => ({
+      user: publicUser(this.platform.auth.getUser(m.userId)),
+      role: m.role,
+      createdAt: m.createdAt,
+    }));
   }
 
   onEvent(listener: (event: PlatformEvent) => void) {

@@ -10,8 +10,26 @@ import type {
   Currency,
   LedgerTransaction,
   PlatformEvent,
+  Role,
+  SessionContext,
   SubscriptionTier,
+  User,
 } from "@acard/core";
+
+export type PublicUser = Omit<User, "passwordHash">;
+
+export interface RegisterResult {
+  user: PublicUser;
+  accountHolder: AccountHolder;
+  sessionToken: string;
+  context: SessionContext;
+}
+
+export interface MemberView {
+  user: PublicUser;
+  role: Role;
+  createdAt: string;
+}
 
 /**
  * The async persistence-and-orchestration port the REST API talks to.
@@ -48,6 +66,7 @@ export type IdempotencyLookup =
 export interface PlatformService {
   // ---- account holders & auth ---------------------------------------------
   signup(input: { email: string; name: string; currency?: Currency }): Promise<AccountHolder>;
+  getAccountHolder(id: string): Promise<AccountHolder | undefined>;
   issueApiKey(accountHolderId: string, name: string): Promise<{ secret: string; id: string }>;
   authenticateApiKey(secret: string): Promise<AccountHolder | undefined>;
   setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): Promise<AccountHolder>;
@@ -83,6 +102,21 @@ export interface PlatformService {
   idempotencyGet(key: string, requestHash: string): Promise<IdempotencyLookup>;
   idempotencyPut(key: string, requestHash: string, status: number, body: unknown): Promise<void>;
   markEvent(eventId: string): Promise<boolean>;
+
+  // ---- human auth & RBAC (dashboard) ---------------------------------------
+  /** Register a user, create their org (account holder + wallet), make them owner, open a session. */
+  registerAccount(input: {
+    email: string;
+    name: string;
+    password: string;
+    currency?: Currency;
+  }): Promise<RegisterResult>;
+  login(input: { email: string; password: string; accountHolderId?: string }): Promise<{ sessionToken: string; context: SessionContext }>;
+  resolveSession(token: string): Promise<SessionContext | undefined>;
+  logout(token: string): Promise<void>;
+  /** Add (or re-role) a member of an org. Creates the user if the email is new. */
+  addMember(input: { accountHolderId: string; email: string; name?: string; password?: string; role: Role }): Promise<MemberView>;
+  listMembers(accountHolderId: string): Promise<MemberView[]>;
 
   // ---- in-process event fanout (Slack notifications) -----------------------
   onEvent(listener: (event: PlatformEvent) => void): void;

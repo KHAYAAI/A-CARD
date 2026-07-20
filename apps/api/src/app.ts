@@ -1,15 +1,18 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import {
   currentBillingPeriod,
   DomainError,
   redactCard,
+  roleAtLeast,
   signWebhook,
   SUBSCRIPTION_TIERS,
   verifyWebhook,
   type AccountHolder,
   type Currency,
+  type Role,
   type SubscriptionTier,
 } from "@acard/core";
 import { PaystackClient, subscriptionReference } from "./paystack.js";
@@ -44,9 +47,30 @@ function asService(platform: AppConfig["platform"]): PlatformService {
   return "serialize" in platform ? new InMemoryPlatformService(platform) : platform;
 }
 
-type Env = { Variables: { holder: AccountHolder } };
+type Env = { Variables: { holder: AccountHolder; role: Role } };
 
+const SESSION_COOKIE = "acard_session";
 const currencySchema = z.enum(["ZAR", "USD", "NGN", "KES"]);
+
+const registerSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1),
+  password: z.string().min(8),
+  currency: currencySchema.optional(),
+});
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+  account_holder_id: z.string().optional(),
+});
+
+const addMemberSchema = z.object({
+  email: z.string().email(),
+  name: z.string().optional(),
+  password: z.string().min(8).optional(),
+  role: z.enum(["owner", "admin", "member", "viewer"]),
+});
 
 const signupSchema = z.object({
   email: z.string().email(),
@@ -125,16 +149,109 @@ export function createApp(config: AppConfig) {
     );
   });
 
-  // ---- API-key auth for everything else under /v1 ---------------------------
+  // ---- auth: register / login / session (dashboard, human RBAC) -------------
+  // These sit before the /v1 auth guard: register + login are public.
 
+  const secureCookies = process.env.NODE_ENV === "production";
+  const setSessionCookie = (c: Context<Env>, token: string) =>
+    setCookie(c, SESSION_COOKIE, token, {
+      httpOnly: true,
+      sameSite: "Lax",
+      path: "/",
+      secure: secureCookies,
+      maxAge: 60 * 60 * 24 * 7,
+    });
+  const bearerSession = (c: Context<Env>) => {
+    const h = c.req.header("authorization") ?? "";
+    const b = h.startsWith("Bearer ") ? h.slice(7) : "";
+    return b.startsWith("sess_") ? b : undefined;
+  };
+
+  app.post("/v1/auth/register", async (c) => {
+    const body = registerSchema.parse(await c.req.json());
+    const result = await platform.registerAccount(body);
+    setSessionCookie(c, result.sessionToken);
+    return c.json(
+      { user: result.user, account_holder: result.accountHolder, role: result.context.role, session_token: result.sessionToken },
+      201,
+    );
+  });
+
+  app.post("/v1/auth/login", async (c) => {
+    const body = loginSchema.parse(await c.req.json());
+    const { sessionToken, context } = await platform.login({
+      email: body.email,
+      password: body.password,
+      accountHolderId: body.account_holder_id,
+    });
+    setSessionCookie(c, sessionToken);
+    return c.json({ user: context.user, account_holder_id: context.accountHolderId, role: context.role, session_token: sessionToken });
+  });
+
+  // ---- API-key OR session auth for everything else under /v1 ----------------
+
+  const PUBLIC_V1 = new Set(["/v1/signup", "/v1/auth/register", "/v1/auth/login"]);
   app.use("/v1/*", async (c, next) => {
-    if (c.req.path === "/v1/signup") return next();
+    if (PUBLIC_V1.has(c.req.path)) return next();
     const header = c.req.header("authorization") ?? "";
-    const secret = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const holder = await platform.authenticateApiKey(secret);
-    if (!holder) return c.json({ error: { code: "unauthorized", message: "invalid API key" } }, 401);
-    c.set("holder", holder);
-    return next();
+    const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
+
+    // Programmatic tenant credential (agents, CLI, MCP): full access.
+    if (bearer.startsWith("ak_")) {
+      const holder = await platform.authenticateApiKey(bearer);
+      if (!holder) return c.json({ error: { code: "unauthorized", message: "invalid API key" } }, 401);
+      c.set("holder", holder);
+      c.set("role", "owner");
+      return next();
+    }
+
+    // Human session: bearer sess_ token or the httpOnly cookie.
+    const sessionToken = bearer.startsWith("sess_") ? bearer : getCookie(c, SESSION_COOKIE);
+    if (sessionToken) {
+      const ctx = await platform.resolveSession(sessionToken);
+      if (ctx) {
+        const holder = await platform.getAccountHolder(ctx.accountHolderId);
+        if (holder) {
+          c.set("holder", holder);
+          c.set("role", ctx.role);
+          return next();
+        }
+      }
+    }
+    return c.json({ error: { code: "unauthorized", message: "authentication required" } }, 401);
+  });
+
+  const requireRole = (min: Role) =>
+    async (c: { get: (k: "role") => Role; json: (b: unknown, s?: number) => Response }, next: () => Promise<void>) => {
+      const role = c.get("role");
+      if (!role || !roleAtLeast(role, min)) {
+        return c.json({ error: { code: "forbidden", message: `this action requires the ${min} role or higher` } }, 403);
+      }
+      return next();
+    };
+
+  app.get("/v1/auth/me", async (c) => {
+    const holder = c.get("holder");
+    return c.json({ account_holder: holder, role: c.get("role"), wallet: await platform.walletBalance(holder.id) });
+  });
+
+  app.post("/v1/auth/logout", async (c) => {
+    const token = bearerSession(c) ?? getCookie(c, SESSION_COOKIE);
+    if (token) await platform.logout(token);
+    deleteCookie(c, SESSION_COOKIE, { path: "/" });
+    return c.json({ ok: true });
+  });
+
+  app.get("/v1/auth/members", requireRole("admin"), async (c) => {
+    const holder = c.get("holder");
+    return c.json({ members: await platform.listMembers(holder.id) });
+  });
+
+  app.post("/v1/auth/members", requireRole("admin"), async (c) => {
+    const holder = c.get("holder");
+    const body = addMemberSchema.parse(await c.req.json());
+    const member = await platform.addMember({ accountHolderId: holder.id, ...body });
+    return c.json({ member }, 201);
   });
 
   // ---- idempotency for mutating /v1 requests --------------------------------
@@ -171,7 +288,7 @@ export function createApp(config: AppConfig) {
     return c.json({ wallet: await platform.walletBalance(holder.id) });
   });
 
-  app.post("/v1/wallet/fund", async (c) => {
+  app.post("/v1/wallet/fund", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const body = fundSchema.parse(await c.req.json());
     const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.reference);
@@ -180,7 +297,7 @@ export function createApp(config: AppConfig) {
 
   // ---- cards -----------------------------------------------------------------
 
-  app.post("/v1/cards", async (c) => {
+  app.post("/v1/cards", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const body = createCardSchema.parse(await c.req.json().catch(() => ({})));
     const card = await platform.createCard({
@@ -218,7 +335,7 @@ export function createApp(config: AppConfig) {
     return c.json({ card: redactCard(card) });
   });
 
-  app.post("/v1/cards/:id/close", async (c) => {
+  app.post("/v1/cards/:id/close", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const card = await platform.getCard(c.req.param("id"));
     if (!card || card.accountHolderId !== holder.id) {
@@ -245,7 +362,7 @@ export function createApp(config: AppConfig) {
     return c.json({ approvals: await platform.listApprovals({ accountHolderId: holder.id, status }) });
   });
 
-  app.post("/v1/approvals/:id/approve", async (c) => {
+  app.post("/v1/approvals/:id/approve", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const approval = await platform.getApproval(c.req.param("id"));
     if (!approval || approval.accountHolderId !== holder.id) {
@@ -254,7 +371,7 @@ export function createApp(config: AppConfig) {
     return c.json({ approval: await platform.decideApproval(approval.id, "approved", holder.email) });
   });
 
-  app.post("/v1/approvals/:id/deny", async (c) => {
+  app.post("/v1/approvals/:id/deny", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const approval = await platform.getApproval(c.req.param("id"));
     if (!approval || approval.accountHolderId !== holder.id) {
@@ -265,7 +382,7 @@ export function createApp(config: AppConfig) {
 
   // ---- API keys -------------------------------------------------------------------
 
-  app.post("/v1/keys", async (c) => {
+  app.post("/v1/keys", requireRole("admin"), async (c) => {
     const holder = c.get("holder");
     const body = z.object({ name: z.string().default("api key") }).parse(await c.req.json().catch(() => ({})));
     const issued = await platform.issueApiKey(holder.id, body.name);
@@ -276,7 +393,7 @@ export function createApp(config: AppConfig) {
 
   app.get("/v1/billing/plans", (c) => c.json({ plans: SUBSCRIPTION_TIERS }));
 
-  app.post("/v1/billing/checkout", async (c) => {
+  app.post("/v1/billing/checkout", requireRole("admin"), async (c) => {
     if (!paystack) {
       return c.json({ error: { code: "billing_not_configured", message: "Paystack is not configured on this deployment" } }, 501);
     }
@@ -376,7 +493,7 @@ export function createApp(config: AppConfig) {
   // through the real webhook route, so the full verification + decision path is
   // exercised exactly as production would.
 
-  app.post("/v1/simulate/purchase", async (c) => {
+  app.post("/v1/simulate/purchase", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const body = simulateAuthSchema.parse(await c.req.json());
     const card = await platform.getCard(body.card_id);

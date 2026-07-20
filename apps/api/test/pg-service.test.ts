@@ -24,6 +24,9 @@ const TABLES = [
   "acard_events_seen",
   "acard_events",
   "acard_settlement_accounts",
+  "acard_sessions",
+  "acard_memberships",
+  "acard_users",
   "acard_accounts",
   "acard_account_holders",
 ];
@@ -31,8 +34,10 @@ const TABLES = [
 suite("PostgresPlatformService (multi-writer ledger)", () => {
   beforeEach(async () => {
     await service.migrate();
-    // @ts-expect-error reach into the pool for a fast test-only truncate
-    await service["pool"].query(`TRUNCATE ${TABLES.join(", ")} RESTART IDENTITY CASCADE`);
+    // Reach into the pool for a fast test-only truncate between cases.
+    await (service as unknown as { pool: { query: (sql: string) => Promise<unknown> } }).pool.query(
+      `TRUNCATE ${TABLES.join(", ")} RESTART IDENTITY CASCADE`,
+    );
   });
 
   afterAll(async () => {
@@ -171,6 +176,30 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     });
     await service.capture("su_1");
     expect((await service.getCard(single.id))!.status).toBe("closed");
+  });
+
+  it("registers an owner, logs in, resolves a session, and manages members (RBAC data)", async () => {
+    const reg = await service.registerAccount({ email: "owner@pg.co.za", name: "Owner", password: "supersecret" });
+    expect(reg.context.role).toBe("owner");
+    expect(reg.sessionToken).toMatch(/^sess_/);
+
+    const resolved = await service.resolveSession(reg.sessionToken);
+    expect(resolved?.role).toBe("owner");
+    expect(resolved?.accountHolderId).toBe(reg.accountHolder.id);
+
+    const login = await service.login({ email: "owner@pg.co.za", password: "supersecret" });
+    expect(login.context.role).toBe("owner");
+    await expect(service.login({ email: "owner@pg.co.za", password: "nope" })).rejects.toThrow(/invalid/);
+
+    await service.addMember({ accountHolderId: reg.accountHolder.id, email: "viewer@pg.co.za", name: "V", password: "viewerpass", role: "viewer" });
+    const members = await service.listMembers(reg.accountHolder.id);
+    expect(members.map((m) => m.role).sort()).toEqual(["owner", "viewer"]);
+
+    const viewerLogin = await service.login({ email: "viewer@pg.co.za", password: "viewerpass" });
+    expect(viewerLogin.context.role).toBe("viewer");
+
+    await service.logout(reg.sessionToken);
+    expect(await service.resolveSession(reg.sessionToken)).toBeUndefined();
   });
 
   it("enforces the free plan monthly card cap and idempotency records", async () => {

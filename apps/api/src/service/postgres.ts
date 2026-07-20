@@ -6,10 +6,13 @@ import {
   DomainError,
   evaluateRules,
   hashApiKeySecret,
+  hashPassword,
+  hashSessionToken,
   InvalidStateError,
   newId,
   NotFoundError,
   SUBSCRIPTION_TIERS,
+  verifyPassword,
   type AccountHolder,
   type ApprovalRequest,
   type ApprovalStatus,
@@ -20,14 +23,21 @@ import {
   type Currency,
   type LedgerTransaction,
   type PlatformEvent,
+  type Role,
+  type SessionContext,
   type SubscriptionTier,
 } from "@acard/core";
+import { randomBytes } from "node:crypto";
 import type {
   CreateCardParams,
   IdempotencyLookup,
+  MemberView,
   PlatformService,
+  RegisterResult,
   WalletBalance,
 } from "./types.js";
+
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 /**
  * Multi-writer, row-level Postgres persistence for the platform.
@@ -179,6 +189,31 @@ const SCHEMA = `
     data JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+
+  CREATE TABLE IF NOT EXISTS acard_users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE IF NOT EXISTS acard_memberships (
+    user_id TEXT NOT NULL,
+    account_holder_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, account_holder_id)
+  );
+  CREATE INDEX IF NOT EXISTS acard_memberships_org_idx ON acard_memberships(account_holder_id);
+
+  CREATE TABLE IF NOT EXISTS acard_sessions (
+    hashed_token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    account_holder_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+  );
 `;
 
 type Client = pg.PoolClient;
@@ -279,8 +314,12 @@ export class PostgresPlatformService implements PlatformService {
     return this.mapHolder(res.rows[0]);
   }
 
+  async getAccountHolder(id: string): Promise<AccountHolder | undefined> {
+    const res = await this.pool.query("SELECT * FROM acard_account_holders WHERE id = $1", [id]);
+    return res.rowCount ? this.mapHolder(res.rows[0]) : undefined;
+  }
+
   async issueApiKey(accountHolderId: string, name: string): Promise<{ secret: string; id: string }> {
-    const { randomBytes } = await import("node:crypto");
     const secret = `ak_live_${randomBytes(24).toString("base64url")}`;
     const id = newId("key");
     await this.pool.query(
@@ -898,6 +937,175 @@ export class PostgresPlatformService implements PlatformService {
       [eventId],
     );
     return res.rowCount === 1;
+  }
+
+  // ---- human auth & RBAC ----------------------------------------------------
+
+  async registerAccount(input: { email: string; name: string; password: string; currency?: Currency }): Promise<RegisterResult> {
+    const email = input.email.toLowerCase();
+    if (input.password.length < 8) throw new DomainError("weak_password", "password must be at least 8 characters");
+    const currency = input.currency ?? "ZAR";
+    return this.tx(async (client, stage) => {
+      const dupeUser = await client.query("SELECT 1 FROM acard_users WHERE email = $1", [email]);
+      if (dupeUser.rowCount) throw new InvalidStateError(`a user with email ${input.email} already exists`);
+      const dupeOrg = await client.query("SELECT 1 FROM acard_account_holders WHERE email = $1", [email]);
+      if (dupeOrg.rowCount) throw new InvalidStateError(`an account for ${input.email} already exists`);
+
+      // org (account holder) + wallet
+      const walletAccountId = newId("acct");
+      await client.query("INSERT INTO acard_accounts (id, name, type, currency) VALUES ($1, $2, 'liability', $3)", [
+        walletAccountId,
+        `wallet:${email}`,
+        currency,
+      ]);
+      const accountHolder: AccountHolder = {
+        id: newId("ah"),
+        email,
+        name: input.name,
+        currency,
+        walletAccountId,
+        subscriptionTier: "free",
+        createdAt: new Date().toISOString(),
+      };
+      await client.query(
+        `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [accountHolder.id, email, accountHolder.name, currency, walletAccountId, "free", accountHolder.createdAt],
+      );
+
+      // user + owner membership
+      const userId = newId("usr");
+      const passwordHash = hashPassword(input.password);
+      const createdAt = new Date().toISOString();
+      await client.query(
+        "INSERT INTO acard_users (id, email, name, password_hash, created_at) VALUES ($1,$2,$3,$4,$5)",
+        [userId, email, input.name, passwordHash, createdAt],
+      );
+      await client.query(
+        "INSERT INTO acard_memberships (user_id, account_holder_id, role, created_at) VALUES ($1,$2,'owner',$3)",
+        [userId, accountHolder.id, createdAt],
+      );
+
+      const { token } = await this.insertSession(client, userId, accountHolder.id);
+      stage({ type: "account_holder.created", data: { accountHolderId: accountHolder.id } });
+      stage({ type: "user.registered", data: { userId, accountHolderId: accountHolder.id } });
+      return {
+        user: { id: userId, email, name: input.name, createdAt },
+        accountHolder,
+        sessionToken: token,
+        context: { user: { id: userId, email, name: input.name, createdAt }, accountHolderId: accountHolder.id, role: "owner" },
+      };
+    });
+  }
+
+  private async insertSession(client: Client, userId: string, accountHolderId: string): Promise<{ token: string; expiresAt: string }> {
+    const token = `sess_${randomBytes(32).toString("base64url")}`;
+    const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+    await client.query(
+      "INSERT INTO acard_sessions (hashed_token, user_id, account_holder_id, expires_at) VALUES ($1,$2,$3,$4)",
+      [hashSessionToken(token), userId, accountHolderId, expiresAt],
+    );
+    return { token, expiresAt };
+  }
+
+  async login(input: { email: string; password: string; accountHolderId?: string }): Promise<{ sessionToken: string; context: SessionContext }> {
+    const email = input.email.toLowerCase();
+    const userRes = await this.pool.query("SELECT * FROM acard_users WHERE email = $1", [email]);
+    if (!userRes.rowCount || !verifyPassword(input.password, userRes.rows[0].password_hash)) {
+      throw new DomainError("invalid_credentials", "invalid email or password", 401);
+    }
+    const user = userRes.rows[0];
+    const memberships = await this.pool.query(
+      "SELECT * FROM acard_memberships WHERE user_id = $1 ORDER BY created_at ASC",
+      [user.id],
+    );
+    if (!memberships.rowCount) throw new DomainError("no_membership", "user has no organization", 403);
+    const membership =
+      (input.accountHolderId && memberships.rows.find((m) => m.account_holder_id === input.accountHolderId)) ||
+      memberships.rows[0];
+    const client = await this.pool.connect();
+    try {
+      const { token } = await this.insertSession(client, user.id, membership.account_holder_id);
+      return {
+        sessionToken: token,
+        context: {
+          user: { id: user.id, email: user.email, name: user.name, createdAt: new Date(user.created_at).toISOString() },
+          accountHolderId: membership.account_holder_id,
+          role: membership.role,
+        },
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  async resolveSession(token: string): Promise<SessionContext | undefined> {
+    const res = await this.pool.query(
+      `SELECT s.expires_at, s.account_holder_id, u.id AS user_id, u.email, u.name, u.created_at, m.role
+       FROM acard_sessions s
+       JOIN acard_users u ON u.id = s.user_id
+       JOIN acard_memberships m ON m.user_id = s.user_id AND m.account_holder_id = s.account_holder_id
+       WHERE s.hashed_token = $1`,
+      [hashSessionToken(token)],
+    );
+    if (!res.rowCount) return undefined;
+    const row = res.rows[0];
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+      await this.pool.query("DELETE FROM acard_sessions WHERE hashed_token = $1", [hashSessionToken(token)]);
+      return undefined;
+    }
+    return {
+      user: { id: row.user_id, email: row.email, name: row.name, createdAt: new Date(row.created_at).toISOString() },
+      accountHolderId: row.account_holder_id,
+      role: row.role,
+    };
+  }
+
+  async logout(token: string): Promise<void> {
+    await this.pool.query("DELETE FROM acard_sessions WHERE hashed_token = $1", [hashSessionToken(token)]);
+  }
+
+  async addMember(input: { accountHolderId: string; email: string; name?: string; password?: string; role: Role }): Promise<MemberView> {
+    const email = input.email.toLowerCase();
+    return this.tx(async (client) => {
+      let user = (await client.query("SELECT * FROM acard_users WHERE email = $1", [email])).rows[0];
+      if (!user) {
+        if (!input.password) throw new DomainError("password_required", "a starting password is required to invite a new user");
+        if (input.password.length < 8) throw new DomainError("weak_password", "password must be at least 8 characters");
+        const userId = newId("usr");
+        const createdAt = new Date().toISOString();
+        await client.query(
+          "INSERT INTO acard_users (id, email, name, password_hash, created_at) VALUES ($1,$2,$3,$4,$5)",
+          [userId, email, input.name ?? email, hashPassword(input.password), createdAt],
+        );
+        user = { id: userId, email, name: input.name ?? email, created_at: createdAt };
+      }
+      const createdAt = new Date().toISOString();
+      await client.query(
+        `INSERT INTO acard_memberships (user_id, account_holder_id, role, created_at) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (user_id, account_holder_id) DO UPDATE SET role = EXCLUDED.role`,
+        [user.id, input.accountHolderId, input.role, createdAt],
+      );
+      return {
+        user: { id: user.id, email: user.email, name: user.name, createdAt: new Date(user.created_at).toISOString() },
+        role: input.role,
+        createdAt,
+      };
+    });
+  }
+
+  async listMembers(accountHolderId: string): Promise<MemberView[]> {
+    const res = await this.pool.query(
+      `SELECT u.id, u.email, u.name, u.created_at AS user_created, m.role, m.created_at AS member_created
+       FROM acard_memberships m JOIN acard_users u ON u.id = m.user_id
+       WHERE m.account_holder_id = $1 ORDER BY m.created_at ASC`,
+      [accountHolderId],
+    );
+    return res.rows.map((row) => ({
+      user: { id: row.id, email: row.email, name: row.name, createdAt: new Date(row.user_created).toISOString() },
+      role: row.role,
+      createdAt: new Date(row.member_created).toISOString(),
+    }));
   }
 
   // ---- events & lifecycle ---------------------------------------------------
