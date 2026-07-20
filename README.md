@@ -4,17 +4,17 @@ Virtual cards for AI agents, over MCP — an Agentcard.sh-style platform targeti
 
 Agents get scoped, budget-capped, single-use virtual cards funded from a prepaid wallet. Every charge runs through a real-time authorization path: rules engine → human-in-the-loop approval → double-entry ledger hold. The sandbox ships with a mock issuer (deterministic `4242…` PANs) so the whole system runs locally with zero external dependencies; the issuer integration point is a single signed webhook, designed to be swapped for a real BIN-sponsored partner (Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stripe Issuing).
 
-State is durable (Postgres-backed), billable (Paystack ZAR subscriptions), and deployable to AWS today — see `infra/cdk`.
+State is durable and **multi-writer** (a Postgres row-level ledger with per-wallet locks, so several API instances can share one database), access is guarded by both a programmatic API key and human **login with role-based access control**, it's billable (Paystack ZAR subscriptions), and it's deployable to a hardened AWS stack today (private subnets, WAF, optional TLS) — see `infra/cdk`.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `packages/core` | Domain logic: double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, idempotency, HMAC webhook signing, whole-platform snapshot serialization |
-| `apps/api` | Hono REST API: signup, wallet funding, cards, transactions, approvals, billing (Paystack), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, and Postgres-backed persistence |
+| `packages/core` | Domain logic: double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
+| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding, cards, transactions, approvals, billing (Paystack), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
-| `apps/dashboard` | Next.js console: wallet stats, card management, transaction history, approve/deny queue |
+| `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management |
 | `infra/cdk` | AWS CDK stack: VPC, RDS Postgres, ALB, three Fargate services — `npx cdk deploy` and you have a live URL |
 
 ## Quick start
@@ -48,7 +48,13 @@ docker compose up -d postgres
 DATABASE_URL=postgres://acard:acard@localhost:5432/acard npm run dev:api
 ```
 
-Without `DATABASE_URL`, the API runs exactly as before — in-memory, reset on restart. With it, the whole platform state (ledger, cards, approvals, API keys) is snapshotted to Postgres after every mutating request and reloaded on boot. This is a single-writer model — correct for one API instance, documented as the next step before scaling to several (see `apps/api/src/persistence.ts`).
+Without `DATABASE_URL`, the API runs in-memory and resets on restart. With it, the default is the **multi-writer Postgres store** (`apps/api/src/service/postgres.ts`): the ledger lives in real `accounts` / `ledger_transactions` / `postings` tables, balances are SQL aggregates, and every authorization takes a `SELECT ... FOR UPDATE` lock on the wallet's account row for the whole decision. Concurrent authorizations on the *same* wallet serialize on that row; different wallets run in parallel — so several API instances can share one database without racing the overspend guard (the CDK stack runs the API at `desiredCount: 2` for exactly this reason).
+
+Set `ACARD_PERSISTENCE=snapshot` to instead use the earlier single-writer model — in-memory with a whole-platform JSONB snapshot after each mutation (`apps/api/src/persistence.ts`), correct only at one instance. Both modes pass the same test suite; the multi-writer path additionally has an integration suite (`apps/api/test/pg-service.test.ts`, gated on `ACARD_TEST_DATABASE_URL`) that proves five concurrent authorizations on a wallet with room for three approve exactly three and never drive the balance negative.
+
+### Login & roles (dashboard)
+
+Beyond the tenant API key (full programmatic access for agents/CLI/MCP), the API has a human auth layer: register/login with a password, a server-side session (`POST /v1/auth/register`, `/login`, `/logout`, `GET /v1/auth/me`), and role-based access control — `owner` > `admin` > `member` > `viewer`. Viewers are read-only; members transact; admins manage billing and team members (`/v1/auth/members`); owners have everything. The `/v1` guard accepts an API key *or* a session (bearer `sess_` token or the httpOnly cookie), and the dashboard ships a login/register screen with a role-aware UI.
 
 ### Billing (Paystack, ZAR subscriptions)
 
@@ -116,12 +122,12 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 - **Money is integer minor units everywhere.** No floats near a balance.
 - **The ledger is the source of truth.** Every top-up, hold, capture, and release is a balanced double-entry transaction; available balance = posted − held, and holds are refused beyond it.
 - **PANs stay out of scope.** Only the sandbox generates (test) PANs; the production plan is issuer-hosted credentials so the platform never enters PCI scope.
-- **Durability without rewriting the ledger into SQL.** `Platform.serialize()`/`Platform.hydrate()` snapshot the whole in-memory state to a single Postgres row after every request. It's honest about being single-writer — a real multi-instance deployment needs row-level ledger tables, noted as the next step rather than pretended away.
+- **Two persistence tiers, one API.** The REST API depends only on an async `PlatformService` port. The in-memory adapter wraps the synchronous `Platform` (sandbox, tests, single-writer snapshot); the Postgres adapter is a real row-level ledger with per-wallet `FOR UPDATE` locks for multi-instance deployments. Same handlers, same tests, either backend — the ledger arithmetic was reimplemented as SQL aggregates for the multi-writer path rather than pretended away.
+- **Two auth boundaries.** The API key is a tenant-wide programmatic credential; human access is users + memberships + roles + sessions on top of it. Passwords are scrypt-hashed, session tokens stored only as SHA-256 hashes.
 - **The MCP server is a pure protocol adapter**, in both its stdio and HTTP forms. It calls the REST API with an API key, so agents get identical guardrails to any other client — and the HTTP transport is stateless per-request, so it can run behind a load balancer with no sticky sessions.
 
 ## What's intentionally not built yet
 
-- **Multi-user dashboard auth (Better Auth/RBAC).** The API's real security boundary is the API key, which is enforced everywhere. A full login system with per-user roles is the next layer, not a blocker to deploying — building half of it would be worse than being explicit that it's not there yet.
 - **Fraud ML.** The rules engine carries hot-path decisions today, which is the correct sequencing — ML scoring is a post-launch layer.
 - **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.

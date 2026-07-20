@@ -1,6 +1,6 @@
 # A-CARD on AWS
 
-One VPC, one Postgres instance, one Application Load Balancer, three Fargate services (`api`, `mcp`, `dashboard`) sharing it by path. Cost-conscious by design (no NAT Gateway) — see the tradeoffs noted at the top of `lib/acard-stack.ts`.
+One VPC, one Postgres instance, one Application Load Balancer, three Fargate services (`api`, `mcp`, `dashboard`) sharing it by path. Hardened for a real (if small) deployment: the ALB sits in public subnets, the Fargate tasks in private-with-egress subnets, and RDS in isolated subnets — a single NAT Gateway gives the tasks outbound access without exposing them. A WAFv2 WebACL (AWS managed rule sets + a rate limit) fronts the ALB, and TLS with a custom domain is one flag away. The API runs the Postgres multi-writer store, so it's deployed at `desiredCount: 2`.
 
 ## Prerequisites
 
@@ -31,6 +31,20 @@ Only `IssuerWebhookSecret` is required — the Paystack and Slack parameters def
 
 Deploy takes 10–15 minutes the first time (mostly RDS). Subsequent deploys of code changes are a few minutes — CDK only rebuilds/pushes the Docker images that changed.
 
+### With TLS and a custom domain
+
+Pass your domain and its Route53 hosted zone via `-c` context; all three are required to turn TLS on:
+
+```bash
+npx cdk deploy \
+  --parameters IssuerWebhookSecret="$(openssl rand -hex 32)" \
+  -c domain=app.acard.co.za \
+  -c hostedZoneId=Z0123456789ABCDEFGHIJ \
+  -c hostedZoneName=acard.co.za
+```
+
+This provisions an ACM certificate (DNS-validated against the zone), an HTTPS:443 listener, an HTTP:80 → HTTPS redirect, and a Route53 alias record pointing at the ALB. `NODE_ENV=production` also flips session cookies to `Secure`. Leave the context flags off and the stack serves plain HTTP on `:80` — fine for a first look, not for real cardholder money.
+
 ## What you get
 
 The `CfnOutput`s at the end of deploy give you:
@@ -57,11 +71,17 @@ npx cdk destroy
 
 The database has `deletionProtection: true` and a `SNAPSHOT` removal policy — you'll need to disable deletion protection on the RDS instance in the console (or via `aws rds modify-db-instance --no-deletion-protection`) before `destroy` can remove it, and it leaves a final snapshot behind either way. This is deliberate: it's the one resource in this stack you really don't want deleted by accident.
 
-## Before this handles real cardholder money
+## What's hardened here
 
-This stack is sized and networked for an MVP, not a regulated production card platform. Before real money flows through it:
+- **Network isolation** — ALB in public subnets, Fargate tasks in private-with-egress subnets, RDS in isolated subnets; only the ALB is reachable from the internet, and only the tasks' security group can reach Postgres.
+- **TLS** — ACM certificate + HTTPS listener + HTTP→HTTPS redirect when a domain is configured (see above).
+- **WAF** — `AWSManagedRulesCommonRuleSet` + `AWSManagedRulesKnownBadInputsRuleSet` + a 2000-req/5-min per-IP rate limit, associated with the ALB.
+- **Multi-writer data** — the API uses the Postgres row-level ledger with per-wallet locks, so it runs at `desiredCount: 2` (no single-writer bottleneck).
+- **RDS** — private, `storageEncrypted`, 7-day backups, deletion protection, `SNAPSHOT` on removal.
 
-- Move RDS and the Fargate tasks into private subnets behind a NAT Gateway or VPC endpoints (currently public subnets + security-group-only isolation, to avoid ~$32+/mo in NAT costs during the pre-revenue phase)
-- Point a real domain at the ALB and put ACM/TLS in front of it (currently plain HTTP)
-- Split the single-writer Postgres snapshot persistence (`apps/api/src/persistence.ts`) into real ledger tables if you need more than one API task
-- Add WAF rules on the ALB, and CloudTrail/GuardDuty for the account
+## Still worth doing before real cardholder money
+
+- Turn on **CloudTrail** and **GuardDuty** for the account, and ship the WAF/ALB logs somewhere queryable.
+- Add a second NAT Gateway (one per AZ) if you need NAT to survive an AZ outage — the default single NAT trades that for cost.
+- Rotate the RDS credential secret on a schedule, and consider RDS Multi-AZ once uptime matters.
+- Get the issuing/compliance (KYC/FICA) relationship in place — that's the actual gate to processing real payments, not infrastructure.

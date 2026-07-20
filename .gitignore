@@ -9,3 +9,4 @@ dist/
 coverage/
 .acard/
 cdk.out/
+cdk.context.json
