@@ -71,11 +71,15 @@ export interface PlatformService {
   authenticateApiKey(secret: string): Promise<AccountHolder | undefined>;
   setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): Promise<AccountHolder>;
 
-  // ---- wallet --------------------------------------------------------------
-  walletBalance(accountHolderId: string): Promise<WalletBalance>;
+  // ---- wallet (one per currency; ZAR + USD + any supported currency) -------
+  /** Balance for a single currency (defaults to the holder's primary currency). */
+  walletBalance(accountHolderId: string, currency?: Currency): Promise<WalletBalance>;
+  /** Every currency wallet the holder holds, primary currency first. */
+  walletBalances(accountHolderId: string): Promise<WalletBalance[]>;
   fundWallet(
     accountHolderId: string,
     amount: number,
+    currency?: Currency,
     reference?: string,
   ): Promise<{ ledgerTransaction: LedgerTransaction; wallet: WalletBalance }>;
 

@@ -42,14 +42,16 @@ export class AcardClient {
     return body as T;
   }
 
-  wallet() {
-    return this.request<{ wallet: { available: number; posted: number; held: number; currency: string } }>(
-      "/v1/wallet",
-    );
+  wallet(currency?: string) {
+    const qs = currency ? `?currency=${encodeURIComponent(currency)}` : "";
+    return this.request<{
+      wallet: { available: number; posted: number; held: number; currency: string };
+      wallets: Array<{ available: number; posted: number; held: number; currency: string }>;
+    }>(`/v1/wallet${qs}`);
   }
 
-  fundWallet(amount: number) {
-    return this.request("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount }) });
+  fundWallet(amount: number, currency?: string) {
+    return this.request("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount, currency }) });
   }
 
   createCard(input: Record<string, unknown>, idempotencyKey?: string) {

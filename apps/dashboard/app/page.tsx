@@ -16,6 +16,7 @@ interface Card {
   label?: string;
   last4: string;
   status: string;
+  currency: string;
   singleUse: boolean;
   createdAt: string;
 }
@@ -58,14 +59,18 @@ export default function Dashboard() {
   const [token, setToken] = useState("");
   const [role, setRole] = useState<Role | null>(null);
   const [connected, setConnected] = useState(false);
-  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [wallets, setWallets] = useState<Wallet[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [txns, setTxns] = useState<Txn[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [error, setError] = useState("");
   const [fundAmount, setFundAmount] = useState("50000");
+  const [fundCurrency, setFundCurrency] = useState("ZAR");
   const [cardLabel, setCardLabel] = useState("");
+  const [cardCurrency, setCardCurrency] = useState("ZAR");
+
+  const CURRENCIES = ["ZAR", "USD"];
 
   // login/register form
   const [mode, setMode] = useState<"login" | "register" | "apikey">("login");
@@ -104,7 +109,7 @@ export default function Dashboard() {
       const requests: Promise<any>[] = [call("/v1/wallet"), call("/v1/cards"), call("/v1/transactions"), call("/v1/approvals?status=pending")];
       if (can(currentRole, "admin")) requests.push(call("/v1/auth/members").catch(() => ({ members: [] })));
       const [w, c, t, a, m] = await Promise.all(requests);
-      setWallet(w.wallet);
+      setWallets(w.wallets ?? (w.wallet ? [w.wallet] : []));
       setCards(c.cards);
       setTxns(t.transactions);
       setApprovals(a.approvals);
@@ -152,7 +157,7 @@ export default function Dashboard() {
     setToken("");
     setRole(null);
     setConnected(false);
-    setWallet(null);
+    setWallets([]);
   };
 
   const readOnly = !can(role, "member");
@@ -241,35 +246,48 @@ export default function Dashboard() {
         </section>
       )}
 
-      {connected && wallet && (
+      {connected && (
         <>
           <section>
-            <h2>Wallet</h2>
-            <div className="stat-row">
-              <div className="panel stat">
-                <div className="label">Available</div>
-                <div className="value">{cents(wallet.available, wallet.currency)}</div>
+            <h2>Wallets</h2>
+            {wallets.map((wallet) => (
+              <div key={wallet.currency} style={{ marginBottom: 12 }}>
+                <div className="muted" style={{ marginBottom: 6 }}>{wallet.currency}</div>
+                <div className="stat-row">
+                  <div className="panel stat">
+                    <div className="label">Available</div>
+                    <div className="value">{cents(wallet.available, wallet.currency)}</div>
+                  </div>
+                  <div className="panel stat">
+                    <div className="label">On hold</div>
+                    <div className="value">{cents(wallet.held, wallet.currency)}</div>
+                  </div>
+                  <div className="panel stat">
+                    <div className="label">Posted</div>
+                    <div className="value">{cents(wallet.posted, wallet.currency)}</div>
+                  </div>
+                </div>
               </div>
-              <div className="panel stat">
-                <div className="label">On hold</div>
-                <div className="value">{cents(wallet.held, wallet.currency)}</div>
-              </div>
-              <div className="panel stat">
-                <div className="label">Posted</div>
-                <div className="value">{cents(wallet.posted, wallet.currency)}</div>
-              </div>
-            </div>
+            ))}
             {!readOnly && (
               <form
                 className="inline"
-                style={{ marginTop: 12 }}
+                style={{ marginTop: 12, gap: 8 }}
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  await call("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: Number(fundAmount) }) });
+                  await call("/v1/wallet/fund", {
+                    method: "POST",
+                    body: JSON.stringify({ amount: Number(fundAmount), currency: fundCurrency }),
+                  });
                   refresh();
                 }}
               >
                 <input value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} style={{ width: 120 }} />
+                <select value={fundCurrency} onChange={(e) => setFundCurrency(e.target.value)}>
+                  {CURRENCIES.map((ccy) => (
+                    <option key={ccy} value={ccy}>{ccy}</option>
+                  ))}
+                </select>
                 <button type="submit">Fund (cents, sandbox)</button>
               </form>
             )}
@@ -335,7 +353,7 @@ export default function Dashboard() {
                   e.preventDefault();
                   await call("/v1/cards", {
                     method: "POST",
-                    body: JSON.stringify({ label: cardLabel || undefined, single_use: true }),
+                    body: JSON.stringify({ label: cardLabel || undefined, currency: cardCurrency, single_use: true }),
                   });
                   setCardLabel("");
                   refresh();
@@ -347,6 +365,11 @@ export default function Dashboard() {
                   onChange={(e) => setCardLabel(e.target.value)}
                   style={{ width: 260 }}
                 />
+                <select value={cardCurrency} onChange={(e) => setCardCurrency(e.target.value)}>
+                  {CURRENCIES.map((ccy) => (
+                    <option key={ccy} value={ccy}>{ccy}</option>
+                  ))}
+                </select>
                 <button type="submit">New single-use card</button>
               </form>
             )}
@@ -359,6 +382,7 @@ export default function Dashboard() {
                     <tr>
                       <th>Card</th>
                       <th>Label</th>
+                      <th>Currency</th>
                       <th>Status</th>
                       <th>Type</th>
                       <th></th>
@@ -369,6 +393,7 @@ export default function Dashboard() {
                       <tr key={card.id}>
                         <td>•••• {card.last4}</td>
                         <td>{card.label ?? <span className="muted">—</span>}</td>
+                        <td className="muted">{card.currency}</td>
                         <td>
                           <span className={`pill ${card.status}`}>{card.status}</span>
                         </td>

@@ -76,6 +76,13 @@ export interface PlatformEvent {
   data: Record<string, unknown>;
 }
 
+export interface WalletBalance {
+  available: number;
+  posted: number;
+  held: number;
+  currency: Currency;
+}
+
 export interface PlatformSnapshot {
   ledger: SerializedLedgerStore;
   approvals: ApprovalRequest[];
@@ -87,6 +94,8 @@ export interface PlatformSnapshot {
   openHolds: Array<[string, { ledgerTxId: string; transactionId: string }]>;
   events: PlatformEvent[];
   settlementAccounts: Array<[Currency, string]>;
+  /** wallet accounts keyed `${accountHolderId}:${currency}`. */
+  wallets?: Array<[string, string]>;
 }
 
 export class Platform {
@@ -104,6 +113,8 @@ export class Platform {
   private readonly events: PlatformEvent[] = [];
   /** Platform settlement account per currency (double-entry counterparty). */
   private readonly settlementAccounts = new Map<Currency, string>();
+  /** Wallet ledger account per (account holder, currency), keyed `${holderId}:${currency}`. */
+  private readonly wallets = new Map<string, string>();
 
   /**
    * Whole-platform state as a plain JSON object, for durability across
@@ -123,6 +134,7 @@ export class Platform {
       openHolds: [...this.openHolds.entries()],
       events: this.events,
       settlementAccounts: [...this.settlementAccounts.entries()],
+      wallets: [...this.wallets.entries()],
     };
   }
 
@@ -140,6 +152,14 @@ export class Platform {
     for (const [currency, accountId] of snapshot.settlementAccounts) {
       platform.settlementAccounts.set(currency, accountId);
     }
+    if (snapshot.wallets) {
+      for (const [key, accountId] of snapshot.wallets) platform.wallets.set(key, accountId);
+    } else {
+      // Back-compat: pre-multi-currency snapshots only had the default wallet.
+      for (const holder of snapshot.accountHolders) {
+        platform.wallets.set(`${holder.id}:${holder.currency}`, holder.walletAccountId);
+      }
+    }
     return platform;
   }
 
@@ -153,7 +173,7 @@ export class Platform {
       }
     }
     const wallet = this.ledger.createAccount({
-      name: `wallet:${input.email}`,
+      name: `wallet:${input.email}:${currency}`,
       type: "liability",
       currency,
     });
@@ -167,6 +187,7 @@ export class Platform {
       createdAt: new Date().toISOString(),
     };
     this.accountHolders.set(holder.id, holder);
+    this.wallets.set(`${holder.id}:${currency}`, wallet.id);
     this.emit("account_holder.created", { accountHolderId: holder.id });
     return holder;
   }
@@ -185,39 +206,79 @@ export class Platform {
     return holder;
   }
 
+  /** Wallet ledger account for a (holder, currency), created on first use. */
+  private walletAccountFor(holder: AccountHolder, currency: Currency): string {
+    const key = `${holder.id}:${currency}`;
+    let id = this.wallets.get(key);
+    if (!id) {
+      id = this.ledger.createAccount({
+        name: `wallet:${holder.email}:${currency}`,
+        type: "liability",
+        currency,
+      }).id;
+      this.wallets.set(key, id);
+    }
+    return id;
+  }
+
   /**
-   * Fund the wallet (sandbox: instant settle; production: driven by a
+   * Fund a wallet (sandbox: instant settle; production: driven by a
    * Paystack/EFT top-up webhook). Double entry: debit the platform settlement
-   * asset account, credit the customer's wallet liability account.
+   * asset account, credit the customer's wallet liability account. Currency
+   * defaults to the holder's primary currency; any supported currency creates
+   * (or tops up) that currency's wallet.
    */
-  fundWallet(accountHolderId: string, amount: number, reference?: string): LedgerTransaction {
+  fundWallet(accountHolderId: string, amount: number, currency?: Currency, reference?: string): LedgerTransaction {
     if (!Number.isSafeInteger(amount) || amount <= 0) {
       throw new DomainError("invalid_amount", "funding amount must be a positive integer of minor units");
     }
     const holder = this.getAccountHolder(accountHolderId);
-    const settlement = this.settlementAccount(holder.currency);
+    const ccy = currency ?? holder.currency;
+    const walletAccountId = this.walletAccountFor(holder, ccy);
+    const settlement = this.settlementAccount(ccy);
     const tx = this.ledger.post({
-      currency: holder.currency,
-      description: `wallet top-up for ${holder.email}`,
+      currency: ccy,
+      description: `wallet top-up for ${holder.email} (${ccy})`,
       reference,
       postings: [
         { accountId: settlement, direction: "debit", amount },
-        { accountId: holder.walletAccountId, direction: "credit", amount },
+        { accountId: walletAccountId, direction: "credit", amount },
       ],
       metadata: { accountHolderId },
     });
-    this.emit("wallet.funded", { accountHolderId, amount, currency: holder.currency });
+    this.emit("wallet.funded", { accountHolderId, amount, currency: ccy });
     return tx;
   }
 
-  walletBalance(accountHolderId: string): { available: number; posted: number; held: number; currency: Currency } {
-    const holder = this.getAccountHolder(accountHolderId);
+  private balanceOf(walletAccountId: string, currency: Currency): WalletBalance {
     return {
-      available: this.ledger.availableBalance(holder.walletAccountId),
-      posted: this.ledger.postedBalance(holder.walletAccountId),
-      held: this.ledger.heldAmount(holder.walletAccountId),
-      currency: holder.currency,
+      available: this.ledger.availableBalance(walletAccountId),
+      posted: this.ledger.postedBalance(walletAccountId),
+      held: this.ledger.heldAmount(walletAccountId),
+      currency,
     };
+  }
+
+  walletBalance(accountHolderId: string, currency?: Currency): WalletBalance {
+    const holder = this.getAccountHolder(accountHolderId);
+    const ccy = currency ?? holder.currency;
+    const walletAccountId = this.wallets.get(`${holder.id}:${ccy}`);
+    if (!walletAccountId) return { available: 0, posted: 0, held: 0, currency: ccy };
+    return this.balanceOf(walletAccountId, ccy);
+  }
+
+  /** Every currency wallet this holder has, primary currency first. */
+  walletBalances(accountHolderId: string): WalletBalance[] {
+    const holder = this.getAccountHolder(accountHolderId);
+    const prefix = `${holder.id}:`;
+    const balances: WalletBalance[] = [];
+    for (const [key, walletAccountId] of this.wallets) {
+      if (!key.startsWith(prefix)) continue;
+      const currency = key.slice(prefix.length) as Currency;
+      balances.push(this.balanceOf(walletAccountId, currency));
+    }
+    if (balances.length === 0) balances.push({ available: 0, posted: 0, held: 0, currency: holder.currency });
+    return balances.sort((a, b) => (a.currency === holder.currency ? -1 : b.currency === holder.currency ? 1 : a.currency.localeCompare(b.currency)));
   }
 
   // ---- cards ----------------------------------------------------------------
@@ -225,9 +286,9 @@ export class Platform {
   createCard(input: Omit<CreateCardInput, "walletAccountId" | "currency"> & { currency?: Currency }): Card {
     const holder = this.getAccountHolder(input.accountHolderId);
     const currency = input.currency ?? holder.currency;
-    if (currency !== holder.currency) {
-      throw new DomainError("currency_mismatch", `wallet is ${holder.currency}; multi-currency cards need a ${currency} wallet`);
-    }
+    // A card draws from its currency's wallet, provisioned on demand — an org
+    // can hold ZAR and USD (and any other supported currency) side by side.
+    const walletAccountId = this.walletAccountFor(holder, currency);
     const tierLimit = SUBSCRIPTION_TIERS[holder.subscriptionTier].cardsPerMonth;
     const period = currentBillingPeriod();
     const createdThisPeriod = [...this.cards.values()].filter(
@@ -240,7 +301,7 @@ export class Platform {
         402,
       );
     }
-    const card = createCard({ ...input, currency, walletAccountId: holder.walletAccountId });
+    const card = createCard({ ...input, currency, walletAccountId });
     this.cards.set(card.id, card);
     this.emit("card.created", { cardId: card.id, accountHolderId: holder.id });
     return card;

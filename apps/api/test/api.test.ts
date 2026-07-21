@@ -75,6 +75,35 @@ describe("API end to end", () => {
     expect(transactions[0].status).toBe("completed");
   });
 
+  it("supports independent ZAR and USD wallets and cards over HTTP", async () => {
+    await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 100_000, currency: "ZAR" }) });
+    await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 40_000, currency: "USD" }) });
+
+    const walletRes = await json(await authed("/v1/wallet"));
+    const byCcy = Object.fromEntries(walletRes.wallets.map((w: any) => [w.currency, w.available]));
+    expect(byCcy.ZAR).toBe(100_000);
+    expect(byCcy.USD).toBe(40_000);
+
+    // A USD card spends USD; the sandbox purchase defaults to the card currency.
+    const { card } = await json(
+      await authed("/v1/cards", { method: "POST", body: JSON.stringify({ currency: "USD", single_use: false }) }),
+    );
+    expect(card.currency).toBe("USD");
+    const purchase = await json(
+      await authed("/v1/simulate/purchase", {
+        method: "POST",
+        body: JSON.stringify({ card_id: card.id, amount: 15_000, merchant: { name: "OpenAI", category: "5734" } }),
+      }),
+    );
+    expect(purchase.approved).toBe(true);
+    expect(purchase.wallet.currency).toBe("USD");
+    expect(purchase.wallet.posted).toBe(25_000);
+
+    // ZAR wallet is untouched.
+    const after = await json(await authed("/v1/wallet?currency=ZAR"));
+    expect(after.wallet.available).toBe(100_000);
+  });
+
   it("declines purchases beyond wallet balance", async () => {
     await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 1_000 }) });
     const { card } = await json(

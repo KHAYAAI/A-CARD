@@ -2,7 +2,7 @@
 
 Virtual cards for AI agents, over MCP — an Agentcard.sh-style platform targeting **South Africa (ZAR) first**, then emerging markets.
 
-Agents get scoped, budget-capped, single-use virtual cards funded from a prepaid wallet. Every charge runs through a real-time authorization path: rules engine → human-in-the-loop approval → double-entry ledger hold. The sandbox ships with a mock issuer (deterministic `4242…` PANs) so the whole system runs locally with zero external dependencies; the issuer integration point is a single signed webhook, designed to be swapped for a real BIN-sponsored partner (Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stripe Issuing).
+Agents get scoped, budget-capped, single-use virtual cards funded from a prepaid wallet — each org holds **ZAR and USD wallets side by side** (and any other supported currency), fully independent, with cards drawing from their own currency. Every charge runs through a real-time authorization path: rules engine → human-in-the-loop approval → double-entry ledger hold. The sandbox ships with a mock issuer (deterministic `4242…` PANs) so the whole system runs locally with zero external dependencies; the issuer integration point is a single signed webhook, designed to be swapped for a real BIN-sponsored partner (Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stripe Issuing).
 
 State is durable and **multi-writer** (a Postgres row-level ledger with per-wallet locks, so several API instances can share one database), access is guarded by both a programmatic API key and human **login with role-based access control**, it's billable (Paystack ZAR subscriptions), and it's deployable to a hardened AWS stack today (private subnets, WAF, optional TLS) — see `infra/cdk`.
 

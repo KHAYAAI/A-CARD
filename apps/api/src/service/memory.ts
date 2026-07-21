@@ -47,13 +47,18 @@ export class InMemoryPlatformService implements PlatformService {
     return this.platform.setSubscriptionTier(accountHolderId, tier);
   }
 
-  async walletBalance(accountHolderId: string): Promise<WalletBalance> {
-    return this.platform.walletBalance(accountHolderId);
+  async walletBalance(accountHolderId: string, currency?: import("@acard/core").Currency): Promise<WalletBalance> {
+    return this.platform.walletBalance(accountHolderId, currency);
   }
 
-  async fundWallet(accountHolderId: string, amount: number, reference?: string) {
-    const ledgerTransaction = this.platform.fundWallet(accountHolderId, amount, reference);
-    return { ledgerTransaction, wallet: this.platform.walletBalance(accountHolderId) };
+  async walletBalances(accountHolderId: string): Promise<WalletBalance[]> {
+    return this.platform.walletBalances(accountHolderId);
+  }
+
+  async fundWallet(accountHolderId: string, amount: number, currency?: import("@acard/core").Currency, reference?: string) {
+    const ledgerTransaction = this.platform.fundWallet(accountHolderId, amount, currency, reference);
+    const ccy = currency ?? this.platform.getAccountHolder(accountHolderId).currency;
+    return { ledgerTransaction, wallet: this.platform.walletBalance(accountHolderId, ccy) };
   }
 
   async createCard(input: CreateCardParams) {

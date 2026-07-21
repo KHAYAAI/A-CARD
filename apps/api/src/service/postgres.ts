@@ -72,6 +72,13 @@ const SCHEMA = `
     owner_id TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS acard_wallets (
+    account_holder_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    PRIMARY KEY (account_holder_id, currency)
+  );
+
   CREATE TABLE IF NOT EXISTS acard_settlement_accounts (
     currency TEXT PRIMARY KEY,
     account_id TEXT NOT NULL
@@ -228,6 +235,14 @@ export class PostgresPlatformService implements PlatformService {
 
   async migrate(): Promise<void> {
     await this.pool.query(SCHEMA);
+    // Backfill: every existing holder's primary wallet becomes its ZAR/USD/…
+    // wallet row, so multi-currency lookups work for accounts created before
+    // acard_wallets existed.
+    await this.pool.query(
+      `INSERT INTO acard_wallets (account_holder_id, currency, account_id)
+       SELECT id, currency, wallet_account_id FROM acard_account_holders
+       ON CONFLICT (account_holder_id, currency) DO NOTHING`,
+    );
   }
 
   // ---- transaction helper ---------------------------------------------------
@@ -275,7 +290,7 @@ export class PostgresPlatformService implements PlatformService {
       const walletAccountId = newId("acct");
       await client.query(
         "INSERT INTO acard_accounts (id, name, type, currency) VALUES ($1, $2, 'liability', $3)",
-        [walletAccountId, `wallet:${input.email}`, currency],
+        [walletAccountId, `wallet:${input.email}:${currency}`, currency],
       );
       const holder: AccountHolder = {
         id: newId("ah"),
@@ -290,6 +305,10 @@ export class PostgresPlatformService implements PlatformService {
         `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [holder.id, holder.email, holder.name, holder.currency, holder.walletAccountId, holder.subscriptionTier, holder.createdAt],
+      );
+      await client.query(
+        "INSERT INTO acard_wallets (account_holder_id, currency, account_id) VALUES ($1, $2, $3)",
+        [holder.id, currency, walletAccountId],
       );
       stage({ type: "account_holder.created", data: { accountHolderId: holder.id } });
       return holder;
@@ -355,6 +374,32 @@ export class PostgresPlatformService implements PlatformService {
 
   // ---- ledger balance helpers ----------------------------------------------
 
+  /** Wallet ledger account for a (holder, currency), created on first use. */
+  private async ensureWallet(client: Client, holder: AccountHolder, currency: Currency): Promise<string> {
+    const existing = await client.query(
+      "SELECT account_id FROM acard_wallets WHERE account_holder_id = $1 AND currency = $2",
+      [holder.id, currency],
+    );
+    if (existing.rowCount) return existing.rows[0].account_id;
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`wallet:${holder.id}:${currency}`]);
+    const again = await client.query(
+      "SELECT account_id FROM acard_wallets WHERE account_holder_id = $1 AND currency = $2",
+      [holder.id, currency],
+    );
+    if (again.rowCount) return again.rows[0].account_id;
+    const accountId = newId("acct");
+    await client.query("INSERT INTO acard_accounts (id, name, type, currency) VALUES ($1, $2, 'liability', $3)", [
+      accountId,
+      `wallet:${holder.email}:${currency}`,
+      currency,
+    ]);
+    await client.query(
+      "INSERT INTO acard_wallets (account_holder_id, currency, account_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [holder.id, currency, accountId],
+    );
+    return accountId;
+  }
+
   private async balances(client: Client, walletAccountId: string): Promise<{ available: number; posted: number; held: number }> {
     const res = await client.query(
       `SELECT
@@ -372,12 +417,40 @@ export class PostgresPlatformService implements PlatformService {
     return { posted, held, available: posted - held };
   }
 
-  async walletBalance(accountHolderId: string): Promise<WalletBalance> {
+  async walletBalance(accountHolderId: string, currency?: Currency): Promise<WalletBalance> {
     const client = await this.pool.connect();
     try {
       const holder = await this.holderById(client, accountHolderId);
-      const b = await this.balances(client, holder.walletAccountId);
-      return { ...b, currency: holder.currency };
+      const ccy = currency ?? holder.currency;
+      const walletRes = await client.query(
+        "SELECT account_id FROM acard_wallets WHERE account_holder_id = $1 AND currency = $2",
+        [accountHolderId, ccy],
+      );
+      if (!walletRes.rowCount) return { available: 0, posted: 0, held: 0, currency: ccy };
+      const b = await this.balances(client, walletRes.rows[0].account_id);
+      return { ...b, currency: ccy };
+    } finally {
+      client.release();
+    }
+  }
+
+  async walletBalances(accountHolderId: string): Promise<WalletBalance[]> {
+    const client = await this.pool.connect();
+    try {
+      const holder = await this.holderById(client, accountHolderId);
+      const wallets = await client.query(
+        "SELECT currency, account_id FROM acard_wallets WHERE account_holder_id = $1",
+        [accountHolderId],
+      );
+      const out: WalletBalance[] = [];
+      for (const row of wallets.rows) {
+        const b = await this.balances(client, row.account_id);
+        out.push({ ...b, currency: row.currency });
+      }
+      if (out.length === 0) out.push({ available: 0, posted: 0, held: 0, currency: holder.currency });
+      return out.sort((a, b) =>
+        a.currency === holder.currency ? -1 : b.currency === holder.currency ? 1 : a.currency.localeCompare(b.currency),
+      );
     } finally {
       client.release();
     }
@@ -400,27 +473,29 @@ export class PostgresPlatformService implements PlatformService {
     return accountId;
   }
 
-  async fundWallet(accountHolderId: string, amount: number, reference?: string) {
+  async fundWallet(accountHolderId: string, amount: number, currency?: Currency, reference?: string) {
     if (!Number.isSafeInteger(amount) || amount <= 0) {
       throw new DomainError("invalid_amount", "funding amount must be a positive integer of minor units");
     }
     return this.tx(async (client, stage) => {
       const holder = await this.holderById(client, accountHolderId);
-      const settlement = await this.ensureSettlementAccount(client, holder.currency);
+      const ccy = currency ?? holder.currency;
+      const walletAccountId = await this.ensureWallet(client, holder, ccy);
+      const settlement = await this.ensureSettlementAccount(client, ccy);
       const ledgerTransaction = await this.recordLedgerTx(client, {
         status: "posted",
-        currency: holder.currency,
-        description: `wallet top-up for ${holder.email}`,
+        currency: ccy,
+        description: `wallet top-up for ${holder.email} (${ccy})`,
         reference,
         metadata: { accountHolderId },
         postings: [
           { accountId: settlement, direction: "debit", amount },
-          { accountId: holder.walletAccountId, direction: "credit", amount },
+          { accountId: walletAccountId, direction: "credit", amount },
         ],
       });
-      const b = await this.balances(client, holder.walletAccountId);
-      stage({ type: "wallet.funded", data: { accountHolderId, amount, currency: holder.currency } });
-      return { ledgerTransaction, wallet: { ...b, currency: holder.currency } };
+      const b = await this.balances(client, walletAccountId);
+      stage({ type: "wallet.funded", data: { accountHolderId, amount, currency: ccy } });
+      return { ledgerTransaction, wallet: { ...b, currency: ccy } };
     });
   }
 
@@ -503,9 +578,7 @@ export class PostgresPlatformService implements PlatformService {
     return this.tx(async (client, stage) => {
       const holder = await this.holderById(client, input.accountHolderId);
       const currency = input.currency ?? holder.currency;
-      if (currency !== holder.currency) {
-        throw new DomainError("currency_mismatch", `wallet is ${holder.currency}; multi-currency cards need a ${currency} wallet`);
-      }
+      const walletAccountId = await this.ensureWallet(client, holder, currency);
       const tierLimit = SUBSCRIPTION_TIERS[holder.subscriptionTier].cardsPerMonth;
       const period = currentBillingPeriod();
       const count = await client.query(
@@ -520,7 +593,7 @@ export class PostgresPlatformService implements PlatformService {
           402,
         );
       }
-      const card = createCard({ ...input, currency, walletAccountId: holder.walletAccountId });
+      const card = createCard({ ...input, currency, walletAccountId });
       await client.query(
         `INSERT INTO acard_cards
            (id, account_holder_id, wallet_account_id, currency, status, single_use, limits, allowed_mccs,
@@ -955,7 +1028,7 @@ export class PostgresPlatformService implements PlatformService {
       const walletAccountId = newId("acct");
       await client.query("INSERT INTO acard_accounts (id, name, type, currency) VALUES ($1, $2, 'liability', $3)", [
         walletAccountId,
-        `wallet:${email}`,
+        `wallet:${email}:${currency}`,
         currency,
       ]);
       const accountHolder: AccountHolder = {
@@ -971,6 +1044,10 @@ export class PostgresPlatformService implements PlatformService {
         `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
         [accountHolder.id, email, accountHolder.name, currency, walletAccountId, "free", accountHolder.createdAt],
+      );
+      await client.query(
+        "INSERT INTO acard_wallets (account_holder_id, currency, account_id) VALUES ($1, $2, $3)",
+        [accountHolder.id, currency, walletAccountId],
       );
 
       // user + owner membership

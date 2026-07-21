@@ -69,26 +69,29 @@ program
 
   program
   .command("fund <amount>")
-  .description("Fund the wallet (sandbox), amount in minor units (cents)")
-  .action(async (amount: string) => {
+  .description("Fund a wallet (sandbox), amount in minor units (cents)")
+  .option("--currency <ccy>", "wallet currency, e.g. ZAR or USD (default: org primary)")
+  .action(async (amount: string, options: { currency?: string }) => {
     const cents = Number(amount);
     const result = await api<{ wallet: { available: number; currency: string } }>("/v1/wallet/fund", {
       method: "POST",
-      body: JSON.stringify({ amount: cents }),
+      body: JSON.stringify({ amount: cents, currency: options.currency }),
     });
     p.log.success(`Wallet funded. Available: ${formatCents(result.wallet.available, result.wallet.currency)}`);
   });
 
 program
   .command("balance")
-  .description("Show wallet balance")
+  .description("Show wallet balances (all currencies)")
   .action(async () => {
-    const { wallet } = await api<{ wallet: { available: number; posted: number; held: number; currency: string } }>(
-      "/v1/wallet",
-    );
-    p.log.info(
-      `Available ${formatCents(wallet.available, wallet.currency)} · Held ${formatCents(wallet.held, wallet.currency)} · Posted ${formatCents(wallet.posted, wallet.currency)}`,
-    );
+    const { wallets } = await api<{
+      wallets: Array<{ available: number; posted: number; held: number; currency: string }>;
+    }>("/v1/wallet");
+    for (const wallet of wallets) {
+      p.log.info(
+        `${wallet.currency}: Available ${formatCents(wallet.available, wallet.currency)} · Held ${formatCents(wallet.held, wallet.currency)} · Posted ${formatCents(wallet.posted, wallet.currency)}`,
+      );
+    }
   });
 
 program
@@ -98,6 +101,15 @@ program
     p.intro("Create a virtual card");
     const label = await p.text({ message: "What is this card for?", placeholder: "agent groceries" });
     if (p.isCancel(label)) return p.cancel("cancelled");
+    const currency = await p.select({
+      message: "Card currency",
+      options: [
+        { value: "ZAR", label: "ZAR — South African Rand" },
+        { value: "USD", label: "USD — US Dollar" },
+      ],
+      initialValue: "ZAR",
+    });
+    if (p.isCancel(currency)) return p.cancel("cancelled");
     const singleUse = await p.confirm({ message: "Single use (auto-close after first charge)?", initialValue: true });
     if (p.isCancel(singleUse)) return p.cancel("cancelled");
     const limitRaw = await p.text({ message: "Per-transaction limit in cents (blank for none)", placeholder: "50000" });
@@ -114,6 +126,7 @@ program
       method: "POST",
       body: JSON.stringify({
         label: label || undefined,
+        currency,
         single_use: singleUse,
         limits: limitRaw ? { per_transaction: Number(limitRaw) } : undefined,
         approval_threshold: thresholdRaw ? Number(thresholdRaw) : undefined,
@@ -121,7 +134,7 @@ program
     });
     spinner.stop("Card issued");
     p.note(
-      `id:      ${card.id}\npan:     ${card.sandboxPan} (sandbox)\nexpiry:  ${String(card.expiryMonth).padStart(2, "0")}/${card.expiryYear}\nsingle:  ${card.singleUse}`,
+      `id:      ${card.id}\nccy:     ${card.currency}\npan:     ${card.sandboxPan} (sandbox)\nexpiry:  ${String(card.expiryMonth).padStart(2, "0")}/${card.expiryYear}\nsingle:  ${card.singleUse}`,
       card.label ?? "card",
     );
     p.outro("Done");

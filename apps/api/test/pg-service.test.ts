@@ -178,6 +178,31 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     expect((await service.getCard(single.id))!.status).toBe("closed");
   });
 
+  it("holds independent ZAR and USD wallets against the row-level ledger", async () => {
+    const holder = await service.signup({ email: `mc${Date.now()}${Math.random()}@x.co.za`, name: "MC", currency: "ZAR" });
+    await service.fundWallet(holder.id, 100_000, "ZAR");
+    await service.fundWallet(holder.id, 40_000, "USD");
+
+    expect((await service.walletBalance(holder.id, "ZAR")).available).toBe(100_000);
+    expect((await service.walletBalance(holder.id, "USD")).available).toBe(40_000);
+    expect((await service.walletBalances(holder.id)).map((w) => w.currency).sort()).toEqual(["USD", "ZAR"]);
+
+    const usdCard = await service.createCard({ accountHolderId: holder.id, currency: "USD", singleUse: false });
+    expect(usdCard.currency).toBe("USD");
+    const decision = await service.authorize({
+      authorizationId: "pg_usd_1",
+      cardId: usdCard.id,
+      amount: 15_000,
+      currency: "USD",
+      merchant: { name: "OpenAI", category: "5734" },
+    });
+    expect(decision.approved).toBe(true);
+
+    // USD moved; ZAR untouched.
+    expect((await service.walletBalance(holder.id, "USD")).available).toBe(25_000);
+    expect((await service.walletBalance(holder.id, "ZAR")).available).toBe(100_000);
+  });
+
   it("registers an owner, logs in, resolves a session, and manages members (RBAC data)", async () => {
     const reg = await service.registerAccount({ email: "owner@pg.co.za", name: "Owner", password: "supersecret" });
     expect(reg.context.role).toBe("owner");

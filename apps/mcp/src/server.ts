@@ -33,6 +33,10 @@ export function createMcpServer(client: AcardClient): McpServer {
         "Create a virtual card funded from the wallet. Defaults to single-use (closes after first charge). Amounts are integer minor units (cents).",
       inputSchema: {
         label: z.string().optional().describe("Human-readable purpose, e.g. 'flight to Cape Town'"),
+        currency: z
+          .enum(["ZAR", "USD", "NGN", "KES"])
+          .optional()
+          .describe("Card currency; draws from the matching wallet (defaults to the org's primary currency)"),
         single_use: z.boolean().optional().describe("Close automatically after first successful charge (default true)"),
         per_transaction_limit: z.number().int().positive().optional().describe("Max cents per charge"),
         total_limit: z.number().int().positive().optional().describe("Lifetime spend cap in cents"),
@@ -50,6 +54,7 @@ export function createMcpServer(client: AcardClient): McpServer {
       try {
         const result = await client.createCard({
           label: args.label,
+          currency: args.currency,
           single_use: args.single_use,
           limits: {
             per_transaction: args.per_transaction_limit,
@@ -167,13 +172,17 @@ export function createMcpServer(client: AcardClient): McpServer {
     "get_wallet",
     {
       title: "Get wallet balance",
-      description: "Fetch wallet available/posted/held balances in minor units.",
-      inputSchema: {},
+      description:
+        "Fetch wallet available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, …); pass a currency to focus on one.",
+      inputSchema: {
+        currency: z.enum(["ZAR", "USD", "NGN", "KES"]).optional().describe("Focus on a single currency wallet"),
+      },
       annotations: { readOnlyHint: true },
     },
-    async () => {
+    async ({ currency }) => {
       try {
-        return ok((await client.wallet()).wallet);
+        const result = await client.wallet(currency);
+        return ok(currency ? result.wallet : result.wallets);
       } catch (error) {
         return fail(error);
       }

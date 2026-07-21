@@ -80,11 +80,13 @@ const signupSchema = z.object({
 
 const fundSchema = z.object({
   amount: z.number().int().positive(),
+  currency: currencySchema.optional(),
   reference: z.string().optional(),
 });
 
 const createCardSchema = z.object({
   label: z.string().optional(),
+  currency: currencySchema.optional(),
   single_use: z.boolean().optional(),
   limits: z
     .object({
@@ -102,7 +104,8 @@ const createCardSchema = z.object({
 const simulateAuthSchema = z.object({
   card_id: z.string(),
   amount: z.number().int().positive(),
-  currency: currencySchema.default("ZAR"),
+  // Defaults to the card's own currency once the card is loaded.
+  currency: currencySchema.optional(),
   merchant: z.object({
     name: z.string(),
     category: z.string().default("5999"),
@@ -232,7 +235,7 @@ export function createApp(config: AppConfig) {
 
   app.get("/v1/auth/me", async (c) => {
     const holder = c.get("holder");
-    return c.json({ account_holder: holder, role: c.get("role"), wallet: await platform.walletBalance(holder.id) });
+    return c.json({ account_holder: holder, role: c.get("role"), wallets: await platform.walletBalances(holder.id) });
   });
 
   app.post("/v1/auth/logout", async (c) => {
@@ -285,14 +288,21 @@ export function createApp(config: AppConfig) {
 
   app.get("/v1/wallet", async (c) => {
     const holder = c.get("holder");
-    return c.json({ wallet: await platform.walletBalance(holder.id) });
+    const currency = c.req.query("currency") as Currency | undefined;
+    const wallets = await platform.walletBalances(holder.id);
+    // `wallet` is the requested currency (or the org's primary) for convenience;
+    // `wallets` is every currency the org holds (ZAR, USD, …).
+    const wallet = currency
+      ? await platform.walletBalance(holder.id, currency)
+      : wallets.find((w) => w.currency === holder.currency) ?? wallets[0];
+    return c.json({ wallet, wallets });
   });
 
   app.post("/v1/wallet/fund", requireRole("member"), async (c) => {
     const holder = c.get("holder");
     const body = fundSchema.parse(await c.req.json());
-    const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.reference);
-    return c.json({ ledger_transaction: ledgerTransaction, wallet }, 201);
+    const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.currency, body.reference);
+    return c.json({ ledger_transaction: ledgerTransaction, wallet, wallets: await platform.walletBalances(holder.id) }, 201);
   });
 
   // ---- cards -----------------------------------------------------------------
@@ -303,6 +313,7 @@ export function createApp(config: AppConfig) {
     const card = await platform.createCard({
       accountHolderId: holder.id,
       label: body.label,
+      currency: body.currency,
       singleUse: body.single_use,
       limits: body.limits
         ? {
@@ -509,7 +520,7 @@ export function createApp(config: AppConfig) {
         authorization_id: authorizationId,
         card_id: body.card_id,
         amount: body.amount,
-        currency: body.currency,
+        currency: body.currency ?? card.currency,
         merchant: body.merchant,
       },
     });
@@ -542,7 +553,7 @@ export function createApp(config: AppConfig) {
       approved: decision.approved,
       decline_reason: decision.decline_reason,
       approval_id: decision.approval_id,
-      wallet: await platform.walletBalance(holder.id),
+      wallet: await platform.walletBalance(holder.id, card.currency),
     });
   });
 
