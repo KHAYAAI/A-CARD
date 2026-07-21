@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A-CARD — Investor Demo</title>
+<style>
+/* ============================ TOKENS ============================ */
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* light theme (default) — neutrals carry a faint green bias */
+  --bg: #EEF3F1;
+  --surface: #FFFFFF;
+  --surface-2: #F5F9F7;
+  --border: #DEE7E3;
+  --ink: #0E1A16;
+  --muted: #5D6C66;
+  --accent: #0C9A6E;
+  --accent-2: #08B07E;
+  --accent-ink: #FFFFFF;
+  --good: #0C9A6E;
+  --warn: #B5761A;
+  --bad: #C4443F;
+  --good-bg: rgba(12,154,110,0.12);
+  --warn-bg: rgba(181,118,26,0.12);
+  --bad-bg: rgba(196,68,63,0.12);
+  --shadow: 0 1px 2px rgba(16,26,22,0.04), 0 12px 32px -12px rgba(16,26,22,0.18);
+  --track: #E4EBE8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0C1116;
+    --surface: #121A22;
+    --surface-2: #17212B;
+    --border: #223040;
+    --ink: #E9F1EF;
+    --muted: #8CA0AB;
+    --accent: #16C692;
+    --accent-2: #3EE3B0;
+    --accent-ink: #04150F;
+    --good: #16C692;
+    --warn: #E9A23B;
+    --bad: #F2706F;
+    --good-bg: rgba(22,198,146,0.14);
+    --warn-bg: rgba(233,162,59,0.14);
+    --bad-bg: rgba(242,112,111,0.14);
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 18px 40px -16px rgba(0,0,0,0.6);
+    --track: #1D2A36;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #EEF3F1; --surface: #FFFFFF; --surface-2: #F5F9F7; --border: #DEE7E3;
+  --ink: #0E1A16; --muted: #5D6C66; --accent: #0C9A6E; --accent-2: #08B07E; --accent-ink: #FFFFFF;
+  --good: #0C9A6E; --warn: #B5761A; --bad: #C4443F;
+  --good-bg: rgba(12,154,110,0.12); --warn-bg: rgba(181,118,26,0.12); --bad-bg: rgba(196,68,63,0.12);
+  --shadow: 0 1px 2px rgba(16,26,22,0.04), 0 12px 32px -12px rgba(16,26,22,0.18); --track:#E4EBE8;
+}
+:root[data-theme="dark"] {
+  --bg: #0C1116; --surface: #121A22; --surface-2: #17212B; --border: #223040;
+  --ink: #E9F1EF; --muted: #8CA0AB; --accent: #16C692; --accent-2: #3EE3B0; --accent-ink: #04150F;
+  --good: #16C692; --warn: #E9A23B; --bad: #F2706F;
+  --good-bg: rgba(22,198,146,0.14); --warn-bg: rgba(233,162,59,0.14); --bad-bg: rgba(242,112,111,0.14);
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 18px 40px -16px rgba(0,0,0,0.6); --track:#1D2A36;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+button { font-family: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1,h2,h3 { text-wrap: balance; margin: 0; }
+
+/* ============================ LOGIN (committed dark vault) ============================ */
+#login {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center; padding: 24px;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(22,198,146,0.10), transparent 60%),
+    linear-gradient(180deg, #0A0F14, #0C1116);
+  color: #E9F1EF;
+}
+#login .grid-bg {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(900px 500px at 50% 30%, #000, transparent 75%);
+}
+.login-card {
+  position: relative; width: 100%; max-width: 400px;
+  background: rgba(18,26,34,0.82);
+  border: 1px solid #223040;
+  border-radius: 18px; padding: 34px 30px;
+  box-shadow: 0 30px 80px -30px rgba(0,0,0,0.8);
+  backdrop-filter: blur(8px);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+  background: linear-gradient(140deg, #16C692, #0B8f68); color: #04150F; font-weight: 800;
+  box-shadow: 0 6px 18px -6px rgba(22,198,146,0.7); font-size: 18px;
+}
+.brand-word { font-weight: 750; letter-spacing: 0.14em; font-size: 15px; }
+.login-title { font-size: 24px; font-weight: 730; letter-spacing: -0.01em; margin-top: 22px; }
+.login-sub { color: #8CA0AB; margin-top: 6px; font-size: 14px; }
+.field { margin-top: 16px; }
+.field label { display: block; font-size: 12px; color: #8CA0AB; margin-bottom: 6px; letter-spacing: 0.02em; }
+.field input {
+  width: 100%; padding: 11px 13px; border-radius: 10px;
+  background: #0E151C; border: 1px solid #26333f; color: #E9F1EF; font-size: 15px;
+}
+.field input::placeholder { color: #5b6a74; }
+.btn {
+  border: 1px solid transparent; border-radius: 10px; padding: 11px 16px;
+  font-weight: 650; font-size: 14px; transition: transform .08s ease, filter .15s ease, background .15s;
+}
+.btn:active { transform: translateY(1px); }
+.btn-accent { background: var(--accent); color: var(--accent-ink); }
+.btn-accent:hover { filter: brightness(1.06); }
+.login-btn { width: 100%; margin-top: 22px; background: linear-gradient(140deg,#16C692,#0d9d73); color:#04150F; font-size:15px; padding: 13px; }
+.login-note { margin-top: 16px; font-size: 12px; color: #6f818b; text-align: center; }
+.login-note strong { color: #a9bcc4; font-weight: 600; }
+
+/* ============================ APP SHELL ============================ */
+#app { display: none; min-height: 100vh; }
+#app.on { display: block; animation: fadeUp .5s ease both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+header.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 22px; background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border-bottom: 1px solid var(--border); backdrop-filter: blur(10px);
+}
+.topbar .brand-word { color: var(--ink); }
+.org-pill {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 13px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px 5px 8px;
+}
+.org-dot { width: 18px; height: 18px; border-radius: 6px; background: linear-gradient(140deg,#6C7BFF,#3A46C8); display:grid;place-items:center;color:#fff;font-size:10px;font-weight:800; }
+.spacer { flex: 1; }
+.icon-btn {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-size: 15px;
+}
+.icon-btn:hover { color: var(--ink); }
+.ghost-btn { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 9px; padding: 7px 12px; font-size: 13px; font-weight: 550; }
+.ghost-btn:hover { color: var(--ink); border-color: var(--muted); }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(140deg,var(--accent-2),var(--accent)); color: var(--accent-ink); display:grid;place-items:center; font-weight:700; font-size:13px; }
+
+.wrap { max-width: 1160px; margin: 0 auto; padding: 22px; }
+.layout { display: grid; grid-template-columns: 1fr 300px; gap: 20px; align-items: start; }
+@media (max-width: 940px) { .layout { grid-template-columns: 1fr; } .guide { order: -1; } }
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.panel-pad { padding: 18px; }
+.panel h2 { font-size: 15px; font-weight: 680; letter-spacing: -0.01em; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; }
+.stack { display: grid; gap: 20px; }
+
+/* wallets */
+.wallets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .wallets { grid-template-columns: 1fr; } }
+.wallet {
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--surface-2);
+  position: relative; overflow: hidden;
+}
+.wallet .ccy { display: flex; align-items: center; justify-content: space-between; }
+.ccy-tag { font-weight: 700; font-size: 13px; letter-spacing: 0.04em; }
+.ccy-name { font-size: 11px; color: var(--muted); }
+.wallet .avail { font-size: 27px; font-weight: 720; margin-top: 10px; letter-spacing: -0.02em; }
+.wallet .sub { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.wallet .sub b { color: var(--ink); font-weight: 600; }
+.flag { font-size: 20px; }
+
+/* agent simulator */
+.sim-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.scenario-list { display: grid; gap: 8px; }
+.scenario {
+  display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 12px;
+  border: 1px solid var(--border); border-radius: 11px; padding: 11px 13px; background: var(--surface-2);
+  text-align: left; color: var(--ink); transition: border-color .15s, transform .08s;
+}
+.scenario:hover { border-color: var(--accent); }
+.scenario:active { transform: translateY(1px); }
+.scenario .m-ico { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 19px; background: var(--surface); border: 1px solid var(--border); }
+.scenario .m-name { font-weight: 600; font-size: 14px; }
+.scenario .m-meta { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.scenario .m-amt { font-weight: 680; font-size: 14px; }
+.scenario .m-agent { font-size: 11px; color: var(--muted); }
+
+/* pipeline */
+.pipeline { border: 1px dashed var(--border); border-radius: 12px; padding: 18px 16px 14px; background: var(--surface-2); margin-top: 4px; }
+.pipe-track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; position: relative; }
+.gate { text-align: center; position: relative; }
+.gate .node {
+  width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 8px; display: grid; place-items: center;
+  background: var(--surface); border: 1.5px solid var(--border); color: var(--muted); font-size: 18px;
+  transition: all .35s ease; position: relative; z-index: 2;
+}
+.gate .lbl { font-size: 10.5px; color: var(--muted); line-height: 1.25; letter-spacing: 0.01em; }
+.gate::after { /* connector */
+  content: ""; position: absolute; top: 22px; left: 50%; width: 100%; height: 2px; background: var(--track); z-index: 1;
+}
+.gate:last-child::after { display: none; }
+.gate.active .node { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px var(--good-bg); }
+.gate.pass .node { border-color: var(--good); color: var(--good); background: var(--good-bg); }
+.gate.pass::after { background: var(--good); }
+.gate.fail .node { border-color: var(--bad); color: var(--bad); background: var(--bad-bg); }
+.gate.review .node { border-color: var(--warn); color: var(--warn); background: var(--warn-bg); }
+.gate.review::after { background: var(--warn); }
+.pipe-result { margin-top: 14px; min-height: 26px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.verdict { font-weight: 700; padding: 4px 11px; border-radius: 7px; font-size: 12.5px; letter-spacing: 0.02em; }
+.verdict.ok { background: var(--good-bg); color: var(--good); }
+.verdict.no { background: var(--bad-bg); color: var(--bad); }
+.verdict.hold { background: var(--warn-bg); color: var(--warn); }
+.pipe-reason { color: var(--muted); }
+.pipe-idle { color: var(--muted); font-size: 13px; }
+
+/* cards table */
+.card-mini {
+  width: 100%; aspect-ratio: 1.6/1; max-width: 62px; border-radius: 8px; padding: 7px;
+  background: linear-gradient(135deg, #1c2a38, #0f1720); color: #dbe7e3; position: relative; border: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; justify-content: space-between;
+}
+.card-mini.usd { background: linear-gradient(135deg, #24303a, #17202a); }
+.card-mini .cm-brand { font-size: 7px; letter-spacing: 0.08em; opacity: 0.85; font-weight: 700; }
+.card-mini .cm-num { font-size: 8px; letter-spacing: 0.03em; }
+.card-mini .cm-chip { width: 11px; height: 8px; border-radius: 2px; background: linear-gradient(135deg,#d9b45a,#b8912f); position:absolute; top:7px; right:7px; }
+
+table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.grid th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 0 10px 9px; }
+table.grid td { padding: 10px; border-top: 1px solid var(--border); vertical-align: middle; }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.02em; }
+.pill.active { background: var(--good-bg); color: var(--good); }
+.pill.closed { background: var(--track); color: var(--muted); }
+.pill.completed { background: var(--good-bg); color: var(--good); }
+.pill.declined { background: var(--bad-bg); color: var(--bad); }
+.pill.pending, .pill.authorized { background: var(--warn-bg); color: var(--warn); }
+.tag { font-size: 10.5px; color: var(--muted); font-family: var(--font-mono); }
+
+/* activity + ledger */
+.feed { display: grid; gap: 2px; max-height: 320px; overflow-y: auto; }
+.feed-row { display: grid; grid-template-columns: 30px 1fr auto; gap: 11px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--border); }
+.feed-row:first-child { border-top: none; }
+.feed-ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 14px; background: var(--surface-2); }
+.feed-main { font-size: 13px; font-weight: 550; }
+.feed-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.feed-amt { font-size: 13px; font-weight: 640; text-align: right; }
+.feed-amt.neg { color: var(--ink); }
+.led-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; font-size: 12px; padding: 7px 2px; border-top: 1px solid var(--border); align-items: baseline; }
+.led-row:first-child { border-top: none; }
+.led-desc { color: var(--ink); }
+.led-d { color: var(--muted); text-align: right; }
+.led-c { color: var(--accent); text-align: right; }
+
+/* approvals */
+.approval {
+  border: 1px solid var(--warn); background: var(--warn-bg); border-radius: 12px; padding: 14px; display: grid; gap: 10px;
+  animation: pop .35s ease both;
+}
+@keyframes pop { from { transform: scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.approval .a-top { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+.approval .a-amt { font-size: 18px; font-weight: 720; }
+.approval .a-why { font-size: 12px; color: var(--muted); }
+.approval .a-actions { display: flex; gap: 8px; }
+.btn-sm { border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 620; border: 1px solid transparent; }
+.btn-approve { background: var(--accent); color: var(--accent-ink); flex: 1; }
+.btn-deny { background: transparent; color: var(--bad); border-color: var(--bad); }
+.empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+
+/* guide rail */
+.guide { position: sticky; top: 78px; display: grid; gap: 12px; }
+.guide .g-head { font-size: 13px; font-weight: 680; display: flex; align-items: center; gap: 8px; }
+.g-steps { display: grid; gap: 3px; }
+.g-step { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 9px 8px; border-radius: 9px; font-size: 12.5px; color: var(--muted); align-items: start; transition: background .15s; }
+.g-step .g-num { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; font-size: 11px; font-weight: 700; border: 1.5px solid var(--border); background: var(--surface); }
+.g-step.current { background: var(--good-bg); color: var(--ink); }
+.g-step.current .g-num { border-color: var(--accent); color: var(--accent); }
+.g-step.done { color: var(--muted); }
+.g-step.done .g-num { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.g-step b { color: var(--ink); font-weight: 620; display: block; margin-bottom: 1px; }
+.g-step.done b { color: var(--muted); font-weight: 550; }
+
+/* modal */
+.modal-back { position: fixed; inset: 0; background: rgba(6,10,14,0.55); z-index: 40; display: none; place-items: center; padding: 20px; backdrop-filter: blur(2px); }
+.modal-back.on { display: grid; }
+.modal { width: 100%; max-width: 460px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 22px; animation: pop .3s ease both; }
+.modal h3 { font-size: 17px; font-weight: 700; }
+.modal .field label { color: var(--muted); }
+.modal .field input, .modal .field select {
+  width: 100%; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: 14px; font-family: inherit;
+}
+.seg { display: flex; gap: 6px; }
+.seg button { flex: 1; padding: 9px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 13px; }
+.seg button.sel { border-color: var(--accent); color: var(--accent); background: var(--good-bg); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 550; }
+.chip.sel { border-color: var(--accent); color: var(--accent); background: var(--good-bg); }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+.modal-actions .btn { flex: 1; }
+
+/* toast */
+#toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 60;
+  background: var(--ink); color: var(--bg); padding: 11px 18px; border-radius: 11px; font-size: 13.5px; font-weight: 550;
+  opacity: 0; transition: all .3s ease; box-shadow: var(--shadow); pointer-events: none; max-width: 90vw; }
+#toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.hint { font-size: 12px; color: var(--muted); }
+.flash { animation: flash 1.4s ease; }
+@keyframes flash { 0%,100% { box-shadow: var(--shadow); } 25% { box-shadow: 0 0 0 3px var(--good-bg), var(--shadow); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================ LOGIN ============================ -->
+<section id="login">
+  <div class="grid-bg"></div>
+  <form class="login-card" id="loginForm">
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div class="brand-word">A·CARD</div>
+    </div>
+    <div class="login-title">Cards for AI agents.</div>
+    <div class="login-sub">Sign in to the Khaya AI console.</div>
+
+    <div class="field">
+      <label for="email">Work email</label>
+      <input id="email" type="email" value="you@khaya.ai" autocomplete="username" />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" type="password" value="demodemo" autocomplete="current-password" />
+    </div>
+    <button type="submit" class="btn login-btn">Sign in</button>
+    <div class="login-note">Investor demo — everything runs <strong>locally in your browser</strong>. No real money moves.</div>
+  </form>
+</section>
+
+<!-- ============================ APP ============================ -->
+<div id="app">
+  <header class="topbar">
+    <div class="brand" style="gap:9px">
+      <div class="brand-mark" style="width:28px;height:28px;font-size:15px;border-radius:8px">A</div>
+      <div class="brand-word" style="font-size:13px">A·CARD</div>
+    </div>
+    <div class="org-pill"><span class="org-dot">K</span> Khaya AI <span style="color:var(--muted)">·</span> <span class="mono" style="font-size:12px">ZAR + USD</span></div>
+    <div class="spacer"></div>
+    <button class="ghost-btn" id="resetBtn">Reset demo</button>
+    <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+    <div class="avatar" title="you@khaya.ai">Y</div>
+  </header>
+
+  <div class="wrap">
+    <div class="layout">
+      <div class="stack">
+
+        <!-- WALLETS -->
+        <div class="panel panel-pad" id="walletsPanel">
+          <div class="panel-head">
+            <h2>Wallets</h2>
+            <button class="ghost-btn" id="fundBtn">+ Add funds</button>
+          </div>
+          <div class="wallets" id="wallets"></div>
+        </div>
+
+        <!-- AGENT SIMULATOR -->
+        <div class="panel panel-pad" id="simPanel">
+          <div class="panel-head">
+            <div>
+              <h2>Agent activity</h2>
+              <div class="hint">Trigger a purchase an agent is trying to make — watch it clear real-time authorization.</div>
+            </div>
+          </div>
+          <div class="scenario-list" id="scenarios"></div>
+
+          <div class="pipeline">
+            <div class="eyebrow" style="margin-bottom:12px">Real-time authorization</div>
+            <div class="pipe-track" id="pipeTrack"></div>
+            <div class="pipe-result" id="pipeResult"><span class="pipe-idle">Idle — run an agent purchase above.</span></div>
+          </div>
+        </div>
+
+        <!-- APPROVALS -->
+        <div class="panel panel-pad" id="approvalsPanel">
+          <div class="panel-head"><h2>Needs your approval <span id="apprCount" class="tag"></span></h2></div>
+          <div id="approvals"></div>
+        </div>
+
+        <!-- CARDS -->
+        <div class="panel panel-pad">
+          <div class="panel-head">
+            <h2>Agents &amp; cards</h2>
+            <button class="btn btn-accent" id="issueBtn" style="padding:8px 14px">Issue card</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="grid" id="cardsTable"></table>
+          </div>
+        </div>
+
+        <!-- ACTIVITY + LEDGER -->
+        <div class="panel panel-pad">
+          <div class="panel-head"><h2>Activity</h2></div>
+          <div class="feed" id="feed"></div>
+        </div>
+
+        <div class="panel panel-pad">
+          <div class="panel-head">
+            <div><h2>Ledger</h2><div class="hint">Double-entry — every hold and capture is balanced. Available = posted − held.</div></div>
+          </div>
+          <div id="ledger"></div>
+        </div>
+
+      </div>
+
+      <!-- GUIDE RAIL -->
+      <aside class="guide">
+        <div class="panel panel-pad">
+          <div class="g-head">◆ Demo guide</div>
+          <div class="hint" style="margin:6px 0 12px">Follow the steps — or click around freely.</div>
+          <div class="g-steps" id="guide"></div>
+        </div>
+      </aside>
+
+    </div>
+  </div>
+</div>
+
+<!-- ISSUE CARD MODAL -->
+<div class="modal-back" id="issueModal">
+  <div class="modal">
+    <h3>Issue a card to an agent</h3>
+    <div class="hint" style="margin:4px 0 14px">The agent can spend only within these rules.</div>
+    <div class="field"><label>Agent / purpose</label><input id="f_label" placeholder="e.g. Procurement agent" value="Procurement agent" /></div>
+    <div class="field" style="margin-top:12px"><label>Currency</label>
+      <div class="seg" id="f_ccy">
+        <button data-ccy="ZAR" class="sel">ZAR</button>
+        <button data-ccy="USD">USD</button>
+      </div>
+    </div>
+    <div class="field" style="margin-top:12px"><label>Per-transaction limit</label><input id="f_pertx" class="mono" value="150000" /><div class="hint" style="margin-top:4px">In cents. 150000 = R1 500.00</div></div>
+    <div class="field" style="margin-top:12px"><label>Human-approval threshold</label><input id="f_thresh" class="mono" value="500000" /><div class="hint" style="margin-top:4px">Charges at/above this need your OK. 500000 = R5 000.00</div></div>
+    <div class="field" style="margin-top:12px"><label>Allowed categories</label>
+      <div class="chips" id="f_mcc">
+        <button class="chip" data-mcc="5411">Groceries</button>
+        <button class="chip" data-mcc="5734">Software</button>
+        <button class="chip" data-mcc="4511">Airlines</button>
+        <button class="chip" data-mcc="5812">Restaurants</button>
+      </div>
+      <div class="hint" style="margin-top:5px">None selected = all merchants allowed.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost-btn" id="issueCancel" style="flex:0 0 auto;padding:11px 16px">Cancel</button>
+      <button class="btn btn-accent" id="issueConfirm">Issue card</button>
+    </div>
+  </div>
+</div>
+
+<!-- FUND MODAL -->
+<div class="modal-back" id="fundModal">
+  <div class="modal">
+    <h3>Add funds (sandbox)</h3>
+    <div class="hint" style="margin:4px 0 14px">Top up a prepaid wallet. In production this is a settled Paystack / EFT pay-in.</div>
+    <div class="field"><label>Currency</label>
+      <div class="seg" id="fund_ccy"><button data-ccy="ZAR" class="sel">ZAR</button><button data-ccy="USD">USD</button></div>
+    </div>
+    <div class="field" style="margin-top:12px"><label>Amount</label><input id="fund_amt" class="mono" value="500000" /><div class="hint" style="margin-top:4px">In cents. 500000 = R5 000.00</div></div>
+    <div class="modal-actions">
+      <button class="btn ghost-btn" id="fundCancel" style="flex:0 0 auto;padding:11px 16px">Cancel</button>
+      <button class="btn btn-accent" id="fundConfirm">Add funds</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   A-CARD demo engine — a faithful in-browser port of the real platform's
+   authorization logic (packages/core: ledger, rules, approvals, platform).
+   Same decisions, same states — running client-side so it never fails
+   mid-pitch. No network, no real money.
+   ===================================================================== */
+
+const CCY = {
+  ZAR: { symbol: "R", name: "South African Rand", flag: "🇿🇦" },
+  USD: { symbol: "$", name: "US Dollar", flag: "🇺🇸" },
+};
+const MCC = { "5411": "Groceries", "5734": "Software", "4511": "Airlines", "5812": "Restaurants", "5999": "General" };
+
+function fmt(cents, ccy) {
+  const v = (cents / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${CCY[ccy].symbol} ${v}`;
+}
+const $ = (s, r = document) => r.querySelector(s);
+const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
+let uid = 1; const nid = (p) => `${p}_${(uid++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+/* ---- state ---- */
+let S;
+function seed() {
+  S = {
+    wallets: { ZAR: { posted: 0, held: 0 }, USD: { posted: 0, held: 0 } },
+    cards: [], txns: [], approvals: [], grants: [], ledger: [],
+    step: 0,
+  };
+  // starting balances
+  topup("ZAR", 2500000, "Opening balance");
+  topup("USD", 500000, "Opening balance");
+  // pre-seeded agents/cards
+  addCard({ label: "Grocery agent", currency: "ZAR", perTx: 100000, threshold: 500000, mcc: ["5411"] });
+  addCard({ label: "Travel agent", currency: "ZAR", perTx: null, threshold: 500000, mcc: [] });
+  addCard({ label: "Dev-tools agent", currency: "USD", perTx: 100000, threshold: null, mcc: ["5734"] });
+}
+
+/* ---- ledger primitives (mirrors packages/core/ledger.ts) ---- */
+function available(ccy) { return S.wallets[ccy].posted - S.wallets[ccy].held; }
+function topup(ccy, amount, desc) {
+  S.wallets[ccy].posted += amount;
+  S.ledger.unshift({ id: nid("ltx"), desc: desc || "Wallet top-up", ccy, debit: 0, credit: amount, kind: "topup" });
+}
+function placeHold(ccy, amount, desc) {
+  S.wallets[ccy].held += amount;
+  const l = { id: nid("ltx"), desc, ccy, debit: amount, credit: 0, kind: "hold" };
+  S.ledger.unshift(l); return l;
+}
+function capture(ccy, amount) { // settle a hold
+  S.wallets[ccy].held -= amount; S.wallets[ccy].posted -= amount;
+  S.ledger.unshift({ id: nid("ltx"), desc: "Captured (settled)", ccy, debit: 0, credit: 0, kind: "capture" });
+}
+
+function addCard(o) {
+  const last4 = String(1000 + Math.floor(Math.random() * 9000));
+  const c = {
+    id: nid("card"), label: o.label, currency: o.currency, status: "active",
+    perTx: o.perTx ?? null, total: o.total ?? null, threshold: o.threshold ?? null,
+    mcc: o.mcc || [], spend: 0, last4, pan: "4242 •••• •••• " + last4,
+  };
+  S.cards.push(c); return c;
+}
+
+/* ---- rules engine (mirrors packages/core/rules.ts) ---- */
+function evaluate(card, amount, ccy, merchant, mcc) {
+  if (card.status !== "active") return { decision: "decline", reason: "card_closed", gate: 1 };
+  if (ccy !== card.currency) return { decision: "decline", reason: "currency_mismatch", gate: 1 };
+  if (card.mcc.length && !card.mcc.includes(mcc)) return { decision: "decline", reason: "merchant_category_not_allowed", gate: 2 };
+  if (card.perTx != null && amount > card.perTx) return { decision: "decline", reason: "per_transaction_limit_exceeded", gate: 2 };
+  if (card.total != null && card.spend + amount > card.total) return { decision: "decline", reason: "card_total_limit_exceeded", gate: 2 };
+  const grant = S.grants.find((g) => g.status === "active" && g.cardId === card.id && g.merchant === merchant && amount <= g.amount);
+  if (card.threshold != null && amount >= card.threshold && !grant) return { decision: "review", reason: "amount_requires_human_approval", gate: 3 };
+  return { decision: "approve", grant };
+}
+
+const REASON_TEXT = {
+  card_closed: "Card is closed",
+  currency_mismatch: "Wrong currency for this card",
+  merchant_category_not_allowed: "Merchant category not on the allow-list",
+  per_transaction_limit_exceeded: "Over the card's per-transaction limit",
+  card_total_limit_exceeded: "Over the card's total budget",
+  insufficient_funds: "Not enough available balance in the wallet",
+  pending_human_approval: "Held — waiting for a human decision",
+};
+
+/* =====================================================================
+   Authorization run + pipeline animation
+   ===================================================================== */
+const GATES = [
+  { icon: "🔏", lbl: "Signature\nverified" },
+  { icon: "💳", lbl: "Card &\ncurrency" },
+  { icon: "⚖️", lbl: "Rules\nengine" },
+  { icon: "🙋", lbl: "Human\napproval" },
+  { icon: "🔒", lbl: "Ledger\nhold" },
+];
+let running = false;
+
+function renderPipeline(states) {
+  const track = $("#pipeTrack"); track.innerHTML = "";
+  GATES.forEach((g, i) => {
+    const node = el("div", "gate " + (states[i] || ""));
+    node.innerHTML = `<div class="node">${g.icon}</div><div class="lbl">${g.lbl.replace(/\n/g, "<br>")}</div>`;
+    track.appendChild(node);
+  });
+}
+
+async function runPurchase(card, amount, merchant, mcc, opts = {}) {
+  if (running) return; running = true;
+  const ccy = card.currency;
+  const outcome = evaluate(card, amount, ccy, merchant, mcc);
+  const states = ["", "", "", "", ""];
+  renderPipeline(states);
+  $("#pipeResult").innerHTML = `<span class="pipe-idle">Authorizing ${merchant}…</span>`;
+  $("#simPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  // gate 0 — signature always valid (issuer signed the webhook)
+  const failGate = outcome.decision === "approve" ? 99 : outcome.gate;
+  let held = null, result;
+
+  for (let i = 0; i < 5; i++) {
+    states[i] = "active"; renderPipeline(states); await sleep(360);
+
+    if (outcome.decision === "decline" && i === failGate) {
+      // but gate 4 (ledger) only fails on funds; check funds at gate 4
+      states[i] = "fail"; renderPipeline(states);
+      result = { kind: "no", reason: outcome.reason }; break;
+    }
+    if (outcome.decision === "review" && i === 3) {
+      states[i] = "review"; renderPipeline(states);
+      result = { kind: "hold", reason: outcome.reason }; break;
+    }
+    // ledger gate — funds check for approve path
+    if (i === 4 && outcome.decision === "approve") {
+      if (amount > available(ccy)) {
+        states[i] = "fail"; renderPipeline(states);
+        result = { kind: "no", reason: "insufficient_funds" }; break;
+      }
+      held = placeHold(ccy, amount, `Hold · ${merchant}`);
+      states[i] = "pass"; renderPipeline(states);
+      result = { kind: "ok" }; break;
+    }
+    states[i] = "pass"; renderPipeline(states);
+  }
+
+  // record + settle
+  if (result.kind === "ok") {
+    if (outcome.grant) outcome.grant.status = "consumed";
+    card.spend += amount;
+    const tx = { id: nid("ctx"), cardId: card.id, ccy, amount, merchant, mcc, status: "authorized", type: "authorization" };
+    S.txns.unshift(tx);
+    showResult("ok", `Approved — ${fmt(amount, ccy)} held on ${card.label}`);
+    render(); await sleep(650);
+    // settle (issuer capture)
+    capture(ccy, amount); tx.status = "completed"; tx.type = "capture";
+    showResult("ok", `Settled — ${merchant} · ${fmt(amount, ccy)}`);
+  } else if (result.kind === "hold") {
+    const ap = { id: nid("appr"), cardId: card.id, ccy, amount, merchant, mcc, reason: result.reason, status: "pending" };
+    S.approvals.unshift(ap);
+    S.txns.unshift({ id: nid("ctx"), cardId: card.id, ccy, amount, merchant, mcc, status: "declined", type: "declined", reason: "pending_human_approval" });
+    showResult("hold", `Held for your approval — ${fmt(amount, ccy)} at ${merchant}`, "Scroll to “Needs your approval”.");
+    if (S.step < 3) setStep(3);
+    flash("#approvalsPanel");
+  } else {
+    S.txns.unshift({ id: nid("ctx"), cardId: card.id, ccy, amount, merchant, mcc, status: "declined", type: "declined", reason: result.reason });
+    showResult("no", `Declined — ${REASON_TEXT[result.reason] || result.reason}`);
+  }
+
+  render(); running = false;
+  if (opts.onDone) opts.onDone(result);
+}
+
+function showResult(kind, text, extra) {
+  const map = { ok: ["ok", "APPROVED"], no: ["no", "DECLINED"], hold: ["hold", "REVIEW"] };
+  const [cls, word] = map[kind];
+  $("#pipeResult").innerHTML =
+    `<span class="verdict ${cls}">${word}</span> <span class="pipe-reason">${text}</span>` +
+    (extra ? ` <span class="pipe-reason">· ${extra}</span>` : "");
+}
+
+/* =====================================================================
+   Scenarios (the presenter's set-pieces)
+   ===================================================================== */
+function scenarios() {
+  const grocery = S.cards.find((c) => c.label === "Grocery agent");
+  const travel = S.cards.find((c) => c.label === "Travel agent");
+  const dev = S.cards.find((c) => c.label === "Dev-tools agent");
+  return [
+    { icon: "🛒", merchant: "Checkers Sixty60", meta: "Groceries · MCC 5411", amount: 24000, mcc: "5411", card: grocery, agent: "Grocery agent" },
+    { icon: "🎮", merchant: "Steam", meta: "Software · MCC 5734", amount: 120000, mcc: "5734", card: grocery, agent: "Grocery agent" },
+    { icon: "✈️", merchant: "FlySafair", meta: "Airlines · MCC 4511", amount: 650000, mcc: "4511", card: travel, agent: "Travel agent" },
+    { icon: "🤖", merchant: "OpenAI", meta: "Software · MCC 5734 · USD", amount: 15000, mcc: "5734", card: dev, agent: "Dev-tools agent" },
+  ];
+}
+function renderScenarios() {
+  const box = $("#scenarios"); box.innerHTML = "";
+  scenarios().forEach((s) => {
+    if (!s.card) return;
+    const b = el("button", "scenario");
+    b.innerHTML =
+      `<div class="m-ico">${s.icon}</div>
+       <div><div class="m-name">${s.merchant}</div><div class="m-meta">${s.meta} · <span class="m-agent">${s.agent}</span></div></div>
+       <div style="text-align:right"><div class="m-amt mono">${fmt(s.amount, s.card.currency)}</div></div>`;
+    b.onclick = () => { runPurchase(s.card, s.amount, s.merchant, s.mcc); advanceFromScenario(s); };
+    box.appendChild(b);
+  });
+}
+function advanceFromScenario(s) {
+  if (s.merchant === "Checkers Sixty60" && S.step < 2) setStep(2);
+  if (s.merchant === "OpenAI" && S.step < 5) setStep(5);
+}
+
+/* =====================================================================
+   Approvals
+   ===================================================================== */
+function decide(ap, ok) {
+  ap.status = ok ? "approved" : "denied";
+  if (ok) {
+    S.grants.push({ id: nid("grant"), cardId: ap.cardId, merchant: ap.merchant, amount: ap.amount, status: "active" });
+    toast("Approved — the agent will retry, and the charge clears.");
+    setStep(4);
+    const card = S.cards.find((c) => c.id === ap.cardId);
+    render();
+    setTimeout(() => runPurchase(card, ap.amount, ap.merchant, ap.mcc), 500);
+  } else {
+    toast("Denied — the agent's charge is permanently blocked.");
+    render();
+  }
+}
+
+/* =====================================================================
+   Rendering
+   ===================================================================== */
+function animateVal(node, to, ccy) {
+  const from = Number(node.dataset.v || 0); node.dataset.v = to;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || from === to) { node.textContent = fmt(to, ccy); return; }
+  const t0 = performance.now(), dur = 550;
+  (function tick(t) {
+    const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    node.textContent = fmt(Math.round(from + (to - from) * e), ccy);
+    if (k < 1) requestAnimationFrame(tick);
+  })(t0);
+}
+function renderWallets() {
+  const box = $("#wallets");
+  ["ZAR", "USD"].forEach((ccy) => {
+    let card = box.querySelector(`[data-ccy="${ccy}"]`);
+    if (!card) {
+      card = el("div", "wallet"); card.dataset.ccy = ccy;
+      card.innerHTML =
+        `<div class="ccy"><div><span class="ccy-tag">${ccy}</span> <span class="ccy-name">${CCY[ccy].name}</span></div><span class="flag">${CCY[ccy].flag}</span></div>
+         <div class="avail mono" data-role="avail">—</div>
+         <div class="sub"><span>On hold <b class="mono" data-role="held">—</b></span><span>Posted <b class="mono" data-role="posted">—</b></span></div>`;
+      box.appendChild(card);
+    }
+    animateVal(card.querySelector('[data-role="avail"]'), available(ccy), ccy);
+    card.querySelector('[data-role="held"]').textContent = fmt(S.wallets[ccy].held, ccy);
+    card.querySelector('[data-role="posted"]').textContent = fmt(S.wallets[ccy].posted, ccy);
+  });
+}
+function renderCards() {
+  const t = $("#cardsTable");
+  t.innerHTML = `<thead><tr><th>Card</th><th>Agent</th><th>Ccy</th><th>Controls</th><th>Spent</th><th>Status</th></tr></thead>`;
+  const tb = el("tbody");
+  S.cards.forEach((c) => {
+    const controls = [
+      c.perTx != null ? `≤${fmt(c.perTx, c.currency)}/txn` : null,
+      c.threshold != null ? `approve ≥${fmt(c.threshold, c.currency)}` : null,
+      c.mcc.length ? c.mcc.map((m) => MCC[m]).join(", ") : "all merchants",
+    ].filter(Boolean).join(" · ");
+    const tr = el("tr");
+    tr.innerHTML =
+      `<td><div class="card-mini ${c.currency === "USD" ? "usd" : ""}"><div class="cm-chip"></div><div class="cm-brand">A·CARD</div><div class="cm-num mono">•${c.last4}</div></div></td>
+       <td><div style="font-weight:600">${c.label}</div><div class="tag">${c.pan}</div></td>
+       <td class="mono">${c.currency}</td>
+       <td style="max-width:230px"><span class="hint">${controls}</span></td>
+       <td class="mono">${fmt(c.spend, c.currency)}</td>
+       <td><span class="pill ${c.status}">${c.status}</span></td>`;
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+}
+function renderApprovals() {
+  const box = $("#approvals"); box.innerHTML = "";
+  const pend = S.approvals.filter((a) => a.status === "pending");
+  $("#apprCount").textContent = pend.length ? `${pend.length} pending` : "";
+  if (!pend.length) { box.innerHTML = `<div class="empty">Nothing waiting on you. Charges above a card's threshold land here.</div>`; return; }
+  pend.forEach((ap) => {
+    const card = S.cards.find((c) => c.id === ap.cardId);
+    const a = el("div", "approval");
+    a.innerHTML =
+      `<div class="a-top">
+         <div><div class="a-amt mono">${fmt(ap.amount, ap.ccy)}</div><div class="a-why">${ap.merchant} · ${card.label}</div></div>
+         <div class="pill pending">review</div>
+       </div>
+       <div class="a-why">An AI agent is trying to spend ${fmt(ap.amount, ap.ccy)} — over ${card.label}'s ${fmt(card.threshold, ap.ccy)} threshold. You decide.</div>
+       <div class="a-actions"><button class="btn-sm btn-approve">Approve</button><button class="btn-sm btn-deny">Deny</button></div>`;
+    a.querySelector(".btn-approve").onclick = () => decide(ap, true);
+    a.querySelector(".btn-deny").onclick = () => decide(ap, false);
+    box.appendChild(a);
+  });
+}
+function renderFeed() {
+  const box = $("#feed"); box.innerHTML = "";
+  if (!S.txns.length) { box.innerHTML = `<div class="empty">No agent activity yet.</div>`; return; }
+  S.txns.slice(0, 12).forEach((t) => {
+    const card = S.cards.find((c) => c.id === t.cardId);
+    const ok = t.status === "completed" || t.status === "authorized";
+    const ico = t.status === "declined" ? (t.reason === "pending_human_approval" ? "🙋" : "⛔") : "✓";
+    const row = el("div", "feed-row");
+    row.innerHTML =
+      `<div class="feed-ico">${ico}</div>
+       <div><div class="feed-main">${t.merchant}</div><div class="feed-meta">${card ? card.label : ""} · <span class="pill ${t.status}">${t.status}</span>${t.reason && t.status === "declined" ? " · " + (REASON_TEXT[t.reason] || t.reason) : ""}</div></div>
+       <div class="feed-amt mono ${ok ? "" : "neg"}">${fmt(t.amount, t.ccy)}</div>`;
+    box.appendChild(row);
+  });
+}
+function renderLedger() {
+  const box = $("#ledger"); box.innerHTML = "";
+  const head = el("div", "led-row");
+  head.innerHTML = `<div class="eyebrow">Entry</div><div class="eyebrow" style="text-align:right">Debit</div><div class="eyebrow" style="text-align:right">Credit</div>`;
+  box.appendChild(head);
+  S.ledger.slice(0, 8).forEach((l) => {
+    const r = el("div", "led-row");
+    r.innerHTML = `<div class="led-desc">${l.desc} <span class="tag">${l.ccy}</span></div>
+      <div class="led-d mono">${l.debit ? fmt(l.debit, l.ccy) : "—"}</div>
+      <div class="led-c mono">${l.credit ? fmt(l.credit, l.ccy) : "—"}</div>`;
+    box.appendChild(r);
+  });
+}
+
+/* ---- guide ---- */
+const STEPS = [
+  { b: "Signed in as Khaya AI", t: "Two prepaid wallets — ZAR and USD — are ready." },
+  { b: "Review your wallets", t: "Available = posted − held. Funds are ring-fenced, not spent." },
+  { b: "Run the grocery agent", t: "Click “Checkers Sixty60” — watch it clear authorization in real time." },
+  { b: "The flight needs you", t: "Run “FlySafair” (R6 500). It's over threshold, so it's held for approval." },
+  { b: "Approve it", t: "Approve the charge — the agent retries and it clears on a one-time grant." },
+  { b: "Spend in USD", t: "Run “OpenAI” — the USD wallet moves, ZAR is untouched." },
+];
+function renderGuide() {
+  const box = $("#guide"); box.innerHTML = "";
+  STEPS.forEach((s, i) => {
+    const cls = i < S.step ? "done" : i === S.step ? "current" : "";
+    const d = el("div", "g-step " + cls);
+    d.innerHTML = `<div class="g-num">${i < S.step ? "✓" : i + 1}</div><div><b>${s.b}</b>${s.t}</div>`;
+    box.appendChild(d);
+  });
+}
+function setStep(n) { if (n > S.step) S.step = n; renderGuide(); }
+
+function render() {
+  renderWallets(); renderCards(); renderApprovals(); renderFeed(); renderLedger(); renderGuide(); renderScenarios();
+}
+
+/* ---- misc UI ---- */
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 3200); }
+function flash(sel) { const n = $(sel); n.classList.remove("flash"); void n.offsetWidth; n.classList.add("flash"); }
+
+/* =====================================================================
+   Wiring
+   ===================================================================== */
+$("#loginForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (!$("#email").value || !$("#password").value) return;
+  $("#login").style.display = "none";
+  const app = $("#app"); app.classList.add("on");
+  seed(); render(); setStep(1);
+});
+
+$("#themeBtn").onclick = () => {
+  const root = document.documentElement;
+  const cur = root.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+};
+$("#resetBtn").onclick = () => { seed(); render(); setStep(1); toast("Demo reset."); renderPipeline(["","","","",""]); $("#pipeResult").innerHTML = `<span class="pipe-idle">Idle — run an agent purchase above.</span>`; };
+
+/* issue-card modal */
+const issueState = { ccy: "ZAR", mcc: new Set() };
+$("#issueBtn").onclick = () => $("#issueModal").classList.add("on");
+$("#issueCancel").onclick = () => $("#issueModal").classList.remove("on");
+$("#f_ccy").querySelectorAll("button").forEach((b) => b.onclick = () => {
+  issueState.ccy = b.dataset.ccy; $("#f_ccy").querySelectorAll("button").forEach((x) => x.classList.toggle("sel", x === b));
+});
+$("#f_mcc").querySelectorAll(".chip").forEach((b) => b.onclick = () => {
+  b.classList.toggle("sel"); const m = b.dataset.mcc; issueState.mcc.has(m) ? issueState.mcc.delete(m) : issueState.mcc.add(m);
+});
+$("#issueConfirm").onclick = () => {
+  const label = $("#f_label").value.trim() || "New agent";
+  const perTx = parseInt($("#f_pertx").value, 10); const thresh = parseInt($("#f_thresh").value, 10);
+  addCard({ label, currency: issueState.ccy, perTx: perTx > 0 ? perTx : null, threshold: thresh > 0 ? thresh : null, mcc: [...issueState.mcc] });
+  $("#issueModal").classList.remove("on"); issueState.mcc = new Set();
+  render(); toast(`Issued a ${issueState.ccy} card to ${label}.`); flash("#simPanel");
+};
+
+/* fund modal */
+const fundState = { ccy: "ZAR" };
+$("#fundBtn").onclick = () => $("#fundModal").classList.add("on");
+$("#fundCancel").onclick = () => $("#fundModal").classList.remove("on");
+$("#fund_ccy").querySelectorAll("button").forEach((b) => b.onclick = () => {
+  fundState.ccy = b.dataset.ccy; $("#fund_ccy").querySelectorAll("button").forEach((x) => x.classList.toggle("sel", x === b));
+});
+$("#fundConfirm").onclick = () => {
+  const amt = parseInt($("#fund_amt").value, 10);
+  if (amt > 0) { topup(fundState.ccy, amt, "Wallet top-up"); toast(`Added ${fmt(amt, fundState.ccy)}.`); }
+  $("#fundModal").classList.remove("on"); render();
+};
+[...document.querySelectorAll(".modal-back")].forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.classList.remove("on"); }));
+
+/* start with an idle pipeline drawn */
+renderPipeline(["", "", "", "", ""]);
+</script>
+</body>
+</html>
