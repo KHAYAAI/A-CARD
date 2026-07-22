@@ -1,6 +1,8 @@
-# A-CARD — Investor / Partner Demo
+# a·card — Investor / Partner Demo
 
-A single self-contained HTML file (`index.html`) that walks the whole A-CARD
+A single self-contained HTML file (`index.html`), styled to match the a·card
+website (Instrument Serif + IBM Plex, cream + emerald palette, fonts embedded
+so it needs no network), that walks the whole a·card
 story from a login screen: sign in → issue an AI agent a card → watch a
 purchase clear **real-time authorization** → **approve** a flagged charge →
 spend across **ZAR and USD** wallets → see the **double-entry ledger** balance.
