@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "A-CARD Dashboard",
-  description: "Virtual cards for AI agents — ZAR first",
+  title: "a·card — console",
+  description: "Virtual cards for AI agents — ZAR & USD",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
