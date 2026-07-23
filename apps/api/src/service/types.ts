@@ -8,9 +8,12 @@ import type {
   CardTransaction,
   CreateCardInput,
   Currency,
+  Chain,
   Department,
   DepartmentSpend,
+  ExternalWalletConnector,
   LedgerTransaction,
+  LinkedWallet,
   OrgPolicy,
   PlatformEvent,
   Role,
@@ -134,6 +137,19 @@ export interface PlatformService {
   listDepartmentSpend(accountHolderId: string): Promise<DepartmentSpend[]>;
   getPolicy(accountHolderId: string): Promise<OrgPolicy>;
   setPolicy(accountHolderId: string, policy: OrgPolicy): Promise<OrgPolicy>;
+
+  // ---- crypto wallets: embedded (default) + optional external linking ------
+  recordEmbeddedWallet(accountHolderId: string, chain: Chain, address: string): Promise<LinkedWallet>;
+  linkExternalWallet(input: {
+    accountHolderId: string;
+    chain: Chain;
+    address: string;
+    connector: ExternalWalletConnector;
+    label?: string;
+  }): Promise<LinkedWallet>;
+  listLinkedWallets(accountHolderId: string): Promise<LinkedWallet[]>;
+  setDefaultWallet(accountHolderId: string, id: string): Promise<LinkedWallet>;
+  unlinkWallet(accountHolderId: string, id: string): Promise<void>;
 
   // ---- in-process event fanout (Slack notifications) -----------------------
   onEvent(listener: (event: PlatformEvent) => void): void;

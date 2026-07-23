@@ -16,6 +16,7 @@ import {
   type SubscriptionTier,
 } from "@acard/core";
 import { PaystackClient, subscriptionReference } from "./paystack.js";
+import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
 
 /**
@@ -38,6 +39,13 @@ export interface AppConfig {
   onMutation?: () => void;
   /** Paystack integration for ZAR subscription billing (optional — omit to run unmetered). */
   paystack?: { secretKey: string; webhookSecret: string };
+  /**
+   * Embedded-wallet provider (optional — omit to run without crypto wallets
+   * at all). When set, every new account gets a wallet auto-provisioned on
+   * signup so nobody has to create one themselves; external wallets can
+   * always be linked in addition, regardless of this setting.
+   */
+  embeddedWallet?: EmbeddedWalletConfig;
   /** Where Paystack should send the customer back after checkout. */
   dashboardUrl?: string;
 }
@@ -93,6 +101,15 @@ const policySchema = z.object({
   approval_threshold: z.number().int().positive().optional(),
 });
 
+const chainSchema = z.enum(["ethereum", "polygon", "solana"]);
+
+const linkWalletSchema = z.object({
+  chain: chainSchema,
+  address: z.string().min(1),
+  connector: z.enum(["metamask", "walletconnect", "coinbase", "other"]),
+  label: z.string().optional(),
+});
+
 const fundSchema = z.object({
   amount: z.number().int().positive(),
   currency: currencySchema.optional(),
@@ -139,7 +156,20 @@ export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl } = config;
   const platform = asService(config.platform);
   const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
+  const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
   const app = new Hono<Env>();
+
+  // Auto-provision the default embedded wallet for a brand-new account. Best-effort:
+  // a provider hiccup must not block signup, so failures are logged, not thrown.
+  const provisionEmbeddedWallet = async (accountHolderId: string) => {
+    if (!embeddedWallet) return;
+    try {
+      const wallet = await embeddedWallet.createWallet(accountHolderId);
+      await platform.recordEmbeddedWallet(accountHolderId, wallet.chain, wallet.address);
+    } catch (error) {
+      console.error("embedded wallet provisioning failed", error);
+    }
+  };
 
   app.use("*", cors());
 
@@ -158,6 +188,7 @@ export function createApp(config: AppConfig) {
     const body = signupSchema.parse(await c.req.json());
     const holder = await platform.signup({ email: body.email, name: body.name, currency: body.currency, accountType: body.account_type });
     const issued = await platform.issueApiKey(holder.id, "default");
+    await provisionEmbeddedWallet(holder.id);
     return c.json(
       {
         account_holder: holder,
@@ -196,6 +227,7 @@ export function createApp(config: AppConfig) {
       accountType: body.account_type,
     });
     setSessionCookie(c, result.sessionToken);
+    await provisionEmbeddedWallet(result.accountHolder.id);
     return c.json(
       { user: result.user, account_holder: result.accountHolder, role: result.context.role, session_token: result.sessionToken },
       201,
@@ -376,6 +408,35 @@ export function createApp(config: AppConfig) {
     const body = fundSchema.parse(await c.req.json());
     const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.currency, body.reference);
     return c.json({ ledger_transaction: ledgerTransaction, wallet, wallets: await platform.walletBalances(holder.id) }, 201);
+  });
+
+  // ---- crypto wallets: embedded by default, external optional ----------------
+  // Every account gets an embedded wallet auto-provisioned at signup (see
+  // provisionEmbeddedWallet above) — nobody has to create one. These routes
+  // let a user additionally link a wallet they already control.
+
+  app.get("/v1/wallets/crypto", async (c) => {
+    const holder = c.get("holder");
+    return c.json({ wallets: await platform.listLinkedWallets(holder.id) });
+  });
+
+  app.post("/v1/wallets/crypto/link", requireRole("member"), async (c) => {
+    const holder = c.get("holder");
+    const body = linkWalletSchema.parse(await c.req.json());
+    const wallet = await platform.linkExternalWallet({ accountHolderId: holder.id, ...body });
+    return c.json({ wallet }, 201);
+  });
+
+  app.post("/v1/wallets/crypto/:id/default", requireRole("member"), async (c) => {
+    const holder = c.get("holder");
+    const wallet = await platform.setDefaultWallet(holder.id, c.req.param("id"));
+    return c.json({ wallet });
+  });
+
+  app.delete("/v1/wallets/crypto/:id", requireRole("member"), async (c) => {
+    const holder = c.get("holder");
+    await platform.unlinkWallet(holder.id, c.req.param("id"));
+    return c.json({ ok: true });
   });
 
   // ---- cards -----------------------------------------------------------------

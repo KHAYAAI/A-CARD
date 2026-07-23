@@ -185,6 +185,32 @@ export class InMemoryPlatformService implements PlatformService {
     }));
   }
 
+  async recordEmbeddedWallet(accountHolderId: string, chain: import("@acard/core").Chain, address: string) {
+    return this.platform.recordEmbeddedWallet(accountHolderId, chain, address);
+  }
+
+  async linkExternalWallet(input: {
+    accountHolderId: string;
+    chain: import("@acard/core").Chain;
+    address: string;
+    connector: import("@acard/core").ExternalWalletConnector;
+    label?: string;
+  }) {
+    return this.platform.linkExternalWallet(input);
+  }
+
+  async listLinkedWallets(accountHolderId: string) {
+    return this.platform.listLinkedWallets(accountHolderId);
+  }
+
+  async setDefaultWallet(accountHolderId: string, id: string) {
+    return this.platform.setDefaultWallet(accountHolderId, id);
+  }
+
+  async unlinkWallet(accountHolderId: string, id: string) {
+    this.platform.unlinkWallet(accountHolderId, id);
+  }
+
   onEvent(listener: (event: PlatformEvent) => void) {
     this.platform.onEvent(listener);
   }

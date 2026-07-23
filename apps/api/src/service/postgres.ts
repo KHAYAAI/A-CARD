@@ -20,10 +20,13 @@ import {
   type AuthorizationRequest,
   type Card,
   type CardTransaction,
+  type Chain,
   type Currency,
   type Department,
   type DepartmentSpend,
+  type ExternalWalletConnector,
   type LedgerTransaction,
+  type LinkedWallet,
   type OrgPolicy,
   type PlatformEvent,
   type Role,
@@ -235,6 +238,21 @@ const SCHEMA = `
     PRIMARY KEY (user_id, account_holder_id)
   );
   CREATE INDEX IF NOT EXISTS acard_memberships_org_idx ON acard_memberships(account_holder_id);
+
+  CREATE TABLE IF NOT EXISTS acard_linked_wallets (
+    id TEXT PRIMARY KEY,
+    account_holder_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    chain TEXT NOT NULL,
+    address TEXT NOT NULL,
+    connector TEXT,
+    label TEXT,
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS acard_linked_wallets_holder_idx ON acard_linked_wallets(account_holder_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS acard_linked_wallets_embedded_idx
+    ON acard_linked_wallets(account_holder_id, chain) WHERE kind = 'embedded';
 
   CREATE TABLE IF NOT EXISTS acard_sessions (
     hashed_token TEXT PRIMARY KEY,
@@ -1356,6 +1374,136 @@ export class PostgresPlatformService implements PlatformService {
       [accountHolderId, JSON.stringify(blocked), policy.approvalThreshold ?? null],
     );
     return { blockedMerchantCategories: blocked, approvalThreshold: policy.approvalThreshold };
+  }
+
+  // ---- crypto wallets: embedded (default) + optional external linking ------
+
+  private mapWallet(row: any): LinkedWallet {
+    return {
+      id: row.id,
+      accountHolderId: row.account_holder_id,
+      kind: row.kind,
+      chain: row.chain,
+      address: row.address,
+      connector: row.connector ?? undefined,
+      label: row.label ?? undefined,
+      isDefault: row.is_default,
+      createdAt: new Date(row.created_at).toISOString(),
+    };
+  }
+
+  private async insertLinkedWallet(
+    client: Client | pg.Pool,
+    input: {
+      accountHolderId: string;
+      kind: "embedded" | "external";
+      chain: Chain;
+      address: string;
+      connector?: ExternalWalletConnector;
+      label?: string;
+    },
+  ): Promise<LinkedWallet> {
+    const existingRes = await client.query("SELECT 1 FROM acard_linked_wallets WHERE account_holder_id = $1 LIMIT 1", [
+      input.accountHolderId,
+    ]);
+    const isDefault = existingRes.rowCount === 0;
+    const id = newId("wal");
+    const createdAt = new Date().toISOString();
+    const res = await client.query(
+      `INSERT INTO acard_linked_wallets (id, account_holder_id, kind, chain, address, connector, label, is_default, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [id, input.accountHolderId, input.kind, input.chain, input.address, input.connector ?? null, input.label ?? null, isDefault, createdAt],
+    );
+    return this.mapWallet(res.rows[0]);
+  }
+
+  async recordEmbeddedWallet(accountHolderId: string, chain: Chain, address: string): Promise<LinkedWallet> {
+    const existing = await this.pool.query(
+      "SELECT * FROM acard_linked_wallets WHERE account_holder_id = $1 AND kind = 'embedded' AND chain = $2",
+      [accountHolderId, chain],
+    );
+    if (existing.rowCount) return this.mapWallet(existing.rows[0]);
+    return this.insertLinkedWallet(this.pool, { accountHolderId, kind: "embedded", chain, address });
+  }
+
+  async linkExternalWallet(input: {
+    accountHolderId: string;
+    chain: Chain;
+    address: string;
+    connector: ExternalWalletConnector;
+    label?: string;
+  }): Promise<LinkedWallet> {
+    const { isValidAddress } = await import("@acard/core");
+    if (!isValidAddress(input.chain, input.address)) {
+      throw new DomainError("invalid_state", `"${input.address}" is not a valid ${input.chain} address`);
+    }
+    const duplicate = await this.pool.query(
+      "SELECT 1 FROM acard_linked_wallets WHERE account_holder_id = $1 AND chain = $2 AND lower(address) = lower($3)",
+      [input.accountHolderId, input.chain, input.address],
+    );
+    if (duplicate.rowCount) {
+      throw new DomainError("invalid_state", "this wallet is already linked to this account");
+    }
+    return this.insertLinkedWallet(this.pool, { ...input, kind: "external" });
+  }
+
+  async listLinkedWallets(accountHolderId: string): Promise<LinkedWallet[]> {
+    const res = await this.pool.query(
+      "SELECT * FROM acard_linked_wallets WHERE account_holder_id = $1 ORDER BY created_at ASC",
+      [accountHolderId],
+    );
+    return res.rows.map((r) => this.mapWallet(r));
+  }
+
+  async setDefaultWallet(accountHolderId: string, id: string): Promise<LinkedWallet> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const target = await client.query("SELECT * FROM acard_linked_wallets WHERE id = $1 AND account_holder_id = $2", [
+        id,
+        accountHolderId,
+      ]);
+      if (!target.rowCount) throw new NotFoundError("wallet", id);
+      await client.query("UPDATE acard_linked_wallets SET is_default = false WHERE account_holder_id = $1", [accountHolderId]);
+      const res = await client.query("UPDATE acard_linked_wallets SET is_default = true WHERE id = $1 RETURNING *", [id]);
+      await client.query("COMMIT");
+      return this.mapWallet(res.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async unlinkWallet(accountHolderId: string, id: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const target = await client.query("SELECT * FROM acard_linked_wallets WHERE id = $1 AND account_holder_id = $2", [
+        id,
+        accountHolderId,
+      ]);
+      if (!target.rowCount) throw new NotFoundError("wallet", id);
+      if (target.rows[0].kind === "embedded") {
+        throw new InvalidStateError("the embedded wallet cannot be unlinked");
+      }
+      await client.query("DELETE FROM acard_linked_wallets WHERE id = $1", [id]);
+      if (target.rows[0].is_default) {
+        await client.query(
+          `UPDATE acard_linked_wallets SET is_default = true WHERE id = (
+             SELECT id FROM acard_linked_wallets WHERE account_holder_id = $1 ORDER BY created_at ASC LIMIT 1
+           )`,
+          [accountHolderId],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // ---- events & lifecycle ---------------------------------------------------

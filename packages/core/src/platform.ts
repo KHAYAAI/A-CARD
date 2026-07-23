@@ -23,6 +23,7 @@ import {
 import type { Currency } from "./money.js";
 import { evaluateRules, type AuthorizationContext } from "./rules.js";
 import { currentBillingPeriod, SUBSCRIPTION_TIERS, type SubscriptionTier } from "./billing.js";
+import { WalletLinkService, type Chain, type ExternalWalletConnector, type LinkedWallet } from "./wallets.js";
 
 /**
  * The platform service: everything the API, MCP server, and CLI need, backed
@@ -98,6 +99,7 @@ export interface PlatformSnapshot {
   apiKeys: ReturnType<ApiKeyService["serialize"]>;
   auth?: { users: User[]; memberships: Membership[]; sessions: Session[] };
   enterprise?: { departments: Department[]; policies: Array<[string, OrgPolicy]> };
+  linkedWallets?: LinkedWallet[];
   accountHolders: AccountHolder[];
   cards: Card[];
   transactions: CardTransaction[];
@@ -115,6 +117,7 @@ export class Platform {
   readonly auth = new AuthService();
   readonly enterprise = new EnterpriseService();
   readonly idempotency = new IdempotencyStore();
+  readonly linkedWallets = new WalletLinkService();
 
   private readonly accountHolders = new Map<string, AccountHolder>();
   private readonly cards = new Map<string, Card>();
@@ -140,6 +143,7 @@ export class Platform {
       apiKeys: this.apiKeys.serialize(),
       auth: this.auth.serialize(),
       enterprise: this.enterprise.serialize(),
+      linkedWallets: this.linkedWallets.serialize(),
       accountHolders: [...this.accountHolders.values()],
       cards: [...this.cards.values()],
       transactions: [...this.transactions.values()],
@@ -157,6 +161,9 @@ export class Platform {
     (platform as { apiKeys: ApiKeyService }).apiKeys = ApiKeyService.hydrate(snapshot.apiKeys);
     if (snapshot.auth) (platform as { auth: AuthService }).auth = AuthService.hydrate(snapshot.auth);
     if (snapshot.enterprise) (platform as { enterprise: EnterpriseService }).enterprise = EnterpriseService.hydrate(snapshot.enterprise);
+    if (snapshot.linkedWallets) {
+      (platform as { linkedWallets: WalletLinkService }).linkedWallets = WalletLinkService.hydrate(snapshot.linkedWallets);
+    }
     for (const holder of snapshot.accountHolders) {
       // Back-compat: snapshots from before enterprise default to personal.
       if (!holder.accountType) holder.accountType = "personal";
@@ -568,6 +575,42 @@ export class Platform {
     const saved = this.enterprise.setPolicy(accountHolderId, policy);
     this.emit("policy.updated", { accountHolderId });
     return saved;
+  }
+
+  // ---- crypto wallets: embedded (default) + optional external linking ------
+
+  /** Called by the API after it provisions an embedded wallet with the wallet provider. */
+  recordEmbeddedWallet(accountHolderId: string, chain: Chain, address: string): LinkedWallet {
+    this.getAccountHolder(accountHolderId);
+    const wallet = this.linkedWallets.recordEmbeddedWallet(accountHolderId, chain, address);
+    this.emit("wallet.embedded_provisioned", { accountHolderId, chain, address: wallet.address });
+    return wallet;
+  }
+
+  linkExternalWallet(input: {
+    accountHolderId: string;
+    chain: Chain;
+    address: string;
+    connector: ExternalWalletConnector;
+    label?: string;
+  }): LinkedWallet {
+    this.getAccountHolder(input.accountHolderId);
+    const wallet = this.linkedWallets.linkExternalWallet(input);
+    this.emit("wallet.external_linked", { accountHolderId: input.accountHolderId, chain: input.chain, connector: input.connector });
+    return wallet;
+  }
+
+  listLinkedWallets(accountHolderId: string): LinkedWallet[] {
+    return this.linkedWallets.list(accountHolderId);
+  }
+
+  setDefaultWallet(accountHolderId: string, id: string): LinkedWallet {
+    return this.linkedWallets.setDefault(accountHolderId, id);
+  }
+
+  unlinkWallet(accountHolderId: string, id: string): void {
+    this.linkedWallets.unlink(accountHolderId, id);
+    this.emit("wallet.unlinked", { accountHolderId, walletId: id });
   }
 
   private departmentSpendThisPeriod(departmentId: string): number {

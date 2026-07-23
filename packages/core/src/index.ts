@@ -12,3 +12,4 @@ export * from "./idempotency.js";
 export * from "./webhooks.js";
 export * from "./billing.js";
 export * from "./platform.js";
+export * from "./wallets.js";
