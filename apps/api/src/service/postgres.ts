@@ -21,11 +21,15 @@ import {
   type Card,
   type CardTransaction,
   type Currency,
+  type Department,
+  type DepartmentSpend,
   type LedgerTransaction,
+  type OrgPolicy,
   type PlatformEvent,
   type Role,
   type SessionContext,
   type SubscriptionTier,
+  type WorkspaceType,
 } from "@acard/core";
 import { randomBytes } from "node:crypto";
 import type {
@@ -61,7 +65,24 @@ const SCHEMA = `
     currency TEXT NOT NULL,
     wallet_account_id TEXT NOT NULL,
     subscription_tier TEXT NOT NULL DEFAULT 'free',
+    account_type TEXT NOT NULL DEFAULT 'personal',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE IF NOT EXISTS acard_departments (
+    id TEXT PRIMARY KEY,
+    account_holder_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    monthly_budget BIGINT NOT NULL,
+    lead TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS acard_departments_holder_idx ON acard_departments(account_holder_id);
+
+  CREATE TABLE IF NOT EXISTS acard_org_policies (
+    account_holder_id TEXT PRIMARY KEY,
+    blocked_mccs JSONB NOT NULL DEFAULT '[]',
+    approval_threshold BIGINT
   );
 
   CREATE TABLE IF NOT EXISTS acard_accounts (
@@ -110,6 +131,7 @@ const SCHEMA = `
     id TEXT PRIMARY KEY,
     account_holder_id TEXT NOT NULL,
     wallet_account_id TEXT NOT NULL,
+    department_id TEXT,
     currency TEXT NOT NULL,
     status TEXT NOT NULL,
     single_use BOOLEAN NOT NULL,
@@ -235,6 +257,11 @@ export class PostgresPlatformService implements PlatformService {
 
   async migrate(): Promise<void> {
     await this.pool.query(SCHEMA);
+    // Additive columns for deployments created before enterprise support.
+    await this.pool.query(
+      `ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'personal';
+       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS department_id TEXT;`,
+    );
     // Backfill: every existing holder's primary wallet becomes its ZAR/USD/…
     // wallet row, so multi-currency lookups work for accounts created before
     // acard_wallets existed.
@@ -281,8 +308,9 @@ export class PostgresPlatformService implements PlatformService {
 
   // ---- account holders & auth ----------------------------------------------
 
-  async signup(input: { email: string; name: string; currency?: Currency }): Promise<AccountHolder> {
+  async signup(input: { email: string; name: string; currency?: Currency; accountType?: WorkspaceType }): Promise<AccountHolder> {
     const currency = input.currency ?? "ZAR";
+    const accountType = input.accountType ?? "personal";
     return this.tx(async (client, stage) => {
       const existing = await client.query("SELECT 1 FROM acard_account_holders WHERE email = $1", [input.email]);
       if (existing.rowCount) throw new InvalidStateError(`an account for ${input.email} already exists`);
@@ -299,12 +327,13 @@ export class PostgresPlatformService implements PlatformService {
         currency,
         walletAccountId,
         subscriptionTier: "free",
+        accountType,
         createdAt: new Date().toISOString(),
       };
       await client.query(
-        `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [holder.id, holder.email, holder.name, holder.currency, holder.walletAccountId, holder.subscriptionTier, holder.createdAt],
+        `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, account_type, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [holder.id, holder.email, holder.name, holder.currency, holder.walletAccountId, holder.subscriptionTier, holder.accountType, holder.createdAt],
       );
       await client.query(
         "INSERT INTO acard_wallets (account_holder_id, currency, account_id) VALUES ($1, $2, $3)",
@@ -323,6 +352,7 @@ export class PostgresPlatformService implements PlatformService {
       currency: row.currency,
       walletAccountId: row.wallet_account_id,
       subscriptionTier: row.subscription_tier,
+      accountType: row.account_type ?? "personal",
       createdAt: new Date(row.created_at).toISOString(),
     };
   }
@@ -557,6 +587,7 @@ export class PostgresPlatformService implements PlatformService {
       id: row.id,
       accountHolderId: row.account_holder_id,
       walletAccountId: row.wallet_account_id,
+      departmentId: row.department_id ?? undefined,
       currency: row.currency,
       status: row.status,
       singleUse: row.single_use,
@@ -579,6 +610,10 @@ export class PostgresPlatformService implements PlatformService {
       const holder = await this.holderById(client, input.accountHolderId);
       const currency = input.currency ?? holder.currency;
       const walletAccountId = await this.ensureWallet(client, holder, currency);
+      if (input.departmentId) {
+        const dept = await client.query("SELECT 1 FROM acard_departments WHERE id = $1 AND account_holder_id = $2", [input.departmentId, holder.id]);
+        if (!dept.rowCount) throw new DomainError("invalid_department", "department does not belong to this account");
+      }
       const tierLimit = SUBSCRIPTION_TIERS[holder.subscriptionTier].cardsPerMonth;
       const period = currentBillingPeriod();
       const count = await client.query(
@@ -596,11 +631,11 @@ export class PostgresPlatformService implements PlatformService {
       const card = createCard({ ...input, currency, walletAccountId });
       await client.query(
         `INSERT INTO acard_cards
-           (id, account_holder_id, wallet_account_id, currency, status, single_use, limits, allowed_mccs,
+           (id, account_holder_id, wallet_account_id, department_id, currency, status, single_use, limits, allowed_mccs,
             approval_threshold, sandbox_pan, last4, expiry_month, expiry_year, label, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
         [
-          card.id, card.accountHolderId, card.walletAccountId, card.currency, card.status, card.singleUse,
+          card.id, card.accountHolderId, card.walletAccountId, card.departmentId ?? null, card.currency, card.status, card.singleUse,
           JSON.stringify(card.limits), JSON.stringify(card.allowedMerchantCategories),
           card.approvalThreshold ?? null, card.sandboxPan, card.last4, card.expiryMonth, card.expiryYear,
           card.label ?? null, card.createdAt,
@@ -753,9 +788,15 @@ export class PostgresPlatformService implements PlatformService {
       // decision, so concurrent authorizations on this wallet serialize here.
       await client.query("SELECT id FROM acard_accounts WHERE id = $1 FOR UPDATE", [card.walletAccountId]);
 
+      // Org policy, enforced ahead of per-card rules.
+      const policy = await this.loadPolicy(client, card.accountHolderId);
+      if (policy.blockedMerchantCategories.includes(request.merchant.category)) {
+        return this.recordDecline(client, stage, request, card, "merchant_category_blocked_by_policy");
+      }
+
       const spend = await this.cardSpend(client, card.id, card.limits.velocity?.windowSeconds ?? 0);
       const grant = await this.findGrant(client, card.id, request.merchant.name, request.amount);
-      const outcome = evaluateRules({
+      let outcome = evaluateRules({
         card,
         amount: request.amount,
         currency: request.currency,
@@ -765,8 +806,24 @@ export class PostgresPlatformService implements PlatformService {
         hasApprovalGrant: grant !== undefined,
       });
 
+      // Org approval threshold: route to review even if the card has none.
+      if (
+        outcome.decision === "approve" &&
+        policy.approvalThreshold !== undefined &&
+        request.amount >= policy.approvalThreshold &&
+        grant === undefined
+      ) {
+        outcome = { decision: "review", reason: "amount_requires_org_approval" };
+      }
+
       if (outcome.decision === "decline") {
         return this.recordDecline(client, stage, request, card, outcome.reason);
+      }
+
+      // Department monthly budget — a hard cap across all of a department's agents.
+      if (outcome.decision === "approve" && card.departmentId) {
+        const budgeted = await this.departmentBudgetExceeded(client, card.departmentId, request.amount);
+        if (budgeted) return this.recordDecline(client, stage, request, card, "department_budget_exceeded");
       }
 
       if (outcome.decision === "review") {
@@ -1014,10 +1071,11 @@ export class PostgresPlatformService implements PlatformService {
 
   // ---- human auth & RBAC ----------------------------------------------------
 
-  async registerAccount(input: { email: string; name: string; password: string; currency?: Currency }): Promise<RegisterResult> {
+  async registerAccount(input: { email: string; name: string; password: string; currency?: Currency; accountType?: WorkspaceType }): Promise<RegisterResult> {
     const email = input.email.toLowerCase();
     if (input.password.length < 8) throw new DomainError("weak_password", "password must be at least 8 characters");
     const currency = input.currency ?? "ZAR";
+    const accountType = input.accountType ?? "personal";
     return this.tx(async (client, stage) => {
       const dupeUser = await client.query("SELECT 1 FROM acard_users WHERE email = $1", [email]);
       if (dupeUser.rowCount) throw new InvalidStateError(`a user with email ${input.email} already exists`);
@@ -1038,12 +1096,13 @@ export class PostgresPlatformService implements PlatformService {
         currency,
         walletAccountId,
         subscriptionTier: "free",
+        accountType,
         createdAt: new Date().toISOString(),
       };
       await client.query(
-        `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [accountHolder.id, email, accountHolder.name, currency, walletAccountId, "free", accountHolder.createdAt],
+        `INSERT INTO acard_account_holders (id, email, name, currency, wallet_account_id, subscription_tier, account_type, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [accountHolder.id, email, accountHolder.name, currency, walletAccountId, "free", accountType, accountHolder.createdAt],
       );
       await client.query(
         "INSERT INTO acard_wallets (account_holder_id, currency, account_id) VALUES ($1, $2, $3)",
@@ -1183,6 +1242,120 @@ export class PostgresPlatformService implements PlatformService {
       role: row.role,
       createdAt: new Date(row.member_created).toISOString(),
     }));
+  }
+
+  // ---- enterprise: departments & policy ------------------------------------
+
+  private mapDept(row: any): Department {
+    return {
+      id: row.id,
+      accountHolderId: row.account_holder_id,
+      name: row.name,
+      monthlyBudget: Number(row.monthly_budget),
+      lead: row.lead ?? undefined,
+      createdAt: new Date(row.created_at).toISOString(),
+    };
+  }
+
+  private async loadPolicy(client: Client, accountHolderId: string): Promise<OrgPolicy> {
+    const res = await client.query("SELECT blocked_mccs, approval_threshold FROM acard_org_policies WHERE account_holder_id = $1", [accountHolderId]);
+    if (!res.rowCount) return { blockedMerchantCategories: [] };
+    const row = res.rows[0];
+    return {
+      blockedMerchantCategories: row.blocked_mccs ?? [],
+      approvalThreshold: row.approval_threshold === null ? undefined : Number(row.approval_threshold),
+    };
+  }
+
+  /** True if this department's captured+held spend this period plus `amount` exceeds its budget. */
+  private async departmentBudgetExceeded(client: Client, departmentId: string, amount: number): Promise<boolean> {
+    const deptRes = await client.query("SELECT monthly_budget FROM acard_departments WHERE id = $1", [departmentId]);
+    if (!deptRes.rowCount) return false;
+    const budget = Number(deptRes.rows[0].monthly_budget);
+    const spentRes = await client.query(
+      `SELECT COALESCE(SUM(t.amount), 0) AS spent
+       FROM acard_card_transactions t JOIN acard_cards c ON c.id = t.card_id
+       WHERE c.department_id = $1 AND t.status IN ('pending','completed')
+         AND to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM') = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')`,
+      [departmentId],
+    );
+    return Number(spentRes.rows[0].spent) + amount > budget;
+  }
+
+  async createDepartment(input: { accountHolderId: string; name: string; monthlyBudget: number; lead?: string }): Promise<Department> {
+    if (!input.name.trim()) throw new DomainError("invalid_department", "department name is required");
+    if (!Number.isSafeInteger(input.monthlyBudget) || input.monthlyBudget <= 0) {
+      throw new DomainError("invalid_department", "monthlyBudget must be a positive integer of minor units");
+    }
+    const id = newId("dept");
+    const createdAt = new Date().toISOString();
+    await this.pool.query(
+      "INSERT INTO acard_departments (id, account_holder_id, name, monthly_budget, lead, created_at) VALUES ($1,$2,$3,$4,$5,$6)",
+      [id, input.accountHolderId, input.name.trim(), input.monthlyBudget, input.lead ?? null, createdAt],
+    );
+    return { id, accountHolderId: input.accountHolderId, name: input.name.trim(), monthlyBudget: input.monthlyBudget, lead: input.lead, createdAt };
+  }
+
+  async updateDepartment(id: string, patch: { name?: string; monthlyBudget?: number; lead?: string }): Promise<Department> {
+    if (patch.monthlyBudget !== undefined && (!Number.isSafeInteger(patch.monthlyBudget) || patch.monthlyBudget <= 0)) {
+      throw new DomainError("invalid_department", "monthlyBudget must be a positive integer of minor units");
+    }
+    const res = await this.pool.query(
+      `UPDATE acard_departments SET
+         name = COALESCE($2, name),
+         monthly_budget = COALESCE($3, monthly_budget),
+         lead = COALESCE($4, lead)
+       WHERE id = $1 RETURNING *`,
+      [id, patch.name?.trim() || null, patch.monthlyBudget ?? null, patch.lead ?? null],
+    );
+    if (!res.rowCount) throw new NotFoundError("department", id);
+    return this.mapDept(res.rows[0]);
+  }
+
+  async listDepartments(accountHolderId: string): Promise<Department[]> {
+    const res = await this.pool.query("SELECT * FROM acard_departments WHERE account_holder_id = $1 ORDER BY created_at ASC", [accountHolderId]);
+    return res.rows.map((r) => this.mapDept(r));
+  }
+
+  async listDepartmentSpend(accountHolderId: string): Promise<DepartmentSpend[]> {
+    const holder = await this.getAccountHolder(accountHolderId);
+    const res = await this.pool.query(
+      `SELECT d.*,
+         (SELECT COUNT(*) FROM acard_cards c WHERE c.department_id = d.id) AS card_count,
+         (SELECT COALESCE(SUM(t.amount),0) FROM acard_card_transactions t JOIN acard_cards c ON c.id = t.card_id
+            WHERE c.department_id = d.id AND t.status IN ('pending','completed')
+              AND to_char(t.created_at AT TIME ZONE 'UTC','YYYY-MM') = to_char(now() AT TIME ZONE 'UTC','YYYY-MM')) AS spent
+       FROM acard_departments d WHERE d.account_holder_id = $1 ORDER BY d.created_at ASC`,
+      [accountHolderId],
+    );
+    return res.rows.map((r) => ({
+      department: this.mapDept(r),
+      spentThisMonth: Number(r.spent),
+      cardCount: Number(r.card_count),
+      currency: holder?.currency ?? "ZAR",
+    }));
+  }
+
+  async getPolicy(accountHolderId: string): Promise<OrgPolicy> {
+    const client = await this.pool.connect();
+    try {
+      return await this.loadPolicy(client, accountHolderId);
+    } finally {
+      client.release();
+    }
+  }
+
+  async setPolicy(accountHolderId: string, policy: OrgPolicy): Promise<OrgPolicy> {
+    if (policy.approvalThreshold !== undefined && (!Number.isSafeInteger(policy.approvalThreshold) || policy.approvalThreshold <= 0)) {
+      throw new DomainError("invalid_policy", "approvalThreshold must be a positive integer of minor units");
+    }
+    const blocked = [...new Set(policy.blockedMerchantCategories ?? [])];
+    await this.pool.query(
+      `INSERT INTO acard_org_policies (account_holder_id, blocked_mccs, approval_threshold) VALUES ($1,$2,$3)
+       ON CONFLICT (account_holder_id) DO UPDATE SET blocked_mccs = EXCLUDED.blocked_mccs, approval_threshold = EXCLUDED.approval_threshold`,
+      [accountHolderId, JSON.stringify(blocked), policy.approvalThreshold ?? null],
+    );
+    return { blockedMerchantCategories: blocked, approvalThreshold: policy.approvalThreshold };
   }
 
   // ---- events & lifecycle ---------------------------------------------------

@@ -13,6 +13,8 @@ const suite = DB_URL ? describe : describe.skip;
 const service = DB_URL ? new PostgresPlatformService(DB_URL) : (undefined as unknown as PostgresPlatformService);
 
 const TABLES = [
+  "acard_org_policies",
+  "acard_departments",
   "acard_open_holds",
   "acard_card_transactions",
   "acard_postings",
@@ -225,6 +227,43 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
 
     await service.logout(reg.sessionToken);
     expect(await service.resolveSession(reg.sessionToken)).toBeUndefined();
+  });
+
+  it("enforces org policy and department budgets in the Postgres hot path", async () => {
+    const holder = await service.signup({ email: `ent${Date.now()}${Math.random()}@x.co.za`, name: "Aurora", currency: "ZAR", accountType: "enterprise" });
+    expect(holder.accountType).toBe("enterprise");
+    await service.fundWallet(holder.id, 10_000_000);
+
+    // block a category org-wide
+    await service.setPolicy(holder.id, { blockedMerchantCategories: ["7995"], approvalThreshold: undefined });
+    const eng = await service.createDepartment({ accountHolderId: holder.id, name: "Engineering", monthlyBudget: 5_000, lead: "Naledi" });
+    const card = await service.createCard({ accountHolderId: holder.id, singleUse: false, departmentId: eng.id });
+    expect(card.departmentId).toBe(eng.id);
+
+    // blocked MCC declines regardless of card rules
+    const blocked = await service.authorize({ authorizationId: "e_block", cardId: card.id, amount: 1_000, currency: "ZAR", merchant: { name: "Casino", category: "7995" } });
+    expect(blocked.declineReason).toBe("merchant_category_blocked_by_policy");
+
+    // department budget: 3000 ok, next 3000 exceeds the 5000 cap
+    expect((await service.authorize({ authorizationId: "e_ok", cardId: card.id, amount: 3_000, currency: "ZAR", merchant: { name: "AWS", category: "5734" } })).approved).toBe(true);
+    const over = await service.authorize({ authorizationId: "e_over", cardId: card.id, amount: 3_000, currency: "ZAR", merchant: { name: "AWS", category: "5734" } });
+    expect(over.declineReason).toBe("department_budget_exceeded");
+
+    // department spend reporting
+    const spend = await service.listDepartmentSpend(holder.id);
+    expect(spend[0]!.department.name).toBe("Engineering");
+    expect(spend[0]!.spentThisMonth).toBe(3_000);
+    expect(spend[0]!.cardCount).toBe(1);
+
+    // org approval threshold routes to review even with no card threshold
+    await service.setPolicy(holder.id, { blockedMerchantCategories: [], approvalThreshold: 2_000 });
+    const holder2 = await service.signup({ email: `ent2${Date.now()}${Math.random()}@x.co.za`, name: "Beta", accountType: "enterprise" });
+    await service.fundWallet(holder2.id, 1_000_000);
+    await service.setPolicy(holder2.id, { blockedMerchantCategories: [], approvalThreshold: 2_000 });
+    const card2 = await service.createCard({ accountHolderId: holder2.id, singleUse: false });
+    const review = await service.authorize({ authorizationId: "e_review", cardId: card2.id, amount: 5_000, currency: "ZAR", merchant: { name: "M", category: "5999" } });
+    expect(review.declineReason).toBe("pending_human_approval");
+    expect(review.approvalId).toBeDefined();
   });
 
   it("enforces the free plan monthly card cap and idempotency records", async () => {

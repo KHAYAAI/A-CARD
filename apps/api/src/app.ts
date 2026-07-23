@@ -52,11 +52,14 @@ type Env = { Variables: { holder: AccountHolder; role: Role } };
 const SESSION_COOKIE = "acard_session";
 const currencySchema = z.enum(["ZAR", "USD", "NGN", "KES"]);
 
+const accountTypeSchema = z.enum(["personal", "enterprise"]);
+
 const registerSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   password: z.string().min(8),
   currency: currencySchema.optional(),
+  account_type: accountTypeSchema.optional(),
 });
 
 const loginSchema = z.object({
@@ -76,6 +79,18 @@ const signupSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   currency: currencySchema.optional(),
+  account_type: accountTypeSchema.optional(),
+});
+
+const departmentSchema = z.object({
+  name: z.string().min(1),
+  monthly_budget: z.number().int().positive(),
+  lead: z.string().optional(),
+});
+
+const policySchema = z.object({
+  blocked_merchant_categories: z.array(z.string()).default([]),
+  approval_threshold: z.number().int().positive().optional(),
 });
 
 const fundSchema = z.object({
@@ -87,6 +102,7 @@ const fundSchema = z.object({
 const createCardSchema = z.object({
   label: z.string().optional(),
   currency: currencySchema.optional(),
+  department_id: z.string().optional(),
   single_use: z.boolean().optional(),
   limits: z
     .object({
@@ -140,7 +156,7 @@ export function createApp(config: AppConfig) {
 
   app.post("/v1/signup", async (c) => {
     const body = signupSchema.parse(await c.req.json());
-    const holder = await platform.signup(body);
+    const holder = await platform.signup({ email: body.email, name: body.name, currency: body.currency, accountType: body.account_type });
     const issued = await platform.issueApiKey(holder.id, "default");
     return c.json(
       {
@@ -172,7 +188,13 @@ export function createApp(config: AppConfig) {
 
   app.post("/v1/auth/register", async (c) => {
     const body = registerSchema.parse(await c.req.json());
-    const result = await platform.registerAccount(body);
+    const result = await platform.registerAccount({
+      email: body.email,
+      name: body.name,
+      password: body.password,
+      currency: body.currency,
+      accountType: body.account_type,
+    });
     setSessionCookie(c, result.sessionToken);
     return c.json(
       { user: result.user, account_holder: result.accountHolder, role: result.context.role, session_token: result.sessionToken },
@@ -257,6 +279,57 @@ export function createApp(config: AppConfig) {
     return c.json({ member }, 201);
   });
 
+  // ---- enterprise: departments, policy, audit -------------------------------
+
+  app.get("/v1/departments", async (c) => {
+    const holder = c.get("holder");
+    return c.json({ departments: await platform.listDepartmentSpend(holder.id) });
+  });
+
+  app.post("/v1/departments", requireRole("admin"), async (c) => {
+    const holder = c.get("holder");
+    const body = departmentSchema.parse(await c.req.json());
+    const department = await platform.createDepartment({ accountHolderId: holder.id, name: body.name, monthlyBudget: body.monthly_budget, lead: body.lead });
+    return c.json({ department }, 201);
+  });
+
+  app.patch("/v1/departments/:id", requireRole("admin"), async (c) => {
+    const holder = c.get("holder");
+    const list = await platform.listDepartments(holder.id);
+    if (!list.some((d) => d.id === c.req.param("id"))) {
+      return c.json({ error: { code: "not_found", message: "department not found" } }, 404);
+    }
+    const body = departmentSchema.partial().parse(await c.req.json());
+    const department = await platform.updateDepartment(c.req.param("id"), { name: body.name, monthlyBudget: body.monthly_budget, lead: body.lead });
+    return c.json({ department });
+  });
+
+  app.get("/v1/policy", async (c) => {
+    const holder = c.get("holder");
+    const policy = await platform.getPolicy(holder.id);
+    return c.json({
+      policy: { blocked_merchant_categories: policy.blockedMerchantCategories, approval_threshold: policy.approvalThreshold },
+    });
+  });
+
+  app.put("/v1/policy", requireRole("admin"), async (c) => {
+    const holder = c.get("holder");
+    const body = policySchema.parse(await c.req.json());
+    const policy = await platform.setPolicy(holder.id, {
+      blockedMerchantCategories: body.blocked_merchant_categories,
+      approvalThreshold: body.approval_threshold,
+    });
+    return c.json({
+      policy: { blocked_merchant_categories: policy.blockedMerchantCategories, approval_threshold: policy.approvalThreshold },
+    });
+  });
+
+  // Audit log = every authorization decision (approved, declined, held) for the org.
+  app.get("/v1/audit", async (c) => {
+    const holder = c.get("holder");
+    return c.json({ audit: await platform.listTransactions({ accountHolderId: holder.id }) });
+  });
+
   // ---- idempotency for mutating /v1 requests --------------------------------
 
   app.use("/v1/*", async (c, next) => {
@@ -314,6 +387,7 @@ export function createApp(config: AppConfig) {
       accountHolderId: holder.id,
       label: body.label,
       currency: body.currency,
+      departmentId: body.department_id,
       singleUse: body.single_use,
       limits: body.limits
         ? {

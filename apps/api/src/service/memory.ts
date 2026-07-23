@@ -1,4 +1,4 @@
-import { Platform, publicUser, type PlatformEvent, type Role } from "@acard/core";
+import { Platform, publicUser, type OrgPolicy, type PlatformEvent, type Role, type WorkspaceType } from "@acard/core";
 import type {
   CreateCardParams,
   IdempotencyLookup,
@@ -20,7 +20,7 @@ import type {
 export class InMemoryPlatformService implements PlatformService {
   constructor(readonly platform: Platform = new Platform()) {}
 
-  async signup(input: { email: string; name: string; currency?: import("@acard/core").Currency }) {
+  async signup(input: { email: string; name: string; currency?: import("@acard/core").Currency; accountType?: WorkspaceType }) {
     return this.platform.signup(input);
   }
 
@@ -127,12 +127,31 @@ export class InMemoryPlatformService implements PlatformService {
     return this.platform.idempotency.markEvent(eventId);
   }
 
-  async registerAccount(input: { email: string; name: string; password: string; currency?: import("@acard/core").Currency }): Promise<RegisterResult> {
+  async registerAccount(input: { email: string; name: string; password: string; currency?: import("@acard/core").Currency; accountType?: WorkspaceType }): Promise<RegisterResult> {
     const user = this.platform.auth.registerUser(input);
-    const accountHolder = this.platform.signup({ email: input.email, name: input.name, currency: input.currency });
+    const accountHolder = this.platform.signup({ email: input.email, name: input.name, currency: input.currency, accountType: input.accountType });
     const membership = this.platform.auth.addMembership(user.id, accountHolder.id, "owner");
     const { token, context } = this.platform.auth.openSession(user, membership);
     return { user: publicUser(user), accountHolder, sessionToken: token, context };
+  }
+
+  async createDepartment(input: { accountHolderId: string; name: string; monthlyBudget: number; lead?: string }) {
+    return this.platform.createDepartment(input);
+  }
+  async updateDepartment(id: string, patch: { name?: string; monthlyBudget?: number; lead?: string }) {
+    return this.platform.updateDepartment(id, patch);
+  }
+  async listDepartments(accountHolderId: string) {
+    return this.platform.listDepartments(accountHolderId);
+  }
+  async listDepartmentSpend(accountHolderId: string) {
+    return this.platform.listDepartmentSpend(accountHolderId);
+  }
+  async getPolicy(accountHolderId: string) {
+    return this.platform.getPolicy(accountHolderId);
+  }
+  async setPolicy(accountHolderId: string, policy: OrgPolicy) {
+    return this.platform.setPolicy(accountHolderId, policy);
   }
 
   async login(input: { email: string; password: string; accountHolderId?: string }) {

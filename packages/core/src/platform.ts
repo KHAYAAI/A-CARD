@@ -1,6 +1,13 @@
 import { ApprovalService, type ApprovalRequest } from "./approvals.js";
 import { ApiKeyService } from "./apikeys.js";
 import { AuthService, type Membership, type Session, type User } from "./auth.js";
+import {
+  EnterpriseService,
+  type WorkspaceType,
+  type Department,
+  type DepartmentSpend,
+  type OrgPolicy,
+} from "./enterprise.js";
 import { createCard, redactCard, type Card, type CreateCardInput } from "./cards.js";
 import { DomainError, InsufficientFundsError, InvalidStateError, NotFoundError } from "./errors.js";
 import { newId } from "./ids.js";
@@ -31,6 +38,8 @@ export interface AccountHolder {
   currency: Currency;
   walletAccountId: string;
   subscriptionTier: SubscriptionTier;
+  /** personal (default) or enterprise workspace — chosen at sign-up. */
+  accountType: WorkspaceType;
   createdAt: string;
 }
 
@@ -88,6 +97,7 @@ export interface PlatformSnapshot {
   approvals: ApprovalRequest[];
   apiKeys: ReturnType<ApiKeyService["serialize"]>;
   auth?: { users: User[]; memberships: Membership[]; sessions: Session[] };
+  enterprise?: { departments: Department[]; policies: Array<[string, OrgPolicy]> };
   accountHolders: AccountHolder[];
   cards: Card[];
   transactions: CardTransaction[];
@@ -103,6 +113,7 @@ export class Platform {
   readonly approvals = new ApprovalService();
   readonly apiKeys = new ApiKeyService();
   readonly auth = new AuthService();
+  readonly enterprise = new EnterpriseService();
   readonly idempotency = new IdempotencyStore();
 
   private readonly accountHolders = new Map<string, AccountHolder>();
@@ -128,6 +139,7 @@ export class Platform {
       approvals: this.approvals.serialize(),
       apiKeys: this.apiKeys.serialize(),
       auth: this.auth.serialize(),
+      enterprise: this.enterprise.serialize(),
       accountHolders: [...this.accountHolders.values()],
       cards: [...this.cards.values()],
       transactions: [...this.transactions.values()],
@@ -144,7 +156,12 @@ export class Platform {
     (platform as { approvals: ApprovalService }).approvals = ApprovalService.hydrate(snapshot.approvals);
     (platform as { apiKeys: ApiKeyService }).apiKeys = ApiKeyService.hydrate(snapshot.apiKeys);
     if (snapshot.auth) (platform as { auth: AuthService }).auth = AuthService.hydrate(snapshot.auth);
-    for (const holder of snapshot.accountHolders) platform.accountHolders.set(holder.id, holder);
+    if (snapshot.enterprise) (platform as { enterprise: EnterpriseService }).enterprise = EnterpriseService.hydrate(snapshot.enterprise);
+    for (const holder of snapshot.accountHolders) {
+      // Back-compat: snapshots from before enterprise default to personal.
+      if (!holder.accountType) holder.accountType = "personal";
+      platform.accountHolders.set(holder.id, holder);
+    }
     for (const card of snapshot.cards) platform.cards.set(card.id, card);
     for (const tx of snapshot.transactions) platform.transactions.set(tx.id, tx);
     for (const [authId, hold] of snapshot.openHolds) platform.openHolds.set(authId, hold);
@@ -165,7 +182,7 @@ export class Platform {
 
   // ---- account holders & wallets ------------------------------------------
 
-  signup(input: { email: string; name: string; currency?: Currency }): AccountHolder {
+  signup(input: { email: string; name: string; currency?: Currency; accountType?: WorkspaceType }): AccountHolder {
     const currency = input.currency ?? "ZAR";
     for (const holder of this.accountHolders.values()) {
       if (holder.email === input.email) {
@@ -184,6 +201,7 @@ export class Platform {
       currency,
       walletAccountId: wallet.id,
       subscriptionTier: "free",
+      accountType: input.accountType ?? "personal",
       createdAt: new Date().toISOString(),
     };
     this.accountHolders.set(holder.id, holder);
@@ -286,6 +304,12 @@ export class Platform {
   createCard(input: Omit<CreateCardInput, "walletAccountId" | "currency"> & { currency?: Currency }): Card {
     const holder = this.getAccountHolder(input.accountHolderId);
     const currency = input.currency ?? holder.currency;
+    if (input.departmentId) {
+      const dept = this.enterprise.findDepartment(input.departmentId);
+      if (!dept || dept.accountHolderId !== holder.id) {
+        throw new DomainError("invalid_department", "department does not belong to this account");
+      }
+    }
     // A card draws from its currency's wallet, provisioned on demand — an org
     // can hold ZAR and USD (and any other supported currency) side by side.
     const walletAccountId = this.walletAccountFor(holder, currency);
@@ -358,6 +382,13 @@ export class Platform {
 
     const spend = this.cardSpend(card.id);
     const grant = this.approvals.findGrant(card.id, request.merchant.name, request.amount);
+
+    // ---- org-wide policy, enforced ahead of per-card rules --------------------
+    const policy = this.enterprise.getPolicy(card.accountHolderId);
+    if (policy.blockedMerchantCategories.includes(request.merchant.category)) {
+      return this.declineRecord(request, card, "merchant_category_blocked_by_policy");
+    }
+
     const ctx: AuthorizationContext = {
       card,
       amount: request.amount,
@@ -368,10 +399,28 @@ export class Platform {
       hasApprovalGrant: grant !== undefined,
     };
 
-    const outcome = evaluateRules(ctx);
+    let outcome = evaluateRules(ctx);
+
+    // Org approval threshold: route to review even if the card has none.
+    if (
+      outcome.decision === "approve" &&
+      policy.approvalThreshold !== undefined &&
+      request.amount >= policy.approvalThreshold &&
+      grant === undefined
+    ) {
+      outcome = { decision: "review", reason: "amount_requires_org_approval" };
+    }
 
     if (outcome.decision === "decline") {
       return this.declineRecord(request, card, outcome.reason);
+    }
+
+    // Department monthly budget: a hard cap across all of a department's agents.
+    if (outcome.decision === "approve" && card.departmentId) {
+      const dept = this.enterprise.findDepartment(card.departmentId);
+      if (dept && this.departmentSpendThisPeriod(dept.id) + request.amount > dept.monthlyBudget) {
+        return this.declineRecord(request, card, "department_budget_exceeded");
+      }
     }
 
     if (outcome.decision === "review") {
@@ -480,6 +529,60 @@ export class Platform {
     const approval = this.approvals.decide(approvalId, decision, decidedBy);
     this.emit(`approval.${decision}`, { approvalId, decidedBy });
     return approval;
+  }
+
+  // ---- enterprise: departments & policy ------------------------------------
+
+  createDepartment(input: { accountHolderId: string; name: string; monthlyBudget: number; lead?: string }): Department {
+    this.getAccountHolder(input.accountHolderId);
+    const department = this.enterprise.createDepartment(input);
+    this.emit("department.created", { departmentId: department.id, accountHolderId: input.accountHolderId });
+    return department;
+  }
+
+  updateDepartment(id: string, patch: { name?: string; monthlyBudget?: number; lead?: string }): Department {
+    return this.enterprise.updateDepartment(id, patch);
+  }
+
+  listDepartments(accountHolderId: string): Department[] {
+    return this.enterprise.listDepartments(accountHolderId);
+  }
+
+  /** Departments with their spend this billing period — the finance/overview view. */
+  listDepartmentSpend(accountHolderId: string): DepartmentSpend[] {
+    const holder = this.getAccountHolder(accountHolderId);
+    return this.enterprise.listDepartments(accountHolderId).map((department) => ({
+      department,
+      spentThisMonth: this.departmentSpendThisPeriod(department.id),
+      cardCount: [...this.cards.values()].filter((c) => c.departmentId === department.id).length,
+      currency: holder.currency,
+    }));
+  }
+
+  getPolicy(accountHolderId: string): OrgPolicy {
+    return this.enterprise.getPolicy(accountHolderId);
+  }
+
+  setPolicy(accountHolderId: string, policy: OrgPolicy): OrgPolicy {
+    this.getAccountHolder(accountHolderId);
+    const saved = this.enterprise.setPolicy(accountHolderId, policy);
+    this.emit("policy.updated", { accountHolderId });
+    return saved;
+  }
+
+  private departmentSpendThisPeriod(departmentId: string): number {
+    const period = currentBillingPeriod();
+    const cardIds = new Set(
+      [...this.cards.values()].filter((c) => c.departmentId === departmentId).map((c) => c.id),
+    );
+    return [...this.transactions.values()]
+      .filter(
+        (t) =>
+          cardIds.has(t.cardId) &&
+          (t.status === "pending" || t.status === "completed") &&
+          currentBillingPeriod(new Date(t.createdAt)) === period,
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
   }
 
   listEvents(): PlatformEvent[] {

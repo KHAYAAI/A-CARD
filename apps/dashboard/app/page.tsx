@@ -34,6 +34,8 @@ const ICONS: Record<string, string> = {
   box: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4.3 7.7 12 12l7.7-4.3M12 12v9"/>',
   plug: '<path d="M9 3v5M15 3v5"/><path d="M7 8h10v3a5 5 0 0 1-10 0z"/><path d="M12 16.5V21"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  building: '<rect x="4" y="3" width="16" height="18" rx="1.6"/><path d="M9 7h1M14 7h1M9 11h1M14 11h1M9 15h1M14 15h1"/><path d="M10 21v-3h4v3"/>',
+  scale: '<path d="M12 3.5v17M7.5 20.5h9M5 7.5 12 6l7 1.5"/><path d="M5 7.5 2.6 13a2.8 2.8 0 0 0 4.8 0z"/><path d="M19 7.5 16.6 13a2.8 2.8 0 0 0 4.8 0z"/>',
 };
 function Icon({ name, size }: { name: string; size?: number }) {
   return (
@@ -54,7 +56,9 @@ interface Card { id: string; label?: string; last4: string; status: string; curr
 interface Txn { id: string; merchantName: string; amount: number; currency: string; status: string; declineReason?: string; createdAt: string }
 interface Approval { id: string; merchantName: string; amount: number; currency: string; reason: string; createdAt: string }
 interface Member { user: { id: string; email: string; name: string }; role: string }
-interface Holder { id: string; email: string; name: string; currency: string; subscriptionTier: string }
+interface Holder { id: string; email: string; name: string; currency: string; subscriptionTier: string; accountType?: string }
+interface DeptSpend { department: { id: string; name: string; monthlyBudget: number; lead?: string }; spentThisMonth: number; cardCount: number; currency: string }
+interface Policy { blocked_merchant_categories: string[]; approval_threshold?: number }
 
 type Role = "owner" | "admin" | "member" | "viewer";
 const RANK: Record<Role, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
@@ -65,15 +69,23 @@ function fmt(cents: number, ccy: string) {
   return `${SYM[ccy] ?? ccy} ${(cents / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const NAV: { view: string; label: string; icon: string; crumb?: string; min?: Role }[] = [
+type NavItem = { view: string; label: string; icon: string; crumb?: string; min?: Role; enterprise?: boolean };
+const NAV: NavItem[] = [
   { view: "overview", label: "Home", icon: "home", crumb: "Home" },
   { view: "cards", label: "Manage cards", icon: "card", crumb: "Cards" },
+  { view: "departments", label: "Departments", icon: "building", enterprise: true },
   { view: "spending", label: "Track spending", icon: "swap", crumb: "Spending" },
   { view: "wallet", label: "Wallet", icon: "wallet" },
   { view: "approvals", label: "Approvals", icon: "shieldCheck" },
+  { view: "policies", label: "Policies", icon: "scale", enterprise: true, min: "admin" },
+  { view: "audit", label: "Audit log", icon: "book", crumb: "Audit log", enterprise: true },
   { view: "connect", label: "Connect agents", icon: "cpu" },
   { view: "team", label: "Team", icon: "users", min: "admin" },
 ];
+const MCC_LABEL: Record<string, string> = {
+  "5411": "Groceries", "5734": "Software", "4816": "Cloud", "7311": "Advertising",
+  "4511": "Airlines", "5812": "Restaurants", "7995": "Gambling", "6051": "Crypto",
+};
 
 const CONNECT: Record<string, { icon: string; cmd: (o: string) => string }> = {
   Claude: { icon: "asterisk", cmd: (o) => `claude mcp add --transport http acard ${o}/mcp` },
@@ -97,9 +109,13 @@ export default function Dashboard() {
   const [txns, setTxns] = useState<Txn[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [departments, setDepartments] = useState<DeptSpend[]>([]);
+  const [policy, setPolicy] = useState<Policy>({ blocked_merchant_categories: [] });
+  const [audit, setAudit] = useState<Txn[]>([]);
 
   // auth form
   const [mode, setMode] = useState<"login" | "register" | "apikey">("login");
+  const [workspace, setWorkspace] = useState<"personal" | "enterprise">("personal");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -110,6 +126,12 @@ export default function Dashboard() {
   const [showFund, setShowFund] = useState(false);
   const [cardLabel, setCardLabel] = useState("");
   const [cardCcy, setCardCcy] = useState("ZAR");
+  const [cardDept, setCardDept] = useState("");
+  const [deptName, setDeptName] = useState("");
+  const [deptBudget, setDeptBudget] = useState("5000000");
+  const [deptLead, setDeptLead] = useState("");
+  const [policyBlocked, setPolicyBlocked] = useState("");
+  const [policyThreshold, setPolicyThreshold] = useState("");
   const [fundCcy, setFundCcy] = useState("ZAR");
   const [fundAmt, setFundAmt] = useState("500000");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -140,16 +162,23 @@ export default function Dashboard() {
     try {
       const me = await call("/v1/auth/me").catch(() => null);
       const currentRole: Role = me?.role ?? "owner";
+      const hld: Holder | null = me?.account_holder ?? null;
+      const isEnt = hld?.accountType === "enterprise";
       setRole(currentRole);
-      setHolder(me?.account_holder ?? null);
+      setHolder(hld);
       const reqs: Promise<any>[] = [call("/v1/wallet"), call("/v1/cards"), call("/v1/transactions"), call("/v1/approvals?status=pending")];
       if (can(currentRole, "admin")) reqs.push(call("/v1/auth/members").catch(() => ({ members: [] })));
-      const [w, c, t, a, m] = await Promise.all(reqs);
+      else reqs.push(Promise.resolve({ members: [] }));
+      if (isEnt) reqs.push(call("/v1/departments").catch(() => ({ departments: [] })), call("/v1/policy").catch(() => ({ policy: {} })), call("/v1/audit").catch(() => ({ audit: [] })));
+      const [w, c, t, a, m, d, p, au] = await Promise.all(reqs);
       setWallets(w.wallets ?? (w.wallet ? [w.wallet] : []));
       setCards(c.cards ?? []);
       setTxns(t.transactions ?? []);
       setApprovals(a.approvals ?? []);
       setMembers(m?.members ?? []);
+      setDepartments(d?.departments ?? []);
+      if (p?.policy) setPolicy({ blocked_merchant_categories: p.policy.blocked_merchant_categories ?? [], approval_threshold: p.policy.approval_threshold });
+      setAudit(au?.audit ?? []);
       setConnected(true);
       setError("");
     } catch (e) {
@@ -158,6 +187,10 @@ export default function Dashboard() {
     }
   }, [call, token]);
 
+  useEffect(() => {
+    setPolicyBlocked(policy.blocked_merchant_categories.join(", "));
+    setPolicyThreshold(policy.approval_threshold ? String(policy.approval_threshold) : "");
+  }, [policy]);
   useEffect(() => { const s = localStorage.getItem("acard_token"); if (s) setToken(s); }, []);
   useEffect(() => {
     if (!token) return;
@@ -189,6 +222,8 @@ export default function Dashboard() {
   };
 
   const readOnly = !can(role, "member");
+  const isEnt = holder?.accountType === "enterprise";
+  const nav = NAV.filter((n) => (!n.enterprise || isEnt) && (!n.min || can(role, n.min)));
   const primaryCcy = holder?.currency ?? "ZAR";
   const primaryWallet = useMemo(
     () => wallets.find((w) => w.currency === primaryCcy) ?? wallets[0],
@@ -199,9 +234,26 @@ export default function Dashboard() {
 
   const doCreateCard = async () => {
     try {
-      await call("/v1/cards", { method: "POST", body: JSON.stringify({ label: cardLabel || undefined, currency: cardCcy, single_use: true }) });
-      setShowCreate(false); setCardLabel(""); refresh(); flash("Card created."); setView("cards");
+      await call("/v1/cards", {
+        method: "POST",
+        body: JSON.stringify({ label: cardLabel || undefined, currency: cardCcy, single_use: true, department_id: cardDept || undefined }),
+      });
+      setShowCreate(false); setCardLabel(""); setCardDept(""); refresh(); flash("Card created."); setView("cards");
     } catch (e) { flash(e instanceof Error ? e.message : "Could not create card"); }
+  };
+  const doCreateDept = async () => {
+    try {
+      await call("/v1/departments", { method: "POST", body: JSON.stringify({ name: deptName, monthly_budget: parseInt(deptBudget, 10), lead: deptLead || undefined }) });
+      setDeptName(""); setDeptLead(""); refresh(); flash("Department created.");
+    } catch (e) { flash(e instanceof Error ? e.message : "Could not create department"); }
+  };
+  const doSavePolicy = async () => {
+    try {
+      const blocked = policyBlocked.split(",").map((s) => s.trim()).filter(Boolean);
+      const threshold = parseInt(policyThreshold, 10);
+      await call("/v1/policy", { method: "PUT", body: JSON.stringify({ blocked_merchant_categories: blocked, approval_threshold: threshold > 0 ? threshold : undefined }) });
+      refresh(); flash("Policy saved.");
+    } catch (e) { flash(e instanceof Error ? e.message : "Could not save policy"); }
   };
   const doFund = async () => {
     try {
@@ -250,11 +302,25 @@ export default function Dashboard() {
               <button type="submit" className="btn btn-green login-btn">Connect</button>
             </form>
           ) : (
-            <form onSubmit={(e) => { e.preventDefault(); mode === "register" ? authenticate("/v1/auth/register", { email, name, password }) : authenticate("/v1/auth/login", { email, password }); }}>
-              {mode === "register" && <div className="field"><label>your name</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>}
+            <form onSubmit={(e) => { e.preventDefault(); mode === "register" ? authenticate("/v1/auth/register", { email, name, password, account_type: workspace }) : authenticate("/v1/auth/login", { email, password }); }}>
+              {mode === "register" && (
+                <>
+                  <div className="field">
+                    <label>workspace</label>
+                    <div className="seg">
+                      <button type="button" className={workspace === "personal" ? "sel" : ""} onClick={() => setWorkspace("personal")}>Personal</button>
+                      <button type="button" className={workspace === "enterprise" ? "sel" : ""} onClick={() => setWorkspace("enterprise")}>Enterprise</button>
+                    </div>
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {workspace === "enterprise" ? "Departments, budgets, org policies, and an audit log." : "A wallet and cards for your own agents."}
+                    </div>
+                  </div>
+                  <div className="field"><label>{workspace === "enterprise" ? "organisation name" : "your name"}</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
+                </>
+              )}
               <div className="field"><label>work email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
               <div className="field"><label>password{mode === "register" ? " (min 8 chars)" : ""}</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
-              <button type="submit" className="btn btn-green login-btn">{mode === "register" ? "Create account" : "Sign in"}</button>
+              <button type="submit" className="btn btn-green login-btn">{mode === "register" ? "Create workspace" : "Sign in"}</button>
             </form>
           )}
           {error && <div className="login-note" style={{ color: "var(--red)" }}>{error}</div>}
@@ -292,11 +358,11 @@ export default function Dashboard() {
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
         <div className="side-acct">
           <div className="acct-badge">{orgInitial}</div>
-          <div className="who"><div className="n">{holder?.name ?? "Account"}</div><div className="e">{holder?.email ?? ""}</div></div>
+          <div className="who"><div className="n">{holder?.name ?? "Account"} {isEnt && <span className="badge-ent" style={{ fontSize: 9 }}>Ent</span>}</div><div className="e">{holder?.email ?? ""}</div></div>
           <span className="chev"><Icon name="updown" /></span>
         </div>
         <nav className="side-nav">
-          {NAV.filter((n) => !n.min || can(role, n.min)).map((n) => (
+          {nav.map((n) => (
             <button key={n.view} className={`nav-item${view === n.view ? " active" : ""}`} onClick={() => goto(n.view)}>
               <Icon name={n.icon} /><span>{n.label}</span>
               {n.view === "approvals" && pendingCount > 0 && (
@@ -345,6 +411,12 @@ export default function Dashboard() {
                   <div className="stat"><div className="head"><span className="lbl">Active cards</span></div><div className="val">{activeCards}</div><div className="foot">{cards.length} issued in total</div></div>
                   <div className="stat"><div className="head"><span className="lbl">Plan</span></div><div className="val serif" style={{ textTransform: "capitalize" }}>{holder?.subscriptionTier ?? "Free"}</div><div className="foot">Subscription tier</div></div>
                 </div>
+                {isEnt && departments.length > 0 && (
+                  <div className="panel panel-pad">
+                    <div className="panel-head"><h2>Spend by department</h2><span className="tag">this month</span></div>
+                    <DeptBars rows={departments} />
+                  </div>
+                )}
                 <div className="cols">
                   <div className="panel panel-pad">
                     <div className="panel-head"><h2>Recent activity</h2></div>
@@ -358,6 +430,80 @@ export default function Dashboard() {
                   </div>
                   <div className="panel panel-pad">{connectPanel}</div>
                 </div>
+              </div>
+            </>
+          )}
+
+          {/* DEPARTMENTS */}
+          {view === "departments" && isEnt && (
+            <>
+              <div className="page-head"><div className="page-title">Departments</div><div className="page-sub">Each team gets its own budget, its own agents, and its own scope.</div></div>
+              <div className="stack">
+                {can(role, "admin") && (
+                  <div className="panel panel-pad">
+                    <div className="panel-head"><h2>New department</h2></div>
+                    <div className="filters">
+                      <input placeholder="Department name" value={deptName} onChange={(e) => setDeptName(e.target.value)} />
+                      <input className="mono" placeholder="Monthly budget (cents)" value={deptBudget} onChange={(e) => setDeptBudget(e.target.value)} />
+                      <input placeholder="Lead (optional)" value={deptLead} onChange={(e) => setDeptLead(e.target.value)} />
+                      <button className="btn btn-green" onClick={doCreateDept}><Icon name="plus" /> Add</button>
+                    </div>
+                  </div>
+                )}
+                {departments.length === 0 ? (
+                  <div className="panel panel-pad"><div className="empty">No departments yet. Create one to give a team its own budget and agents.</div></div>
+                ) : (
+                  <div className="dept-grid">
+                    {departments.map((d) => {
+                      const pct = Math.round((d.spentThisMonth / d.department.monthlyBudget) * 100);
+                      return (
+                        <div className="dept-card" key={d.department.id}>
+                          <div className="dept-top"><div className="dept-ico" style={{ color: "var(--green)" }}><Icon name="building" /></div><div><div className="dept-name">{d.department.name}</div>{d.department.lead && <div className="dept-lead">Lead · {d.department.lead}</div>}</div></div>
+                          <div className="dept-meta"><span>Agents <b>{d.cardCount}</b></span><span>Spent <b>{fmt(d.spentThisMonth, d.currency)}</b></span><span>Budget <b>{fmt(d.department.monthlyBudget, d.currency)}</b></span></div>
+                          <div className="budget-bar"><div className={`budget-fill ${pct > 85 ? "over" : pct > 65 ? "warn" : ""}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* POLICIES */}
+          {view === "policies" && isEnt && can(role, "admin") && (
+            <>
+              <div className="page-head"><div className="page-title">Policies &amp; controls</div><div className="page-sub">One rulebook, enforced on every authorization before a cent moves.</div></div>
+              <div className="panel panel-pad" style={{ maxWidth: 640 }}>
+                <div className="field"><label>blocked merchant categories (MCC, comma-separated)</label><input className="mono" placeholder="7995, 6051" value={policyBlocked} onChange={(e) => setPolicyBlocked(e.target.value)} /><div className="hint" style={{ marginTop: 5 }}>e.g. 7995 = gambling, 6051 = crypto. Declined org-wide regardless of card rules.</div></div>
+                <div className="field" style={{ marginTop: 14 }}><label>org approval threshold (cents, blank for none)</label><input className="mono" placeholder="10000000" value={policyThreshold} onChange={(e) => setPolicyThreshold(e.target.value)} /><div className="hint" style={{ marginTop: 5 }}>Charges at/above this route to a human even if the card has no threshold.</div></div>
+                <div style={{ marginTop: 18 }}><button className="btn btn-green" onClick={doSavePolicy}>Save policy</button></div>
+                {policy.blocked_merchant_categories.length > 0 && (
+                  <div className="hint" style={{ marginTop: 16 }}>Currently blocking: {policy.blocked_merchant_categories.map((m) => MCC_LABEL[m] ? `${MCC_LABEL[m]} (${m})` : m).join(", ")}.</div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* AUDIT */}
+          {view === "audit" && isEnt && (
+            <>
+              <div className="page-head"><div className="page-title">Audit log</div><div className="page-sub">Every authorization decision — approved, declined, or held — with the reason.</div></div>
+              <div className="panel panel-pad">
+                {audit.length === 0 ? <div className="empty">No decisions yet.</div> : (
+                  <div>
+                    {audit.slice(0, 60).map((t) => {
+                      const d = t.status === "declined" ? (t.declineReason === "pending_human_approval" ? ["hold", "held"] : ["no", "declined"]) : ["ok", "approved"];
+                      return (
+                        <div className="audit-row" key={t.id} style={{ gridTemplateColumns: "170px 1fr auto" }}>
+                          <div className="audit-when">{new Date(t.createdAt).toLocaleString()}</div>
+                          <div><div className="audit-main">{t.merchantName}</div>{t.declineReason && t.status === "declined" && <div className="audit-sub">{t.declineReason}</div>}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "flex-end" }}><span className="audit-amt">{fmt(t.amount, t.currency)}</span><span className={`decision ${d[0]}`}>{d[1]}</span></div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -529,6 +675,15 @@ export default function Dashboard() {
             <div className="field" style={{ marginTop: 12 }}><label>currency</label>
               <div className="seg">{["ZAR", "USD"].map((c) => <button key={c} className={cardCcy === c ? "sel" : ""} onClick={() => setCardCcy(c)}>{c}</button>)}</div>
             </div>
+            {isEnt && departments.length > 0 && (
+              <div className="field" style={{ marginTop: 12 }}><label>department</label>
+                <select value={cardDept} onChange={(e) => setCardDept(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--border)", color: "var(--ink)", fontSize: 14 }}>
+                  <option value="">No department</option>
+                  {departments.map((d) => <option key={d.department.id} value={d.department.id}>{d.department.name}</option>)}
+                </select>
+                <div className="hint" style={{ marginTop: 5 }}>The card draws from this department&apos;s monthly budget.</div>
+              </div>
+            )}
             <div className="modal-actions"><button className="btn btn-outline" style={{ flex: "0 0 auto" }} onClick={() => setShowCreate(false)}>Cancel</button><button className="btn btn-green" onClick={doCreateCard}>Create card</button></div>
           </div>
         </div>
@@ -548,6 +703,24 @@ export default function Dashboard() {
       )}
 
       {toast && <div id="toast" className="on">{toast}</div>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------- department bars */
+function DeptBars({ rows }: { rows: DeptSpend[] }) {
+  return (
+    <div>
+      {rows.map((d) => {
+        const pct = Math.round((d.spentThisMonth / d.department.monthlyBudget) * 100);
+        return (
+          <div className="bar-row" key={d.department.id}>
+            <div className="bar-name"><span className="dot" style={{ background: "var(--green)" }} />{d.department.name}</div>
+            <div className="budget-bar"><div className={`budget-fill ${pct > 85 ? "over" : pct > 65 ? "warn" : ""}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
+            <div className="bar-amt"><b>{fmt(d.spentThisMonth, d.currency)}</b> / {fmt(d.department.monthlyBudget, d.currency)}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -8,12 +8,16 @@ import type {
   CardTransaction,
   CreateCardInput,
   Currency,
+  Department,
+  DepartmentSpend,
   LedgerTransaction,
+  OrgPolicy,
   PlatformEvent,
   Role,
   SessionContext,
   SubscriptionTier,
   User,
+  WorkspaceType,
 } from "@acard/core";
 
 export type PublicUser = Omit<User, "passwordHash">;
@@ -65,7 +69,7 @@ export type IdempotencyLookup =
 
 export interface PlatformService {
   // ---- account holders & auth ---------------------------------------------
-  signup(input: { email: string; name: string; currency?: Currency }): Promise<AccountHolder>;
+  signup(input: { email: string; name: string; currency?: Currency; accountType?: WorkspaceType }): Promise<AccountHolder>;
   getAccountHolder(id: string): Promise<AccountHolder | undefined>;
   issueApiKey(accountHolderId: string, name: string): Promise<{ secret: string; id: string }>;
   authenticateApiKey(secret: string): Promise<AccountHolder | undefined>;
@@ -114,6 +118,7 @@ export interface PlatformService {
     name: string;
     password: string;
     currency?: Currency;
+    accountType?: WorkspaceType;
   }): Promise<RegisterResult>;
   login(input: { email: string; password: string; accountHolderId?: string }): Promise<{ sessionToken: string; context: SessionContext }>;
   resolveSession(token: string): Promise<SessionContext | undefined>;
@@ -121,6 +126,14 @@ export interface PlatformService {
   /** Add (or re-role) a member of an org. Creates the user if the email is new. */
   addMember(input: { accountHolderId: string; email: string; name?: string; password?: string; role: Role }): Promise<MemberView>;
   listMembers(accountHolderId: string): Promise<MemberView[]>;
+
+  // ---- enterprise: departments, policy, audit ------------------------------
+  createDepartment(input: { accountHolderId: string; name: string; monthlyBudget: number; lead?: string }): Promise<Department>;
+  updateDepartment(id: string, patch: { name?: string; monthlyBudget?: number; lead?: string }): Promise<Department>;
+  listDepartments(accountHolderId: string): Promise<Department[]>;
+  listDepartmentSpend(accountHolderId: string): Promise<DepartmentSpend[]>;
+  getPolicy(accountHolderId: string): Promise<OrgPolicy>;
+  setPolicy(accountHolderId: string, policy: OrgPolicy): Promise<OrgPolicy>;
 
   // ---- in-process event fanout (Slack notifications) -----------------------
   onEvent(listener: (event: PlatformEvent) => void): void;

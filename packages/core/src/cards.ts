@@ -16,6 +16,8 @@ export interface Card {
   id: string;
   accountHolderId: string;
   walletAccountId: string;
+  /** Enterprise: the department this card (agent) belongs to. Personal accounts leave it undefined. */
+  departmentId?: string;
   currency: Currency;
   status: CardStatus;
   /** Card closes automatically after its first successful capture. */
@@ -44,6 +46,7 @@ export interface CreateCardInput {
   accountHolderId: string;
   walletAccountId: string;
   currency: Currency;
+  departmentId?: string;
   singleUse?: boolean;
   limits?: CardLimits;
   allowedMerchantCategories?: string[];
@@ -58,6 +61,7 @@ export function createCard(input: CreateCardInput): Card {
     id: newId("card"),
     accountHolderId: input.accountHolderId,
     walletAccountId: input.walletAccountId,
+    departmentId: input.departmentId,
     currency: input.currency,
     status: "active",
     singleUse: input.singleUse ?? true,

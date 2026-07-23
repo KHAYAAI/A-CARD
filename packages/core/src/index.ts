@@ -7,6 +7,7 @@ export * from "./rules.js";
 export * from "./approvals.js";
 export * from "./apikeys.js";
 export * from "./auth.js";
+export * from "./enterprise.js";
 export * from "./idempotency.js";
 export * from "./webhooks.js";
 export * from "./billing.js";

@@ -56,6 +56,16 @@ Set `ACARD_PERSISTENCE=snapshot` to instead use the earlier single-writer model 
 
 Beyond the tenant API key (full programmatic access for agents/CLI/MCP), the API has a human auth layer: register/login with a password, a server-side session (`POST /v1/auth/register`, `/login`, `/logout`, `GET /v1/auth/me`), and role-based access control — `owner` > `admin` > `member` > `viewer`. Viewers are read-only; members transact; admins manage billing and team members (`/v1/auth/members`); owners have everything. The `/v1` guard accepts an API key *or* a session (bearer `sess_` token or the httpOnly cookie), and the dashboard ships a login/register screen with a role-aware UI.
 
+### Personal vs Enterprise workspace (chosen at sign-up)
+
+Registration picks a **workspace type** (`account_type: personal | enterprise`). Personal is the default and behaves exactly as before. **Enterprise** unlocks org-scale governance, enforced in the same authorization hot path:
+
+- **Departments** with a monthly budget (`/v1/departments`). A card belongs to a department; when the department's captured+held spend for the month plus a new charge would exceed its budget, the authorization is declined (`department_budget_exceeded`) — a hard cap across all of a team's agents, checked under the same per-wallet row lock as the overspend guard.
+- **Org policy** (`/v1/policy`): merchant categories blocked org-wide (declined ahead of per-card rules, `merchant_category_blocked_by_policy`), and an org approval threshold that routes large charges to a human even when the card has none.
+- **Audit log** (`/v1/audit`): every authorization decision — approved, declined, or held — with its reason.
+
+All of it lives in `packages/core/src/enterprise.ts`, is enforced in `Platform.authorize`, and is implemented in **both** the in-memory and Postgres multi-writer stores (new `acard_departments` / `acard_org_policies` tables; `account_type` and `department_id` columns added idempotently for existing deployments). The dashboard renders Departments, Policies, and Audit tabs plus a spend-by-department overview for enterprise accounts only. See `apps/demo/enterprise.html` for the standalone pitch demo of the same model.
+
 ### Billing (Paystack, ZAR subscriptions)
 
 Three tiers — `free` (5 cards/month), `basic` (R149/mo, 25 cards), `pro` (R499/mo, 100 cards) — enforced in `packages/core/src/billing.ts`. Set `PAYSTACK_SECRET_KEY` and `PAYSTACK_WEBHOOK_SECRET` (see the external dependencies list) to enable `POST /v1/billing/checkout` and the `/webhooks/paystack` upgrade flow. Omit both and every account just stays on the free tier.
