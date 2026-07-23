@@ -43,3 +43,13 @@ The demo mirrors the real platform's behaviour but is intentionally a
 client-side simulation for reliability while presenting. The production system
 is the REST API + Postgres multi-writer store + MCP server + dashboard in this
 repo; see the root `README.md` and `docs/DEPLOYMENT.md`.
+
+## Enterprise demo (`enterprise.html`)
+
+A corporate variant for showing enterprises how a·card works at org scale —
+sample org **Aurora Industries**: a fleet of agents across five departments,
+per-department budgets, org-wide policies, one consolidated finance ledger,
+Finance-routed approvals, and a security **audit log of every decision**.
+Same brand, same authorization engine, sidebar grouped into Overview / Operate
+/ Govern / Finance / Admin. Self-contained; open `enterprise.html` or present
+the published Artifact.
