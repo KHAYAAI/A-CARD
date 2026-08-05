@@ -31,6 +31,32 @@ Enterprise workspace walkthrough featuring:
 - Team & roles management (RBAC across org)
 - MCP workspace scoping
 
+## Download
+
+### Batch Download (Shell)
+```bash
+./download-videos.sh [output-dir]
+```
+Downloads all three videos to the specified directory (default: current directory).
+
+**Requirements:** `curl`
+
+### Individual Download
+Download directly from GitHub:
+```bash
+# Replace <branch> with the actual branch name
+https://github.com/KHAYAAI/A-CARD/raw/<branch>/docs/videos/A-CARD-full-walkthrough.mp4
+https://github.com/KHAYAAI/A-CARD/raw/<branch>/docs/videos/A-CARD-personal-console.mp4
+https://github.com/KHAYAAI/A-CARD/raw/<branch>/docs/videos/A-CARD-enterprise-console.mp4
+```
+
+### Clone & Copy
+Videos are stored in this repository, so a full clone includes them:
+```bash
+git clone <repo-url>
+cp A-CARD/docs/videos/*.mp4 ~/Downloads/
+```
+
 ## Usage
 
 Videos are embedded captions in the a·card brand style:
