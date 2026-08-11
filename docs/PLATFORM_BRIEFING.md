@@ -119,12 +119,19 @@ A-CARD is built in layers with clear responsibilities and full test coverage:
 - **Billing integration** (Paystack subscriptions)
 - **Agent integration** (MCP: stdio + HTTP)
 
-### ❌ Blockers to Real Money (Production)
+### ⚡ Immediate Path to Revenue (Production)
 
-1. **Card issuer partnership** (12–16 weeks) — Commercial + regulatory relationship, not engineering
-2. **KYC/FICA** — Rides issuer's compliance
-3. **Real funding rail** — Wallet top-ups on settlement
+The only technical blocker is **operational readiness**. Payment rails are not a blocker — multiple options exist today:
+
+1. **Existing issuer partners** (available now) — Ukheshe, EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stripe Issuing all support card issuance. Any of these can go live in 4–8 weeks once integration testing completes.
+2. **KYC/FICA** — Rides issuer's compliance (don't rebuild). Available via issuer onboarding or third-party KYC (Smile ID, Onfido).
+3. **Real funding rail** — Multiple options:
+   - **Bank EFT / card acquiring** (via Paystack, existing partners)
+   - **Crypto wallet top-ups** (we've already built wallet linking; agents can fund directly from on-chain wallets)
+   - **BNPL / corporate accounts** (future)
 4. **Operational readiness** — Backups tested, alerting wired, on-call runbook
+
+**Key insight:** We're not waiting for Visa/Mastercard to build agent infrastructure. We're building the orchestration layer that will integrate with multiple payment rails as they launch.
 
 ### Deployment Timeline
 
@@ -169,6 +176,31 @@ Calculation: ~2.1M agents globally by 2027 × $2,500–3,500 avg spend/month × 
 - **LTV:** R35,000–65,000 (3–5 year retention, 2–3x expansion)
 - **Payback:** 8–12 months
 - **NRR:** 115–125% (expansion basic → pro, team growth)
+
+---
+
+## Future Payment Infrastructure
+
+A-CARD is built as a payment orchestration layer. Multiple new agent-payment rails are launching:
+
+### Emerging Standards (2026–2027)
+
+| Rail | What | Timeline | A-CARD Integration |
+|------|------|----------|-------------------|
+| **Visa Intelligent Commerce** | Tokenized payment credentials scoped to specific merchants/transaction types | 2026–2027 | Agents see Visa IC tools alongside card tools; same approval workflow |
+| **Mastercard Agent Pay** | Secure agentic transactions within regulated banking frameworks | 2026–2027 | Pluggable authorization backend; MC's rules engine can co-decide |
+| **Crypto wallet native** | Agents fund cards directly from on-chain wallets (we already support linking) | Now–2027 | Extend wallet linking to full funding mechanism; stablecoin settlements |
+| **Bank APIs (Open Banking)** | Direct bank account transfers (PSD2, Open Banking) | 2027+ | ACH/EFT as alternative funding rail |
+
+### Strategic Positioning
+
+**A-CARD is not a card company. A-CARD is the agent payment orchestration platform.** We abstract away the underlying rail. Agents issue a `pay()` call; A-CARD:
+1. Evaluates policy (spending limits, merchant categories, approval thresholds)
+2. Routes to the optimal rail (card, Visa IC, MC Agent Pay, crypto wallet, or bank API)
+3. Settles the transaction
+4. Records the decision in the audit log
+
+This makes us **rail-agnostic** and **future-proof**. Agents don't need to know which payment infrastructure is best for a given transaction type — A-CARD does the routing.
 
 ---
 
@@ -221,19 +253,27 @@ Calculation: ~2.1M agents globally by 2027 × $2,500–3,500 avg spend/month × 
 ### 18-Month Roadmap
 
 **Q3 2026: Public Beta (Months 0–3)**
-- Deploy Phase 1. 50–100 signups. First customer feedback.
+- Deploy Phase 1 (MVP cards). 50–100 signups. First customer feedback.
+- Begin payment rail integrations testing (Ukheshe, EFT Eclipse, Paymentology).
 
-**Q4 2026: Issuer Negotiation (Months 3–6)**
-- Close issuer partnership. Begin sandbox testing. 200+ signups, 30–50 paying.
+**Q4 2026: Initial Revenue (Months 3–6)**
+- First issuer live (cards in sandbox + limited production pilot). 200+ signups, 30–50 paying.
+- Crypto wallet funding live (agents can top up from on-chain wallets).
 
-**Q1 2027: Production Integration (Months 6–9)**
-- Issuer sandbox live. Real cards in limited pilot (10–50 orgs). KYC live.
+**Q1 2027: Production GA (Months 6–9)**
+- Real cards at scale (10–50 org pilot → 100+ orgs). Full KYC flow live.
+- 2–3 issuer rails available (Ukheshe + Paymentology or similar).
 
-**Q2 2027: General Availability (Months 9–12)**
-- Full production launch. Real money movement. 150–300 orgs. R2M–4M ARR.
+**Q2 2027: Multi-Rail Architecture (Months 9–12)**
+- Visa Intelligent Commerce integration (beta, as Visa releases).
+- Dashboard shows rail-agnostic transaction history. Agents see optimal routing.
+- 150–300 orgs live. R2M–4M ARR.
 
-**Q3–Q4 2027: Regional Expansion (Months 12–18)**
-- Nigeria, Kenya, Botswana launches. 600+ orgs. R8M–12M ARR.
+**Q3–Q4 2027: AI Agent Payment Ecosystem (Months 12–18)**
+- Mastercard Agent Pay integration (as MC releases).
+- Native bank account ACH/EFT as alternative funding.
+- Regional expansion (Nigeria, Kenya, Botswana).
+- 600+ orgs. R8M–12M ARR. A-CARD becomes the de facto agent payment orchestration layer.
 
 ---
 
@@ -241,12 +281,13 @@ Calculation: ~2.1M agents globally by 2027 × $2,500–3,500 avg spend/month × 
 
 | Risk | Probability | Mitigation |
 |------|-------------|-----------|
-| Issuer partnership delay | Medium | Start conversations now; 2–3 backup partners; extend beta if needed |
-| Regulatory uncertainty (SARB, KYC) | Low–Medium | Hire local legal counsel early; issuer absorbs most compliance |
-| Competition from global players | Medium | Move fast to market; deep issuer relationships; agent-first UX |
-| Agent adoption slower than expected | Low–Medium | Broad GTM; free tier lowers CAC; focus on high-intent segments |
-| Infrastructure costs exceed budget | Low | CDK is cost-optimized (~$200/mo); no heavy ML; scale with revenue |
-| Security incident | Low | Pentest pre-GA; bug bounty; disclosure policy; audit all mutations |
+| Payment rail choice suboptimal | Low | Multiple rails available now (Ukheshe, EFT Eclipse, etc.). We're rail-agnostic; can swap backends without agent-facing changes. |
+| Regulatory uncertainty (SARB, KYC) | Low–Medium | Hire local legal counsel early; issuer absorbs most compliance. First mover advantage in SA market. |
+| Competition from global players (Stripe, Wise) | Medium | Move fast to market; deep issuer/rail partnerships; agent-first UX. Our multi-rail architecture is differentiated. |
+| Agent adoption slower than expected | Low–Medium | Broad GTM (developers, fintech, automation). Free tier lowers CAC. Focus on high-intent segments (founders, finance ops). |
+| Visa IC / MC Agent Pay delay launch | Low | Not a blocker; we launch with existing card rails. New rails plug in when available. |
+| Infrastructure costs exceed budget | Low | CDK is cost-optimized (~$200/mo). No heavy ML. Scale infrastructure with revenue. |
+| Security incident | Low | Pentest pre-GA. Bug bounty program. Disclosure policy. Audit all ledger mutations. |
 
 ---
 
