@@ -82,6 +82,8 @@ const SCHEMA = `
     wallet_account_id TEXT NOT NULL,
     subscription_tier TEXT NOT NULL DEFAULT 'free',
     account_type TEXT NOT NULL DEFAULT 'personal',
+    workos_organization_id TEXT,
+    sso_domain TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 
@@ -324,7 +326,16 @@ export class PostgresPlatformService implements PlatformService {
        ALTER TABLE acard_api_keys ADD COLUMN IF NOT EXISTS provisioned_cents BIGINT NOT NULL DEFAULT 0;
        ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_secret TEXT;
        ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false;
-       ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_recovery_code_hashes JSONB NOT NULL DEFAULT '[]';`,
+       ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_recovery_code_hashes JSONB NOT NULL DEFAULT '[]';
+       ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS workos_organization_id TEXT;
+       ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS sso_domain TEXT;`,
+    );
+    // The uniqueness constraint on sso_domain must come after the column
+    // exists on an upgraded (pre-SSO) deployment, so it runs here rather than
+    // as part of the fresh-install SCHEMA above.
+    await this.pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS acard_account_holders_sso_domain_idx
+       ON acard_account_holders(sso_domain) WHERE sso_domain IS NOT NULL`,
     );
     // Backfill: every existing holder's primary wallet becomes its ZAR/USD/…
     // wallet row, so multi-currency lookups work for accounts created before
@@ -417,6 +428,8 @@ export class PostgresPlatformService implements PlatformService {
       walletAccountId: row.wallet_account_id,
       subscriptionTier: row.subscription_tier,
       accountType: row.account_type ?? "personal",
+      workosOrganizationId: row.workos_organization_id ?? undefined,
+      ssoDomain: row.sso_domain ?? undefined,
       createdAt: new Date(row.created_at).toISOString(),
     };
   }
@@ -536,6 +549,95 @@ export class PostgresPlatformService implements PlatformService {
       if (!res.rowCount) throw new NotFoundError("account holder", accountHolderId);
       stage({ type: "subscription.updated", data: { accountHolderId, tier } });
       return this.mapHolder(res.rows[0]);
+    });
+  }
+
+  // ---- SSO (WorkOS) — additive to password + MFA login, never a replacement ----
+
+  async setSsoOrganization(
+    accountHolderId: string,
+    input: { workosOrganizationId: string; ssoDomain: string },
+  ): Promise<AccountHolder> {
+    const domain = input.ssoDomain.toLowerCase();
+    return this.tx(async (client, stage) => {
+      let res;
+      try {
+        res = await client.query(
+          "UPDATE acard_account_holders SET workos_organization_id = $2, sso_domain = $3 WHERE id = $1 RETURNING *",
+          [accountHolderId, input.workosOrganizationId, domain],
+        );
+      } catch (err: any) {
+        // Unique violation on the partial sso_domain index: another account already owns this domain.
+        if (err?.code === "23505") {
+          throw new InvalidStateError(`the domain ${domain} is already configured for SSO on a different account`);
+        }
+        throw err;
+      }
+      if (!res.rowCount) throw new NotFoundError("account holder", accountHolderId);
+      stage({ type: "sso.configured", data: { accountHolderId, domain } });
+      return this.mapHolder(res.rows[0]);
+    });
+  }
+
+  async getAccountHolderBySsoDomain(domain: string): Promise<AccountHolder | undefined> {
+    const res = await this.pool.query("SELECT * FROM acard_account_holders WHERE sso_domain = $1", [domain.toLowerCase()]);
+    return res.rowCount ? this.mapHolder(res.rows[0]) : undefined;
+  }
+
+  async getAccountHolderByWorkosOrganizationId(workosOrganizationId: string): Promise<AccountHolder | undefined> {
+    const res = await this.pool.query("SELECT * FROM acard_account_holders WHERE workos_organization_id = $1", [
+      workosOrganizationId,
+    ]);
+    return res.rowCount ? this.mapHolder(res.rows[0]) : undefined;
+  }
+
+  async completeSsoLogin(input: {
+    accountHolderId: string;
+    email: string;
+    name: string;
+  }): Promise<{ sessionToken: string; context: SessionContext }> {
+    const email = input.email.toLowerCase();
+    return this.tx(async (client, stage) => {
+      await this.holderById(client, input.accountHolderId); // throws NotFoundError if missing
+
+      let user = (await client.query("SELECT * FROM acard_users WHERE email = $1 FOR UPDATE", [email])).rows[0];
+      if (!user) {
+        const userId = newId("usr");
+        const createdAt = new Date().toISOString();
+        // Random, never-disclosed password — scrypt-hashed like any other, but
+        // nobody knows it, so this user can only ever authenticate through SSO.
+        await client.query(
+          "INSERT INTO acard_users (id, email, name, password_hash, created_at) VALUES ($1,$2,$3,$4,$5)",
+          [userId, email, input.name, hashPassword(randomBytes(24).toString("hex")), createdAt],
+        );
+        user = { id: userId, email, name: input.name, created_at: createdAt };
+      }
+
+      // Only create the membership if one doesn't already exist — an existing
+      // membership's role (e.g. an admin promoted by hand) must not be reset
+      // to `member` on a routine SSO login.
+      await client.query(
+        `INSERT INTO acard_memberships (user_id, account_holder_id, role, created_at)
+         VALUES ($1,$2,'member',$3) ON CONFLICT (user_id, account_holder_id) DO NOTHING`,
+        [user.id, input.accountHolderId, new Date().toISOString()],
+      );
+      const membership = (
+        await client.query("SELECT role FROM acard_memberships WHERE user_id = $1 AND account_holder_id = $2", [
+          user.id,
+          input.accountHolderId,
+        ])
+      ).rows[0];
+
+      stage({ type: "sso.login", data: { accountHolderId: input.accountHolderId, userId: user.id } });
+      const { token } = await this.insertSession(client, user.id, input.accountHolderId);
+      return {
+        sessionToken: token,
+        context: {
+          user: this.mapUser(user),
+          accountHolderId: input.accountHolderId,
+          role: membership.role,
+        },
+      };
     });
   }
 

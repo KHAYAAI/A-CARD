@@ -171,6 +171,17 @@ export class AuthService {
     return id ? this.users.get(id) : undefined;
   }
 
+  /**
+   * Find or create a user for an SSO login. A new user gets a random,
+   * never-disclosed password — scrypt-hashed like any other, but nobody
+   * knows it, so this user can only ever authenticate through SSO.
+   */
+  findOrCreateSsoUser(input: { email: string; name: string }): User {
+    const existing = this.getUserByEmail(input.email);
+    if (existing) return existing;
+    return this.registerUser({ email: input.email, name: input.name, password: randomBytes(24).toString("hex") });
+  }
+
   getUser(id: string): User {
     const user = this.users.get(id);
     if (!user) throw new NotFoundError("user", id);

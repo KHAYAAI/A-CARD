@@ -65,6 +65,23 @@ export class InMemoryPlatformService implements PlatformService {
     return this.platform.setSubscriptionTier(accountHolderId, tier);
   }
 
+  async setSsoOrganization(accountHolderId: string, input: { workosOrganizationId: string; ssoDomain: string }) {
+    return this.platform.setSsoOrganization(accountHolderId, input);
+  }
+
+  async getAccountHolderBySsoDomain(domain: string) {
+    return this.platform.getAccountHolderBySsoDomain(domain);
+  }
+
+  async getAccountHolderByWorkosOrganizationId(workosOrganizationId: string) {
+    return this.platform.getAccountHolderByWorkosOrganizationId(workosOrganizationId);
+  }
+
+  async completeSsoLogin(input: { accountHolderId: string; email: string; name: string }) {
+    const { token, context } = this.platform.completeSsoLogin(input);
+    return { sessionToken: token, context };
+  }
+
   async walletBalance(accountHolderId: string, currency?: import("@acard/core").Currency): Promise<WalletBalance> {
     return this.platform.walletBalance(accountHolderId, currency);
   }

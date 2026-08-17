@@ -1,6 +1,6 @@
 import { ApprovalService, type ApprovalRequest } from "./approvals.js";
 import { ApiKeyService } from "./apikeys.js";
-import { AuthService, type Membership, type Session, type User } from "./auth.js";
+import { AuthService, type Membership, type Session, type SessionContext, type User } from "./auth.js";
 import {
   EnterpriseService,
   type WorkspaceType,
@@ -41,6 +41,10 @@ export interface AccountHolder {
   subscriptionTier: SubscriptionTier;
   /** personal (default) or enterprise workspace — chosen at sign-up. */
   accountType: WorkspaceType;
+  /** WorkOS Organization ID, set once an org owner completes SSO setup. */
+  workosOrganizationId?: string;
+  /** Email domain routed to this org's SSO connection (lowercased). */
+  ssoDomain?: string;
   createdAt: string;
 }
 
@@ -229,6 +233,65 @@ export class Platform {
     holder.subscriptionTier = tier;
     this.emit("subscription.updated", { accountHolderId, tier });
     return holder;
+  }
+
+  // ---- SSO (WorkOS) --------------------------------------------------------
+  //
+  // Existing email/password login (with its own TOTP MFA) stays primary for
+  // every account. This is purely an additive door scoped to organizations
+  // that have configured SAML/OIDC via their own identity provider — an
+  // org owner runs setup once (`setSsoOrganization`), after which any of
+  // their people can sign in through it. A WorkOS profile never becomes a
+  // second source of identity: `completeSsoLogin` resolves it onto the same
+  // User/Membership/Session model password login and MFA already use.
+
+  /** Record the WorkOS Organization an account has configured for SSO, once. */
+  setSsoOrganization(accountHolderId: string, input: { workosOrganizationId: string; ssoDomain: string }): AccountHolder {
+    const holder = this.getAccountHolder(accountHolderId);
+    const domain = input.ssoDomain.toLowerCase();
+    for (const other of this.accountHolders.values()) {
+      if (other.id !== holder.id && other.ssoDomain === domain) {
+        throw new InvalidStateError(`the domain ${domain} is already configured for SSO on a different account`);
+      }
+    }
+    holder.workosOrganizationId = input.workosOrganizationId;
+    holder.ssoDomain = domain;
+    this.emit("sso.configured", { accountHolderId, domain });
+    return holder;
+  }
+
+  /** Which account (if any) a work email's domain routes SSO login to. */
+  getAccountHolderBySsoDomain(domain: string): AccountHolder | undefined {
+    const lower = domain.toLowerCase();
+    return [...this.accountHolders.values()].find((h) => h.ssoDomain === lower);
+  }
+
+  /**
+   * Which account a WorkOS Organization ID belongs to. Used on the SSO
+   * callback, where the organization id comes from WorkOS's own signed
+   * profile rather than anything the caller supplied — the trustworthy end
+   * of the flow, unlike the email domain used to kick it off.
+   */
+  getAccountHolderByWorkosOrganizationId(workosOrganizationId: string): AccountHolder | undefined {
+    return [...this.accountHolders.values()].find((h) => h.workosOrganizationId === workosOrganizationId);
+  }
+
+  /**
+   * Complete an SSO login: find-or-create the user and their membership on
+   * this account, then open a session exactly the way password login does.
+   * New SSO users default to `member` — the org already has an owner from
+   * whoever registered it and ran SSO setup.
+   */
+  completeSsoLogin(input: { accountHolderId: string; email: string; name: string }): {
+    token: string;
+    session: Session;
+    context: SessionContext;
+  } {
+    const holder = this.getAccountHolder(input.accountHolderId);
+    const user = this.auth.findOrCreateSsoUser({ email: input.email, name: input.name });
+    const membership = this.auth.getMembership(user.id, holder.id) ?? this.auth.addMembership(user.id, holder.id, "member");
+    this.emit("sso.login", { accountHolderId: holder.id, userId: user.id });
+    return this.auth.openSession(user, membership);
   }
 
   /** Wallet ledger account for a (holder, currency), created on first use. */

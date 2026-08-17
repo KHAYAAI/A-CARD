@@ -12,6 +12,8 @@ const dashboardUrl = process.env.DASHBOARD_URL;
 const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 const paystackWebhookSecret = process.env.PAYSTACK_WEBHOOK_SECRET;
 const slackWebhookUrl = process.env.SLACK_APPROVALS_WEBHOOK_URL;
+const workosApiKey = process.env.WORKOS_API_KEY;
+const workosClientId = process.env.WORKOS_CLIENT_ID;
 
 /**
  * Persistence modes:
@@ -56,6 +58,14 @@ const app = createApp({
   paystack:
     paystackSecretKey && paystackWebhookSecret
       ? { secretKey: paystackSecretKey, webhookSecret: paystackWebhookSecret }
+      : undefined,
+  // SSO is purely additive to password + MFA login — omit these three and the
+  // deployment runs exactly as before, no code path changes. The callback
+  // lives on this API service (see infra/cdk: the ALB only routes /v1/* here),
+  // so the redirect URI is this same public origin, not the dashboard app.
+  workos:
+    workosApiKey && workosClientId && dashboardUrl
+      ? { apiKey: workosApiKey, clientId: workosClientId, redirectUri: `${dashboardUrl.replace(/\/$/, "")}/v1/auth/sso/callback` }
       : undefined,
 });
 

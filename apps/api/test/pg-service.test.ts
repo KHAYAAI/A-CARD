@@ -27,9 +27,13 @@ const TABLES = [
   "acard_events_seen",
   "acard_events",
   "acard_settlement_accounts",
+  "acard_mfa_challenges",
+  "acard_login_attempts",
   "acard_sessions",
   "acard_memberships",
   "acard_users",
+  "acard_linked_wallets",
+  "acard_wallets",
   "acard_accounts",
   "acard_account_holders",
 ];
@@ -296,6 +300,34 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     const third = await service.login({ email: "mfa@pg.co.za", password: "supersecret" });
     if (third.status !== "mfa_required") throw new Error("expected a challenge");
     await expect(service.verifyMfaChallenge(third.challengeToken, code)).rejects.toMatchObject({ code: "invalid_mfa_code" });
+  });
+
+  it("links a WorkOS org, routes login by domain, and refuses a duplicate domain", async () => {
+    const holder = await service.signup({ email: `ssoA${Date.now()}@acme.co.za`, name: "Acme", currency: "ZAR" });
+    const linked = await service.setSsoOrganization(holder.id, { workosOrganizationId: "org_pg_1", ssoDomain: "Acme-PG.co.za" });
+    expect(linked.ssoDomain).toBe("acme-pg.co.za"); // lowercased
+
+    expect((await service.getAccountHolderBySsoDomain("ACME-PG.CO.ZA"))?.id).toBe(holder.id);
+    expect((await service.getAccountHolderByWorkosOrganizationId("org_pg_1"))?.id).toBe(holder.id);
+
+    const other = await service.signup({ email: `ssoB${Date.now()}@other.co.za`, name: "Other", currency: "ZAR" });
+    await expect(
+      service.setSsoOrganization(other.id, { workosOrganizationId: "org_pg_2", ssoDomain: "acme-pg.co.za" }),
+    ).rejects.toMatchObject({ code: "invalid_state" });
+  });
+
+  it("completes an SSO login under the row lock, creating a member without touching a promoted role on retry", async () => {
+    const holder = await service.signup({ email: `ssoC${Date.now()}@acme2.co.za`, name: "Acme2", currency: "ZAR" });
+    await service.setSsoOrganization(holder.id, { workosOrganizationId: "org_pg_3", ssoDomain: "acme2.co.za" });
+
+    const first = await service.completeSsoLogin({ accountHolderId: holder.id, email: "person@acme2.co.za", name: "Person" });
+    expect(first.sessionToken).toMatch(/^sess_/);
+    expect(first.context.role).toBe("member");
+
+    await service.addMember({ accountHolderId: holder.id, email: "person@acme2.co.za", role: "admin" });
+    const second = await service.completeSsoLogin({ accountHolderId: holder.id, email: "person@acme2.co.za", name: "Person" });
+    expect(second.context.user.id).toBe(first.context.user.id);
+    expect(second.context.role).toBe("admin"); // the second SSO login did not reset the promotion
   });
 
   it("enforces org policy and department budgets in the Postgres hot path", async () => {

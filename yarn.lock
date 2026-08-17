@@ -23,6 +23,7 @@
   version "0.1.0"
   resolved "file:packages/core"
   dependencies:
+    otplib "^13.4.1"
     zod "^3.23.0"
 
 "@acard/dashboard@file:/home/user/A-CARD/apps/dashboard":
@@ -304,6 +305,11 @@
     "@vitest/pretty-format" "2.1.9"
     loupe "^3.1.2"
     tinyrainbow "^1.2.0"
+
+"@workos-inc/node@^10.10.0":
+  version "10.10.0"
+  resolved "https://registry.npmjs.org/@workos-inc/node/-/node-10.10.0.tgz"
+  integrity sha512-qAf00a0DaIFD2yX4D11jCnMsk8w5FpE4Oif8EDBxGnPR1WNelqPeQqRrwX4/9xUpQV0asI6SFkdaffEj6IO33Q==
 
 accepts@^2.0.0:
   version "2.0.0"

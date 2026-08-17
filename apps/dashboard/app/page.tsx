@@ -56,7 +56,7 @@ interface Card { id: string; label?: string; last4: string; status: string; curr
 interface Txn { id: string; merchantName: string; amount: number; currency: string; status: string; declineReason?: string; createdAt: string }
 interface Approval { id: string; merchantName: string; amount: number; currency: string; reason: string; createdAt: string }
 interface Member { user: { id: string; email: string; name: string }; role: string }
-interface Holder { id: string; email: string; name: string; currency: string; subscriptionTier: string; accountType?: string }
+interface Holder { id: string; email: string; name: string; currency: string; subscriptionTier: string; accountType?: string; ssoDomain?: string }
 interface DeptSpend { department: { id: string; name: string; monthlyBudget: number; lead?: string }; spentThisMonth: number; cardCount: number; currency: string }
 interface Policy { blocked_merchant_categories: string[]; approval_threshold?: number }
 
@@ -123,6 +123,9 @@ export default function Dashboard() {
   /** Open MFA challenge from a login that needs a second factor, and the code being entered. */
   const [challenge, setChallenge] = useState("");
   const [mfaCode, setMfaCode] = useState("");
+  /** Work email typed into the "Sign in with SSO" box. */
+  const [ssoEmail, setSsoEmail] = useState("");
+  const [ssoMode, setSsoMode] = useState(false);
 
   // modals & inputs
   const [showCreate, setShowCreate] = useState(false);
@@ -194,7 +197,20 @@ export default function Dashboard() {
     setPolicyBlocked(policy.blocked_merchant_categories.join(", "));
     setPolicyThreshold(policy.approval_threshold ? String(policy.approval_threshold) : "");
   }, [policy]);
-  useEffect(() => { const s = localStorage.getItem("acard_token"); if (s) setToken(s); }, []);
+  useEffect(() => {
+    // Landing back from the WorkOS SSO callback: the API redirects here with
+    // the session token in the query string (the dashboard keeps its session
+    // in localStorage, not a cookie — see the `call` helper below).
+    const params = new URLSearchParams(window.location.search);
+    const ssoToken = params.get("sso_token");
+    if (ssoToken) {
+      setToken(ssoToken);
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+    const s = localStorage.getItem("acard_token");
+    if (s) setToken(s);
+  }, []);
   useEffect(() => {
     if (!token) return;
     localStorage.setItem("acard_token", token);
@@ -225,6 +241,32 @@ export default function Dashboard() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error?.message ?? `request failed (${res.status})`);
       setChallenge(""); setMfaCode(""); setToken(body.session_token);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+  const [ssoSetupBusy, setSsoSetupBusy] = useState(false);
+  const [ssoPortalUrl, setSsoPortalUrl] = useState("");
+  const setupSso = async () => {
+    setError(""); setSsoSetupBusy(true);
+    try {
+      const res = await call("/v1/sso/setup", { method: "POST", body: "{}" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error?.message ?? `request failed (${res.status})`);
+      setSsoPortalUrl(body.portal_url);
+      await refresh(); // pick up the newly set ssoDomain on the account holder
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSsoSetupBusy(false); }
+  };
+  const startSso = async () => {
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/v1/auth/sso/authorize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: ssoEmail.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error?.message ?? `request failed (${res.status})`);
+      window.location.href = body.redirect_url;
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const signOut = async () => {
@@ -308,7 +350,7 @@ export default function Dashboard() {
           <div className="login-title">Give your agent<br />a <span className="em">card</span>.</div>
           <div className="login-sub">Sign in to your console.</div>
 
-          <div className="seg" style={{ marginTop: 18, display: challenge ? "none" : undefined }}>
+          <div className="seg" style={{ marginTop: 18, display: challenge || ssoMode ? "none" : undefined }}>
             <button className={mode === "login" ? "sel" : ""} onClick={() => setMode("login")}>Sign in</button>
             <button className={mode === "register" ? "sel" : ""} onClick={() => setMode("register")}>Create account</button>
             <button className={mode === "apikey" ? "sel" : ""} onClick={() => setMode("apikey")}>API key</button>
@@ -342,6 +384,18 @@ export default function Dashboard() {
               <div className="field"><label>api key</label><input type="password" placeholder="ak_live_…" value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} /></div>
               <button type="submit" className="btn btn-green login-btn">Connect</button>
             </form>
+          ) : mode === "login" && ssoMode ? (
+            <form onSubmit={(e) => { e.preventDefault(); startSso(); }}>
+              <div className="field">
+                <label>work email</label>
+                <input type="email" placeholder="you@yourcompany.com" value={ssoEmail} onChange={(e) => setSsoEmail(e.target.value)} />
+                <div className="hint" style={{ marginTop: 6 }}>Your organisation's identity provider handles the rest.</div>
+              </div>
+              <button type="submit" className="btn btn-green login-btn">Continue with SSO</button>
+              <button type="button" className="btn login-btn" style={{ marginTop: 8 }} onClick={() => { setSsoMode(false); setError(""); }}>
+                Back to password sign-in
+              </button>
+            </form>
           ) : (
             <form onSubmit={(e) => { e.preventDefault(); mode === "register" ? authenticate("/v1/auth/register", { email, name, password, account_type: workspace }) : authenticate("/v1/auth/login", { email, password }); }}>
               {mode === "register" && (
@@ -362,6 +416,11 @@ export default function Dashboard() {
               <div className="field"><label>work email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
               <div className="field"><label>password{mode === "register" ? " (min 8 chars)" : ""}</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
               <button type="submit" className="btn btn-green login-btn">{mode === "register" ? "Create workspace" : "Sign in"}</button>
+              {mode === "login" && (
+                <button type="button" className="btn login-btn" style={{ marginTop: 8 }} onClick={() => { setSsoMode(true); setError(""); }}>
+                  Sign in with SSO instead
+                </button>
+              )}
             </form>
           )}
           {error && <div className="login-note" style={{ color: "var(--red)" }}>{error}</div>}
@@ -677,6 +736,37 @@ export default function Dashboard() {
             <>
               <div className="page-head"><div className="page-title">Team</div><div className="page-sub">People with access to this account, and what they can do.</div></div>
               <div className="stack">
+                {can(role, "owner") && (
+                  <div className="panel panel-pad">
+                    <div className="panel-head"><h2>Single sign-on</h2></div>
+                    {holder?.ssoDomain ? (
+                      <>
+                        <div className="hint">
+                          Configured for <strong>{holder.ssoDomain}</strong> — anyone with that work email can sign in via your identity provider.
+                        </div>
+                        <button className="btn btn-outline" style={{ marginTop: 12 }} onClick={setupSso} disabled={ssoSetupBusy}>
+                          Reopen setup portal
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="hint">
+                          Let your team sign in through your own identity provider (Okta, Azure AD, Google Workspace, and others) instead of a password.
+                        </div>
+                        <button className="btn btn-green" style={{ marginTop: 12 }} onClick={setupSso} disabled={ssoSetupBusy}>
+                          {ssoSetupBusy ? "Setting up…" : "Enable SSO"}
+                        </button>
+                      </>
+                    )}
+                    {ssoPortalUrl && (
+                      <div className="hint" style={{ marginTop: 10 }}>
+                        Send this link to whoever administers your identity provider — they configure the connection themselves, no A-CARD login needed:
+                        <br />
+                        <a href={ssoPortalUrl} target="_blank" rel="noreferrer">{ssoPortalUrl}</a>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="panel panel-pad">
                   <div className="panel-head"><h2>Add a member</h2></div>
                   <div className="filters">

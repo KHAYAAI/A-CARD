@@ -19,6 +19,7 @@ import {
 } from "@acard/core";
 import { PaystackClient, subscriptionReference } from "./paystack.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
+import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
 import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
 
 /**
@@ -48,13 +49,26 @@ export interface AppConfig {
    * always be linked in addition, regardless of this setting.
    */
   embeddedWallet?: EmbeddedWalletConfig;
-  /** Where Paystack should send the customer back after checkout. */
+  /**
+   * WorkOS SSO (optional — omit to run without it). Purely additive: existing
+   * email/password login (with its own TOTP MFA) stays primary for every
+   * account. Accepts either a `WorkOSConfig` (the real client is constructed)
+   * or a `WorkOSClient` directly, so tests can inject a fake without hitting
+   * the network.
+   */
+  workos?: WorkOSConfig | WorkOSClient;
+  /** Where Paystack should send the customer back after checkout, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
 
 function asService(platform: AppConfig["platform"]): PlatformService {
   // A bare `Platform` (has `serialize`) is wrapped; a `PlatformService` passes through.
   return "serialize" in platform ? new InMemoryPlatformService(platform) : platform;
+}
+
+function asWorkOSClient(config: WorkOSConfig | WorkOSClient): WorkOSClient {
+  // A config object (has `apiKey`) builds the real client; a `WorkOSClient` (tests) passes through.
+  return "apiKey" in config ? createWorkOSClient(config) : config;
 }
 
 type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
@@ -86,6 +100,13 @@ const mfaVerifySchema = z.object({
 const mfaCodeSchema = z.object({ code: z.string().min(1) });
 
 const mfaDisableSchema = z.object({ password: z.string().min(1), code: z.string().min(1) });
+
+const ssoSetupSchema = z.object({
+  /** Override the domain routed to this org's SSO connection; defaults to the caller's own email domain. */
+  domain: z.string().min(1).optional(),
+});
+
+const ssoAuthorizeSchema = z.object({ email: z.string().email() });
 
 const issueKeySchema = z.object({
   name: z.string().default("api key"),
@@ -175,6 +196,7 @@ export function createApp(config: AppConfig) {
   const platform = asService(config.platform);
   const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
+  const workos = config.workos ? asWorkOSClient(config.workos) : undefined;
   const app = new Hono<Env>();
 
   // Auto-provision the default embedded wallet for a brand-new account. Best-effort:
@@ -285,9 +307,64 @@ export function createApp(config: AppConfig) {
     });
   });
 
+  // ---- SSO (WorkOS) login initiation: public, the caller has no session yet --
+  // Existing email/password login (above) stays the primary path for every
+  // account; this is purely an additive door for organizations that have
+  // configured SSO via `/v1/sso/setup`.
+
+  app.post("/v1/auth/sso/authorize", async (c) => {
+    if (!workos) return c.json({ error: { code: "sso_not_configured", message: "SSO is not configured on this deployment" } }, 501);
+    const body = ssoAuthorizeSchema.parse(await c.req.json());
+    const domain = domainFromEmail(body.email);
+    const holder = await platform.getAccountHolderBySsoDomain(domain);
+    if (!holder?.workosOrganizationId) {
+      return c.json({ error: { code: "sso_not_configured", message: `no SSO connection is configured for ${domain}` } }, 404);
+    }
+    return c.json({ redirect_url: workos.getAuthorizationUrl(holder.workosOrganizationId) });
+  });
+
+  // The identity provider redirects the browser here after authenticating —
+  // a full page navigation, not a fetch, so this responds with a redirect
+  // (carrying the session token in the query string) rather than JSON. The
+  // dashboard SPA keeps its session in localStorage rather than the cookie
+  // (see apps/dashboard/app/page.tsx), so the token has to travel this way;
+  // the cookie is set too, for any server-rendered client that wants it.
+  //
+  // Kept under /v1/ (rather than a bare /auth/...) so the ALB's existing
+  // "/v1/*" listener rule routes it to this service — see infra/cdk. It's
+  // listed in PUBLIC_V1 below since the caller has no session yet.
+  app.get("/v1/auth/sso/callback", async (c) => {
+    if (!workos) return c.json({ error: { code: "sso_not_configured", message: "SSO is not configured on this deployment" } }, 501);
+    const code = c.req.query("code");
+    if (!code) return c.json({ error: { code: "invalid_request", message: "missing code" } }, 400);
+
+    const profile = await workos.getProfile(code);
+    // The organization id comes from WorkOS's own signed profile, not
+    // anything the caller supplied at the authorize step — this is the
+    // trustworthy end of the flow, unlike the email domain used to start it.
+    const holder = profile.organizationId ? await platform.getAccountHolderByWorkosOrganizationId(profile.organizationId) : undefined;
+    if (!holder) return c.json({ error: { code: "sso_not_configured", message: "no account is linked to this SSO organization" } }, 404);
+
+    const { sessionToken } = await platform.completeSsoLogin({
+      accountHolderId: holder.id,
+      email: profile.email,
+      name: [profile.firstName, profile.lastName].filter(Boolean).join(" ") || profile.email,
+    });
+    setSessionCookie(c, sessionToken);
+    if (!dashboardUrl) return c.json({ session_token: sessionToken });
+    return c.redirect(`${dashboardUrl}/?sso_token=${encodeURIComponent(sessionToken)}`, 302);
+  });
+
   // ---- API-key OR session auth for everything else under /v1 ----------------
 
-  const PUBLIC_V1 = new Set(["/v1/signup", "/v1/auth/register", "/v1/auth/login", "/v1/auth/mfa/verify"]);
+  const PUBLIC_V1 = new Set([
+    "/v1/signup",
+    "/v1/auth/register",
+    "/v1/auth/login",
+    "/v1/auth/mfa/verify",
+    "/v1/auth/sso/authorize",
+    "/v1/auth/sso/callback",
+  ]);
   app.use("/v1/*", async (c, next) => {
     if (PUBLIC_V1.has(c.req.path)) return next();
     const header = c.req.header("authorization") ?? "";
@@ -628,6 +705,28 @@ export function createApp(config: AppConfig) {
   app.delete("/v1/keys/:id", requireRole("admin"), async (c) => {
     await platform.revokeApiKey(c.get("holder").id, c.req.param("id"));
     return c.json({ revoked: true });
+  });
+
+  // ---- SSO (WorkOS) setup — org owner only, self-serve after this point ------
+  // Generates a link to WorkOS's hosted Admin Portal, where the org's own
+  // IT/security team configures their SAML/OIDC connection directly — no
+  // A-CARD login and no code on our side per customer.
+
+  app.post("/v1/sso/setup", requireRole("owner"), async (c) => {
+    if (!workos) return c.json({ error: { code: "sso_not_configured", message: "SSO is not configured on this deployment" } }, 501);
+    const holder = c.get("holder");
+    const body = ssoSetupSchema.parse(await c.req.json().catch(() => ({})));
+
+    let organizationId = holder.workosOrganizationId;
+    if (!organizationId) {
+      const domain = body.domain ?? domainFromEmail(holder.email);
+      const org = await workos.createOrganization(holder.name, domain);
+      organizationId = org.id;
+      await platform.setSsoOrganization(holder.id, { workosOrganizationId: organizationId, ssoDomain: domain });
+    }
+
+    const portalUrl = await workos.generatePortalLink(organizationId, dashboardUrl ?? "https://workos.com");
+    return c.json({ portal_url: portalUrl });
   });
 
   // ---- billing (freemium tiers, ZAR collection via Paystack) ------------------------

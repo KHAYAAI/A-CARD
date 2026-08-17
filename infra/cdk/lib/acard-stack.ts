@@ -81,6 +81,18 @@ export class AcardStack extends cdk.Stack {
       default: "",
       description: "Slack incoming webhook URL for approval-request notifications. Leave blank to disable.",
     });
+    const workosApiKeyParam = new cdk.CfnParameter(this, "WorkOsApiKey", {
+      type: "String",
+      noEcho: true,
+      default: "",
+      description: "WorkOS API key (sk_...). SSO is purely additive to password + MFA login; leave blank to run without it.",
+    });
+    const workosClientIdParam = new cdk.CfnParameter(this, "WorkOsClientId", {
+      type: "String",
+      noEcho: true,
+      default: "",
+      description: "WorkOS Client ID (client_...). Leave blank alongside WorkOsApiKey to run without SSO.",
+    });
 
     // ---- networking: public ALB, private tasks, isolated database -------------
 
@@ -147,6 +159,12 @@ export class AcardStack extends cdk.Stack {
     const slackWebhookUrlSecret = new secretsmanager.Secret(this, "SlackApprovalsWebhookUrlValue", {
       secretStringValue: cdk.SecretValue.cfnParameter(slackWebhookUrlParam),
     });
+    const workosApiKeySecret = new secretsmanager.Secret(this, "WorkOsApiKeyValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(workosApiKeyParam),
+    });
+    const workosClientIdSecret = new secretsmanager.Secret(this, "WorkOsClientIdValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(workosClientIdParam),
+    });
 
     // ---- cluster + load balancer ----------------------------------------------
 
@@ -199,6 +217,8 @@ export class AcardStack extends cdk.Stack {
         PAYSTACK_SECRET_KEY: ecs.Secret.fromSecretsManager(paystackSecretKey),
         PAYSTACK_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(paystackWebhookSecret),
         SLACK_APPROVALS_WEBHOOK_URL: ecs.Secret.fromSecretsManager(slackWebhookUrlSecret),
+        WORKOS_API_KEY: ecs.Secret.fromSecretsManager(workosApiKeySecret),
+        WORKOS_CLIENT_ID: ecs.Secret.fromSecretsManager(workosClientIdSecret),
       },
     });
     apiContainer.addPortMappings({ containerPort: 8787 });

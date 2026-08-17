@@ -107,6 +107,12 @@ export interface PlatformService {
   revokeApiKey(accountHolderId: string, id: string): Promise<void>;
   setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): Promise<AccountHolder>;
 
+  // ---- SSO (WorkOS) — additive to password + MFA login, never a replacement ----
+  setSsoOrganization(accountHolderId: string, input: { workosOrganizationId: string; ssoDomain: string }): Promise<AccountHolder>;
+  getAccountHolderBySsoDomain(domain: string): Promise<AccountHolder | undefined>;
+  getAccountHolderByWorkosOrganizationId(workosOrganizationId: string): Promise<AccountHolder | undefined>;
+  completeSsoLogin(input: { accountHolderId: string; email: string; name: string }): Promise<{ sessionToken: string; context: SessionContext }>;
+
   // ---- wallet (one per currency; ZAR + USD + any supported currency) -------
   /** Balance for a single currency (defaults to the holder's primary currency). */
   walletBalance(accountHolderId: string, currency?: Currency): Promise<WalletBalance>;
