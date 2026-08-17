@@ -1,7 +1,9 @@
-import { Platform, publicUser, type OrgPolicy, type PlatformEvent, type Role, type WorkspaceType } from "@acard/core";
+import { Platform, publicUser, type ApiKeyScope, type OrgPolicy, type PlatformEvent, type Role, type WorkspaceType } from "@acard/core";
 import type {
+  ApiKeyPrincipal,
   CreateCardParams,
   IdempotencyLookup,
+  LoginOutcome,
   MemberView,
   PlatformService,
   RegisterResult,
@@ -32,15 +34,31 @@ export class InMemoryPlatformService implements PlatformService {
     }
   }
 
-  async issueApiKey(accountHolderId: string, name: string) {
-    const issued = this.platform.apiKeys.issue(accountHolderId, name);
-    return { secret: issued.secret, id: issued.key.id };
+  async issueApiKey(accountHolderId: string, name: string, options: { scope?: ApiKeyScope; spendCapCents?: number } = {}) {
+    const issued = this.platform.apiKeys.issue(accountHolderId, name, options);
+    return {
+      secret: issued.secret,
+      id: issued.key.id,
+      scope: issued.key.scope,
+      spendCapCents: issued.key.spendCapCents,
+    };
   }
 
-  async authenticateApiKey(secret: string) {
+  async authenticateApiKey(secret: string): Promise<ApiKeyPrincipal | undefined> {
     const key = this.platform.apiKeys.authenticate(secret);
     if (!key) return undefined;
-    return this.platform.getAccountHolder(key.accountHolderId);
+    const holder = this.platform.getAccountHolder(key.accountHolderId);
+    return holder ? { holder, key } : undefined;
+  }
+
+  async listApiKeys(accountHolderId: string) {
+    return this.platform.apiKeys.list(accountHolderId).map(({ hashedSecret: _secret, ...rest }) => rest);
+  }
+
+  async revokeApiKey(accountHolderId: string, id: string) {
+    const key = this.platform.apiKeys.list(accountHolderId).find((k) => k.id === id);
+    if (!key) throw new (await import("@acard/core")).NotFoundError("api key", id);
+    this.platform.apiKeys.revoke(id);
   }
 
   async setSubscriptionTier(accountHolderId: string, tier: import("@acard/core").SubscriptionTier) {
@@ -62,7 +80,16 @@ export class InMemoryPlatformService implements PlatformService {
   }
 
   async createCard(input: CreateCardParams) {
-    return this.platform.createCard(input);
+    const { apiKeyId, ...cardInput } = input;
+    // Check the cap before creating, then draw it down only once the card
+    // exists — so a card refused for an unrelated reason (plan limit, bad
+    // department) does not silently eat the key's allowance. Safe to do in two
+    // steps here because this path is synchronous and single-writer; the
+    // Postgres store instead relies on its transaction to roll both back.
+    if (apiKeyId) this.platform.apiKeys.assertSpendAllowance(apiKeyId, cardInput.limits?.total);
+    const card = this.platform.createCard(cardInput);
+    if (apiKeyId) this.platform.apiKeys.recordSpend(apiKeyId, cardInput.limits?.total);
+    return card;
   }
 
   async listCards(accountHolderId: string) {
@@ -154,9 +181,27 @@ export class InMemoryPlatformService implements PlatformService {
     return this.platform.setPolicy(accountHolderId, policy);
   }
 
-  async login(input: { email: string; password: string; accountHolderId?: string }) {
-    const { token, context } = this.platform.auth.login(input);
+  async login(input: { email: string; password: string; accountHolderId?: string }): Promise<LoginOutcome> {
+    const result = this.platform.auth.login(input);
+    if (result.status === "mfa_required") return result;
+    return { status: "authenticated", sessionToken: result.token, context: result.context };
+  }
+
+  async verifyMfaChallenge(challengeToken: string, code: string) {
+    const { token, context } = this.platform.auth.verifyMfaChallenge(challengeToken, code);
     return { sessionToken: token, context };
+  }
+
+  async beginMfaEnrolment(userId: string) {
+    return this.platform.auth.beginMfaEnrolment(userId);
+  }
+
+  async confirmMfaEnrolment(userId: string, code: string) {
+    return this.platform.auth.confirmMfaEnrolment(userId, code);
+  }
+
+  async disableMfa(userId: string, password: string, code: string) {
+    this.platform.auth.disableMfa(userId, password, code);
   }
 
   async resolveSession(token: string) {

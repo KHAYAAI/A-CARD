@@ -11,7 +11,9 @@ import {
   SUBSCRIPTION_TIERS,
   verifyWebhook,
   type AccountHolder,
+  type ApiKey,
   type Currency,
+  type PublicUser,
   type Role,
   type SubscriptionTier,
 } from "@acard/core";
@@ -55,7 +57,7 @@ function asService(platform: AppConfig["platform"]): PlatformService {
   return "serialize" in platform ? new InMemoryPlatformService(platform) : platform;
 }
 
-type Env = { Variables: { holder: AccountHolder; role: Role } };
+type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
 
 const SESSION_COOKIE = "acard_session";
 const currencySchema = z.enum(["ZAR", "USD", "NGN", "KES"]);
@@ -74,6 +76,22 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
   account_holder_id: z.string().optional(),
+});
+
+const mfaVerifySchema = z.object({
+  challenge_token: z.string().min(1),
+  code: z.string().min(1),
+});
+
+const mfaCodeSchema = z.object({ code: z.string().min(1) });
+
+const mfaDisableSchema = z.object({ password: z.string().min(1), code: z.string().min(1) });
+
+const issueKeySchema = z.object({
+  name: z.string().default("api key"),
+  scope: z.enum(["full", "read_only"]).default("full"),
+  /** Cumulative card budget this key may provision, in minor units. */
+  spend_cap_cents: z.number().int().positive().optional(),
 });
 
 const addMemberSchema = z.object({
@@ -236,18 +254,40 @@ export function createApp(config: AppConfig) {
 
   app.post("/v1/auth/login", async (c) => {
     const body = loginSchema.parse(await c.req.json());
-    const { sessionToken, context } = await platform.login({
+    const result = await platform.login({
       email: body.email,
       password: body.password,
       accountHolderId: body.account_holder_id,
     });
+    if (result.status === "mfa_required") {
+      // No session and no cookie yet — the challenge is not an authenticated state.
+      return c.json({ mfa_required: true, challenge_token: result.challengeToken }, 200);
+    }
+    setSessionCookie(c, result.sessionToken);
+    return c.json({
+      user: result.context.user,
+      account_holder_id: result.context.accountHolderId,
+      role: result.context.role,
+      session_token: result.sessionToken,
+    });
+  });
+
+  // Second step of an MFA login: public, because the caller has no session yet.
+  app.post("/v1/auth/mfa/verify", async (c) => {
+    const body = mfaVerifySchema.parse(await c.req.json());
+    const { sessionToken, context } = await platform.verifyMfaChallenge(body.challenge_token, body.code);
     setSessionCookie(c, sessionToken);
-    return c.json({ user: context.user, account_holder_id: context.accountHolderId, role: context.role, session_token: sessionToken });
+    return c.json({
+      user: context.user,
+      account_holder_id: context.accountHolderId,
+      role: context.role,
+      session_token: sessionToken,
+    });
   });
 
   // ---- API-key OR session auth for everything else under /v1 ----------------
 
-  const PUBLIC_V1 = new Set(["/v1/signup", "/v1/auth/register", "/v1/auth/login"]);
+  const PUBLIC_V1 = new Set(["/v1/signup", "/v1/auth/register", "/v1/auth/login", "/v1/auth/mfa/verify"]);
   app.use("/v1/*", async (c, next) => {
     if (PUBLIC_V1.has(c.req.path)) return next();
     const header = c.req.header("authorization") ?? "";
@@ -255,10 +295,13 @@ export function createApp(config: AppConfig) {
 
     // Programmatic tenant credential (agents, CLI, MCP): full access.
     if (bearer.startsWith("ak_")) {
-      const holder = await platform.authenticateApiKey(bearer);
-      if (!holder) return c.json({ error: { code: "unauthorized", message: "invalid API key" } }, 401);
-      c.set("holder", holder);
-      c.set("role", "owner");
+      const principal = await platform.authenticateApiKey(bearer);
+      if (!principal) return c.json({ error: { code: "unauthorized", message: "invalid API key" } }, 401);
+      c.set("holder", principal.holder);
+      c.set("apiKey", principal.key);
+      // A read-only key is exactly a viewer: reads pass, every write route's
+      // existing `requireRole` gate rejects it. No second permission system.
+      c.set("role", principal.key.scope === "read_only" ? "viewer" : "owner");
       return next();
     }
 
@@ -271,6 +314,7 @@ export function createApp(config: AppConfig) {
         if (holder) {
           c.set("holder", holder);
           c.set("role", ctx.role);
+          c.set("sessionUser", ctx.user);
           return next();
         }
       }
@@ -290,6 +334,36 @@ export function createApp(config: AppConfig) {
   app.get("/v1/auth/me", async (c) => {
     const holder = c.get("holder");
     return c.json({ account_holder: holder, role: c.get("role"), wallets: await platform.walletBalances(holder.id) });
+  });
+
+  // ---- MFA enrolment (authenticated; the verify step above is public) --------
+  // Enrolment acts on the signed-in *user*, so it needs a session — an API key
+  // authenticates an org, not a person, and has no second factor to enrol.
+
+  const sessionUserId = (c: Context<Env>): string => {
+    const user = c.get("sessionUser");
+    if (!user) {
+      throw new DomainError("session_required", "MFA is managed by a signed-in user, not an API key", 403);
+    }
+    return user.id;
+  };
+
+  app.post("/v1/auth/mfa/setup", async (c) => {
+    const { secret, keyUri } = await platform.beginMfaEnrolment(sessionUserId(c));
+    return c.json({ secret, otpauth_url: keyUri });
+  });
+
+  app.post("/v1/auth/mfa/enable", async (c) => {
+    const body = mfaCodeSchema.parse(await c.req.json());
+    const { recoveryCodes } = await platform.confirmMfaEnrolment(sessionUserId(c), body.code);
+    // Shown exactly once — they are stored only as hashes.
+    return c.json({ enabled: true, recovery_codes: recoveryCodes });
+  });
+
+  app.post("/v1/auth/mfa/disable", async (c) => {
+    const body = mfaDisableSchema.parse(await c.req.json());
+    await platform.disableMfa(sessionUserId(c), body.password, body.code);
+    return c.json({ enabled: false });
   });
 
   app.post("/v1/auth/logout", async (c) => {
@@ -461,6 +535,7 @@ export function createApp(config: AppConfig) {
         : undefined,
       allowedMerchantCategories: body.allowed_merchant_categories,
       approvalThreshold: body.approval_threshold,
+      apiKeyId: c.get("apiKey")?.id,
     });
     // Sandbox returns full card credentials once at creation, like issuer
     // sandboxes do. Production would return an issuer-hosted credential URL.
@@ -530,9 +605,29 @@ export function createApp(config: AppConfig) {
 
   app.post("/v1/keys", requireRole("admin"), async (c) => {
     const holder = c.get("holder");
-    const body = z.object({ name: z.string().default("api key") }).parse(await c.req.json().catch(() => ({})));
-    const issued = await platform.issueApiKey(holder.id, body.name);
-    return c.json({ api_key: issued.secret, api_key_id: issued.id }, 201);
+    const body = issueKeySchema.parse(await c.req.json().catch(() => ({})));
+    const issued = await platform.issueApiKey(holder.id, body.name, {
+      scope: body.scope,
+      spendCapCents: body.spend_cap_cents,
+    });
+    return c.json(
+      {
+        api_key: issued.secret,
+        api_key_id: issued.id,
+        scope: issued.scope,
+        spend_cap_cents: issued.spendCapCents ?? null,
+      },
+      201,
+    );
+  });
+
+  app.get("/v1/keys", requireRole("admin"), async (c) => {
+    return c.json({ keys: await platform.listApiKeys(c.get("holder").id) });
+  });
+
+  app.delete("/v1/keys/:id", requireRole("admin"), async (c) => {
+    await platform.revokeApiKey(c.get("holder").id, c.req.param("id"));
+    return c.json({ revoked: true });
   });
 
   // ---- billing (freemium tiers, ZAR collection via Paystack) ------------------------

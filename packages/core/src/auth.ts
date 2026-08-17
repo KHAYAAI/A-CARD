@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
 import { newId } from "./ids.js";
 import { DomainError, InvalidStateError, NotFoundError } from "./errors.js";
+import { generateMfaSecret, generateRecoveryCodes, hashRecoveryCode, mfaKeyUri, verifyTotp } from "./mfa.js";
 
 /**
  * Human authentication and role-based access control for the dashboard.
@@ -28,6 +29,12 @@ export interface User {
   name: string;
   passwordHash: string;
   createdAt: string;
+  /** TOTP shared secret. Present once enrolment starts, before it is confirmed. */
+  mfaSecret?: string;
+  /** Only true after a first valid code proves the authenticator is working. */
+  mfaEnabled?: boolean;
+  /** SHA-256 of each unused recovery code; entries are removed as they are consumed. */
+  mfaRecoveryCodeHashes?: string[];
 }
 
 export interface Membership {
@@ -49,10 +56,30 @@ export interface Session {
 }
 
 export interface SessionContext {
-  user: Omit<User, "passwordHash">;
+  user: PublicUser;
   accountHolderId: string;
   role: Role;
 }
+
+/**
+ * A pending second factor. Password verification succeeded, but no session
+ * exists yet — the challenge is exchanged for one by presenting a valid TOTP
+ * or recovery code. Short-lived and single-use, so an intercepted challenge is
+ * worth little on its own.
+ */
+export interface MfaChallenge {
+  hashedToken: string;
+  userId: string;
+  accountHolderId: string;
+  expiresAt: string;
+}
+
+/** What a login returns: either a session, or the demand for a second factor. */
+export type LoginResult =
+  | { status: "authenticated"; token: string; session: Session; context: SessionContext }
+  | { status: "mfa_required"; challengeToken: string };
+
+export const MFA_CHALLENGE_TTL_MS = 1000 * 60 * 5; // 5 minutes
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
@@ -82,8 +109,11 @@ export function hashSessionToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function publicUser(user: User): Omit<User, "passwordHash"> {
-  const { passwordHash: _hash, ...rest } = user;
+/** A user as it may cross the API boundary: no password hash, no MFA material. */
+export type PublicUser = Omit<User, "passwordHash" | "mfaSecret" | "mfaRecoveryCodeHashes">;
+
+export function publicUser(user: User): PublicUser {
+  const { passwordHash: _hash, mfaSecret: _secret, mfaRecoveryCodeHashes: _codes, ...rest } = user;
   return rest;
 }
 
@@ -98,6 +128,8 @@ export class AuthService {
   private readonly sessions = new Map<string, Session>();
   /** email (lowercased) -> timestamps (ms) of recent failed login attempts. Not persisted — resetting on restart is an acceptable trade-off for an in-memory security counter. */
   private readonly failedLoginAttempts = new Map<string, number[]>();
+  /** Pending second factors, keyed by hashed challenge token. Short-lived, so not persisted. */
+  private readonly mfaChallenges = new Map<string, MfaChallenge>();
 
   serialize(): { users: User[]; memberships: Membership[]; sessions: Session[] } {
     return { users: [...this.users.values()], memberships: this.memberships, sessions: [...this.sessions.values()] };
@@ -187,8 +219,12 @@ export class AuthService {
     this.failedLoginAttempts.delete(email.toLowerCase());
   }
 
-  /** Verify credentials and open a session bound to `accountHolderId`. Returns the raw token once. */
-  login(input: { email: string; password: string; accountHolderId?: string }): { token: string; session: Session; context: SessionContext } {
+  /**
+   * Verify credentials. Returns a session for users without MFA; for users
+   * with MFA enabled it returns a challenge that must be exchanged via
+   * `verifyMfaChallenge` before any session exists.
+   */
+  login(input: { email: string; password: string; accountHolderId?: string }): LoginResult {
     if (this.recentFailedAttempts(input.email).length >= LOGIN_LOCKOUT_THRESHOLD) {
       throw new DomainError("account_locked", "too many failed login attempts — try again in a few minutes", 429);
     }
@@ -202,7 +238,97 @@ export class AuthService {
     const membership =
       (input.accountHolderId && memberships.find((m) => m.accountHolderId === input.accountHolderId)) || memberships[0];
     if (!membership) throw new DomainError("no_membership", "user has no organization", 403);
+
+    if (user.mfaEnabled) {
+      return { status: "mfa_required", challengeToken: this.openMfaChallenge(user.id, membership.accountHolderId) };
+    }
+    return { status: "authenticated", ...this.openSession(user, membership) };
+  }
+
+  private openMfaChallenge(userId: string, accountHolderId: string): string {
+    const token = `mfa_${randomBytes(32).toString("base64url")}`;
+    this.mfaChallenges.set(hashSessionToken(token), {
+      hashedToken: hashSessionToken(token),
+      userId,
+      accountHolderId,
+      expiresAt: new Date(Date.now() + MFA_CHALLENGE_TTL_MS).toISOString(),
+    });
+    return token;
+  }
+
+  /**
+   * Exchange a login challenge plus a TOTP (or recovery) code for a session.
+   * The challenge is consumed either way, so a wrong code costs a full
+   * password round-trip rather than allowing unlimited guesses.
+   */
+  verifyMfaChallenge(challengeToken: string, code: string): { token: string; session: Session; context: SessionContext } {
+    const hashed = hashSessionToken(challengeToken);
+    const challenge = this.mfaChallenges.get(hashed);
+    this.mfaChallenges.delete(hashed);
+    if (!challenge || Date.parse(challenge.expiresAt) < Date.now()) {
+      throw new DomainError("invalid_mfa_challenge", "this login attempt expired — sign in again", 401);
+    }
+    const user = this.getUser(challenge.userId);
+    if (!this.consumeMfaCode(user, code)) {
+      throw new DomainError("invalid_mfa_code", "invalid authentication code", 401);
+    }
+    const membership = this.getMembership(user.id, challenge.accountHolderId);
+    if (!membership) throw new DomainError("no_membership", "user has no organization", 403);
     return this.openSession(user, membership);
+  }
+
+  /** True if `code` is a valid TOTP or an unused recovery code (which it then burns). */
+  private consumeMfaCode(user: User, code: string): boolean {
+    if (user.mfaSecret && verifyTotp(code, user.mfaSecret)) return true;
+    const hashed = hashRecoveryCode(code);
+    const remaining = user.mfaRecoveryCodeHashes ?? [];
+    const index = remaining.indexOf(hashed);
+    if (index === -1) return false;
+    remaining.splice(index, 1);
+    user.mfaRecoveryCodeHashes = remaining;
+    return true;
+  }
+
+  /**
+   * Begin enrolment: mint a secret and return the `otpauth://` URI for a QR
+   * code. MFA is not active until `confirmMfa` proves the device works, so an
+   * abandoned setup cannot lock anyone out.
+   */
+  beginMfaEnrolment(userId: string): { secret: string; keyUri: string } {
+    const user = this.getUser(userId);
+    if (user.mfaEnabled) throw new InvalidStateError("MFA is already enabled for this user");
+    const secret = generateMfaSecret();
+    user.mfaSecret = secret;
+    return { secret, keyUri: mfaKeyUri(user.email, secret) };
+  }
+
+  /** Confirm enrolment with a live code; returns recovery codes, shown once. */
+  confirmMfaEnrolment(userId: string, code: string): { recoveryCodes: string[] } {
+    const user = this.getUser(userId);
+    if (user.mfaEnabled) throw new InvalidStateError("MFA is already enabled for this user");
+    if (!user.mfaSecret) throw new InvalidStateError("start MFA enrolment before confirming it");
+    if (!verifyTotp(code, user.mfaSecret)) {
+      throw new DomainError("invalid_mfa_code", "invalid authentication code", 401);
+    }
+    const { codes, hashes } = generateRecoveryCodes();
+    user.mfaEnabled = true;
+    user.mfaRecoveryCodeHashes = hashes;
+    return { recoveryCodes: codes };
+  }
+
+  /** Turn MFA off. Requires the password *and* a current code — either factor alone is not enough. */
+  disableMfa(userId: string, password: string, code: string): void {
+    const user = this.getUser(userId);
+    if (!user.mfaEnabled) throw new InvalidStateError("MFA is not enabled for this user");
+    if (!verifyPassword(password, user.passwordHash)) {
+      throw new DomainError("invalid_credentials", "invalid password", 401);
+    }
+    if (!this.consumeMfaCode(user, code)) {
+      throw new DomainError("invalid_mfa_code", "invalid authentication code", 401);
+    }
+    user.mfaEnabled = false;
+    user.mfaSecret = undefined;
+    user.mfaRecoveryCodeHashes = undefined;
   }
 
   openSession(user: User, membership: Membership): { token: string; session: Session; context: SessionContext } {

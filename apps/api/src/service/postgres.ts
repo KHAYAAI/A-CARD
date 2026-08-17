@@ -5,17 +5,25 @@ import {
   currentBillingPeriod,
   DomainError,
   evaluateRules,
+  generateMfaSecret,
+  generateRecoveryCodes,
   hashApiKeySecret,
   hashPassword,
+  hashRecoveryCode,
   hashSessionToken,
   InvalidStateError,
   LOGIN_LOCKOUT_THRESHOLD,
   LOGIN_LOCKOUT_WINDOW_MS,
+  MFA_CHALLENGE_TTL_MS,
+  mfaKeyUri,
   newId,
   NotFoundError,
   SUBSCRIPTION_TIERS,
   verifyPassword,
+  verifyTotp,
   type AccountHolder,
+  type ApiKey,
+  type ApiKeyScope,
   type ApprovalRequest,
   type ApprovalStatus,
   type AuthorizationDecision,
@@ -31,6 +39,7 @@ import {
   type LinkedWallet,
   type OrgPolicy,
   type PlatformEvent,
+  type PublicUser,
   type Role,
   type SessionContext,
   type SubscriptionTier,
@@ -38,8 +47,10 @@ import {
 } from "@acard/core";
 import { randomBytes } from "node:crypto";
 import type {
+  ApiKeyPrincipal,
   CreateCardParams,
   IdempotencyLookup,
+  LoginOutcome,
   MemberView,
   PlatformService,
   RegisterResult,
@@ -200,6 +211,9 @@ const SCHEMA = `
     name TEXT NOT NULL,
     hashed_secret TEXT UNIQUE NOT NULL,
     prefix TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'full',
+    spend_cap_cents BIGINT,
+    provisioned_cents BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at TIMESTAMPTZ
   );
@@ -229,6 +243,9 @@ const SCHEMA = `
     email TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    mfa_secret TEXT,
+    mfa_enabled BOOLEAN NOT NULL DEFAULT false,
+    mfa_recovery_code_hashes JSONB NOT NULL DEFAULT '[]',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 
@@ -264,6 +281,15 @@ const SCHEMA = `
     expires_at TIMESTAMPTZ NOT NULL
   );
 
+  -- Pending second factors. Short-lived, but shared across instances so the
+  -- challenge a user was issued is honoured whichever task serves the retry.
+  CREATE TABLE IF NOT EXISTS acard_mfa_challenges (
+    hashed_token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    account_holder_id TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL
+  );
+
   -- Per-account login lockout, shared across API instances (the WAF rate limit
   -- on /v1/auth/login is IP-keyed and can't catch an attacker rotating IPs
   -- against one email; this can, because every instance reads the same table).
@@ -287,10 +313,18 @@ export class PostgresPlatformService implements PlatformService {
 
   async migrate(): Promise<void> {
     await this.pool.query(SCHEMA);
-    // Additive columns for deployments created before enterprise support.
+    // Additive columns for deployments created before enterprise support,
+    // API-key scoping, and MFA. Existing keys stay full-access and uncapped;
+    // existing users stay single-factor — neither is retroactively tightened.
     await this.pool.query(
       `ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'personal';
-       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS department_id TEXT;`,
+       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS department_id TEXT;
+       ALTER TABLE acard_api_keys ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'full';
+       ALTER TABLE acard_api_keys ADD COLUMN IF NOT EXISTS spend_cap_cents BIGINT;
+       ALTER TABLE acard_api_keys ADD COLUMN IF NOT EXISTS provisioned_cents BIGINT NOT NULL DEFAULT 0;
+       ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_secret TEXT;
+       ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false;
+       ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_recovery_code_hashes JSONB NOT NULL DEFAULT '[]';`,
     );
     // Backfill: every existing holder's primary wallet becomes its ZAR/USD/…
     // wallet row, so multi-currency lookups work for accounts created before
@@ -398,26 +432,99 @@ export class PostgresPlatformService implements PlatformService {
     return res.rowCount ? this.mapHolder(res.rows[0]) : undefined;
   }
 
-  async issueApiKey(accountHolderId: string, name: string): Promise<{ secret: string; id: string }> {
-    const secret = `ak_live_${randomBytes(24).toString("base64url")}`;
-    const id = newId("key");
-    await this.pool.query(
-      `INSERT INTO acard_api_keys (id, account_holder_id, name, hashed_secret, prefix)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, accountHolderId, name, hashApiKeySecret(secret), secret.slice(0, 12)],
-    );
-    return { secret, id };
+  private mapApiKey(row: any): ApiKey {
+    return {
+      id: row.id,
+      accountHolderId: row.account_holder_id,
+      name: row.name,
+      hashedSecret: row.hashed_secret,
+      prefix: row.prefix,
+      scope: (row.scope ?? "full") as ApiKeyScope,
+      spendCapCents: row.spend_cap_cents === null || row.spend_cap_cents === undefined ? undefined : Number(row.spend_cap_cents),
+      provisionedCents: Number(row.provisioned_cents ?? 0),
+      createdAt: new Date(row.created_at).toISOString(),
+      revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : undefined,
+    };
   }
 
-  async authenticateApiKey(secret: string): Promise<AccountHolder | undefined> {
+  async issueApiKey(
+    accountHolderId: string,
+    name: string,
+    options: { scope?: ApiKeyScope; spendCapCents?: number } = {},
+  ): Promise<{ secret: string; id: string; scope: ApiKeyScope; spendCapCents?: number }> {
+    const secret = `ak_live_${randomBytes(24).toString("base64url")}`;
+    const id = newId("key");
+    const scope = options.scope ?? "full";
+    await this.pool.query(
+      `INSERT INTO acard_api_keys (id, account_holder_id, name, hashed_secret, prefix, scope, spend_cap_cents)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, accountHolderId, name, hashApiKeySecret(secret), secret.slice(0, 12), scope, options.spendCapCents ?? null],
+    );
+    return { secret, id, scope, spendCapCents: options.spendCapCents };
+  }
+
+  async authenticateApiKey(secret: string): Promise<ApiKeyPrincipal | undefined> {
     const res = await this.pool.query(
-      `SELECT h.* FROM acard_api_keys k
+      `SELECT k.*, row_to_json(h.*) AS holder FROM acard_api_keys k
        JOIN acard_account_holders h ON h.id = k.account_holder_id
        WHERE k.hashed_secret = $1 AND k.revoked_at IS NULL`,
       [hashApiKeySecret(secret)],
     );
     if (!res.rowCount) return undefined;
-    return this.mapHolder(res.rows[0]);
+    const row = res.rows[0];
+    return { holder: this.mapHolder(row.holder), key: this.mapApiKey(row) };
+  }
+
+  async listApiKeys(accountHolderId: string): Promise<Omit<ApiKey, "hashedSecret">[]> {
+    const res = await this.pool.query(
+      "SELECT * FROM acard_api_keys WHERE account_holder_id = $1 ORDER BY created_at ASC",
+      [accountHolderId],
+    );
+    return res.rows.map((row) => {
+      const { hashedSecret: _secret, ...rest } = this.mapApiKey(row);
+      return rest;
+    });
+  }
+
+  async revokeApiKey(accountHolderId: string, id: string): Promise<void> {
+    const res = await this.pool.query(
+      "UPDATE acard_api_keys SET revoked_at = now() WHERE id = $1 AND account_holder_id = $2 AND revoked_at IS NULL",
+      [id, accountHolderId],
+    );
+    if (!res.rowCount) throw new NotFoundError("api key", id);
+  }
+
+  /**
+   * Charge a capped key for card budget, under a row lock so two concurrent
+   * card creations through the same key cannot both pass the check and
+   * together exceed the cap — the same hazard the wallet ledger guards against.
+   */
+  private async consumeKeySpendAllowance(client: Client, apiKeyId: string, amountCents: number | undefined): Promise<void> {
+    const res = await client.query(
+      "SELECT spend_cap_cents, provisioned_cents FROM acard_api_keys WHERE id = $1 FOR UPDATE",
+      [apiKeyId],
+    );
+    if (!res.rowCount) return;
+    const { spend_cap_cents: cap, provisioned_cents: used } = res.rows[0];
+    if (cap === null || cap === undefined) return;
+    if (amountCents === undefined) {
+      throw new DomainError(
+        "card_budget_required",
+        "a spend-capped API key must set limits.total on every card it creates",
+        400,
+      );
+    }
+    if (Number(used) + amountCents > Number(cap)) {
+      throw new DomainError(
+        "api_key_spend_cap_exceeded",
+        `this API key may provision at most ${Number(cap)} (minor units) of card budget; ${Number(used)} already used`,
+        403,
+      );
+    }
+    await client.query("UPDATE acard_api_keys SET provisioned_cents = provisioned_cents + $2 WHERE id = $1", [
+      apiKeyId,
+      amountCents,
+    ]);
   }
 
   async setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): Promise<AccountHolder> {
@@ -658,6 +765,9 @@ export class PostgresPlatformService implements PlatformService {
           402,
         );
       }
+      // Inside the same transaction as the insert: a refused charge rolls the
+      // card back, and a committed card is always accounted for against the key.
+      if (input.apiKeyId) await this.consumeKeySpendAllowance(client, input.apiKeyId, input.limits?.total);
       const card = createCard({ ...input, currency, walletAccountId });
       await client.query(
         `INSERT INTO acard_cards
@@ -1174,7 +1284,7 @@ export class PostgresPlatformService implements PlatformService {
     return { token, expiresAt };
   }
 
-  async login(input: { email: string; password: string; accountHolderId?: string }): Promise<{ sessionToken: string; context: SessionContext }> {
+  async login(input: { email: string; password: string; accountHolderId?: string }): Promise<LoginOutcome> {
     const email = input.email.toLowerCase();
     const windowStart = new Date(Date.now() - LOGIN_LOCKOUT_WINDOW_MS).toISOString();
     const attemptsRes = await this.pool.query(
@@ -1200,13 +1310,29 @@ export class PostgresPlatformService implements PlatformService {
     const membership =
       (input.accountHolderId && memberships.rows.find((m) => m.account_holder_id === input.accountHolderId)) ||
       memberships.rows[0];
+
+    if (user.mfa_enabled) {
+      const challengeToken = `mfa_${randomBytes(32).toString("base64url")}`;
+      await this.pool.query(
+        "INSERT INTO acard_mfa_challenges (hashed_token, user_id, account_holder_id, expires_at) VALUES ($1,$2,$3,$4)",
+        [
+          hashSessionToken(challengeToken),
+          user.id,
+          membership.account_holder_id,
+          new Date(Date.now() + MFA_CHALLENGE_TTL_MS).toISOString(),
+        ],
+      );
+      return { status: "mfa_required", challengeToken };
+    }
+
     const client = await this.pool.connect();
     try {
       const { token } = await this.insertSession(client, user.id, membership.account_holder_id);
       return {
+        status: "authenticated",
         sessionToken: token,
         context: {
-          user: { id: user.id, email: user.email, name: user.name, createdAt: new Date(user.created_at).toISOString() },
+          user: this.mapUser(user),
           accountHolderId: membership.account_holder_id,
           role: membership.role,
         },
@@ -1214,6 +1340,113 @@ export class PostgresPlatformService implements PlatformService {
     } finally {
       client.release();
     }
+  }
+
+  private mapUser(row: any): PublicUser {
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      createdAt: new Date(row.created_at).toISOString(),
+      mfaEnabled: Boolean(row.mfa_enabled),
+    };
+  }
+
+  async verifyMfaChallenge(challengeToken: string, code: string): Promise<{ sessionToken: string; context: SessionContext }> {
+    return this.tx(async (client) => {
+      const hashed = hashSessionToken(challengeToken);
+      // Delete-and-return: the challenge is spent whether or not the code is
+      // right, so a stolen challenge cannot be used to grind codes.
+      const res = await client.query("DELETE FROM acard_mfa_challenges WHERE hashed_token = $1 RETURNING *", [hashed]);
+      if (!res.rowCount || new Date(res.rows[0].expires_at).getTime() < Date.now()) {
+        throw new DomainError("invalid_mfa_challenge", "this login attempt expired — sign in again", 401);
+      }
+      const challenge = res.rows[0];
+
+      const userRes = await client.query("SELECT * FROM acard_users WHERE id = $1 FOR UPDATE", [challenge.user_id]);
+      if (!userRes.rowCount) throw new NotFoundError("user", challenge.user_id);
+      const user = userRes.rows[0];
+
+      let ok = Boolean(user.mfa_secret) && verifyTotp(code, user.mfa_secret);
+      if (!ok) {
+        // Fall back to recovery codes, burning the one that matches.
+        const remaining: string[] = user.mfa_recovery_code_hashes ?? [];
+        const index = remaining.indexOf(hashRecoveryCode(code));
+        if (index !== -1) {
+          remaining.splice(index, 1);
+          await client.query("UPDATE acard_users SET mfa_recovery_code_hashes = $2 WHERE id = $1", [
+            user.id,
+            JSON.stringify(remaining),
+          ]);
+          ok = true;
+        }
+      }
+      if (!ok) throw new DomainError("invalid_mfa_code", "invalid authentication code", 401);
+
+      const memberRes = await client.query(
+        "SELECT * FROM acard_memberships WHERE user_id = $1 AND account_holder_id = $2",
+        [user.id, challenge.account_holder_id],
+      );
+      if (!memberRes.rowCount) throw new DomainError("no_membership", "user has no organization", 403);
+
+      const { token } = await this.insertSession(client, user.id, challenge.account_holder_id);
+      return {
+        sessionToken: token,
+        context: {
+          user: this.mapUser(user),
+          accountHolderId: challenge.account_holder_id,
+          role: memberRes.rows[0].role,
+        },
+      };
+    });
+  }
+
+  async beginMfaEnrolment(userId: string): Promise<{ secret: string; keyUri: string }> {
+    const res = await this.pool.query("SELECT * FROM acard_users WHERE id = $1", [userId]);
+    if (!res.rowCount) throw new NotFoundError("user", userId);
+    if (res.rows[0].mfa_enabled) throw new InvalidStateError("MFA is already enabled for this user");
+    const secret = generateMfaSecret();
+    await this.pool.query("UPDATE acard_users SET mfa_secret = $2 WHERE id = $1", [userId, secret]);
+    return { secret, keyUri: mfaKeyUri(res.rows[0].email, secret) };
+  }
+
+  async confirmMfaEnrolment(userId: string, code: string): Promise<{ recoveryCodes: string[] }> {
+    return this.tx(async (client) => {
+      const res = await client.query("SELECT * FROM acard_users WHERE id = $1 FOR UPDATE", [userId]);
+      if (!res.rowCount) throw new NotFoundError("user", userId);
+      const user = res.rows[0];
+      if (user.mfa_enabled) throw new InvalidStateError("MFA is already enabled for this user");
+      if (!user.mfa_secret) throw new InvalidStateError("start MFA enrolment before confirming it");
+      if (!verifyTotp(code, user.mfa_secret)) {
+        throw new DomainError("invalid_mfa_code", "invalid authentication code", 401);
+      }
+      const { codes, hashes } = generateRecoveryCodes();
+      await client.query(
+        "UPDATE acard_users SET mfa_enabled = true, mfa_recovery_code_hashes = $2 WHERE id = $1",
+        [userId, JSON.stringify(hashes)],
+      );
+      return { recoveryCodes: codes };
+    });
+  }
+
+  async disableMfa(userId: string, password: string, code: string): Promise<void> {
+    await this.tx(async (client) => {
+      const res = await client.query("SELECT * FROM acard_users WHERE id = $1 FOR UPDATE", [userId]);
+      if (!res.rowCount) throw new NotFoundError("user", userId);
+      const user = res.rows[0];
+      if (!user.mfa_enabled) throw new InvalidStateError("MFA is not enabled for this user");
+      if (!verifyPassword(password, user.password_hash)) {
+        throw new DomainError("invalid_credentials", "invalid password", 401);
+      }
+      const remaining: string[] = user.mfa_recovery_code_hashes ?? [];
+      const validCode =
+        (Boolean(user.mfa_secret) && verifyTotp(code, user.mfa_secret)) || remaining.includes(hashRecoveryCode(code));
+      if (!validCode) throw new DomainError("invalid_mfa_code", "invalid authentication code", 401);
+      await client.query(
+        "UPDATE acard_users SET mfa_enabled = false, mfa_secret = NULL, mfa_recovery_code_hashes = '[]' WHERE id = $1",
+        [userId],
+      );
+    });
   }
 
   async resolveSession(token: string): Promise<SessionContext | undefined> {

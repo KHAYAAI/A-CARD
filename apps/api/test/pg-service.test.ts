@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { generateSync } from "otplib";
 import { PostgresPlatformService } from "../src/service/postgres.js";
 
 /**
@@ -215,6 +216,8 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     expect(resolved?.accountHolderId).toBe(reg.accountHolder.id);
 
     const login = await service.login({ email: "owner@pg.co.za", password: "supersecret" });
+    expect(login.status).toBe("authenticated");
+    if (login.status !== "authenticated") throw new Error("expected a session");
     expect(login.context.role).toBe("owner");
     await expect(service.login({ email: "owner@pg.co.za", password: "nope" })).rejects.toThrow(/invalid/);
 
@@ -223,6 +226,7 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     expect(members.map((m) => m.role).sort()).toEqual(["owner", "viewer"]);
 
     const viewerLogin = await service.login({ email: "viewer@pg.co.za", password: "viewerpass" });
+    if (viewerLogin.status !== "authenticated") throw new Error("expected a session");
     expect(viewerLogin.context.role).toBe("viewer");
 
     await service.logout(reg.sessionToken);
@@ -239,6 +243,59 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     await expect(service.login({ email: "locktarget@pg.co.za", password: "supersecret" })).rejects.toMatchObject({
       code: "account_locked",
     });
+  });
+
+  it("issues scoped API keys and enforces a spend cap under the row lock", async () => {
+    const holder = await service.signup({ email: `keys${Date.now()}@x.co.za`, name: "Keys", currency: "ZAR" });
+    await service.fundWallet(holder.id, 10_000_000);
+
+    const readOnly = await service.issueApiKey(holder.id, "bi tool", { scope: "read_only" });
+    expect(readOnly.scope).toBe("read_only");
+    const principal = await service.authenticateApiKey(readOnly.secret);
+    expect(principal?.key.scope).toBe("read_only");
+    expect(principal?.holder.id).toBe(holder.id);
+
+    const capped = await service.issueApiKey(holder.id, "capped", { spendCapCents: 100_000 });
+    await service.createCard({ accountHolderId: holder.id, limits: { total: 60_000 }, apiKeyId: capped.id });
+    await expect(
+      service.createCard({ accountHolderId: holder.id, limits: { total: 50_000 }, apiKeyId: capped.id }),
+    ).rejects.toMatchObject({ code: "api_key_spend_cap_exceeded" });
+
+    // A capped key may not sidestep the cap by omitting the card's total budget.
+    await expect(
+      service.createCard({ accountHolderId: holder.id, apiKeyId: capped.id }),
+    ).rejects.toMatchObject({ code: "card_budget_required" });
+
+    // The refused attempts left the running total untouched.
+    const keys = await service.listApiKeys(holder.id);
+    expect(keys.find((k) => k.id === capped.id)?.provisionedCents).toBe(60_000);
+
+    await service.revokeApiKey(holder.id, capped.id);
+    expect(await service.authenticateApiKey(capped.secret)).toBeUndefined();
+  });
+
+  it("demands a TOTP code at login once MFA is enabled, and burns recovery codes", async () => {
+    const reg = await service.registerAccount({ email: "mfa@pg.co.za", name: "MFA", password: "supersecret" });
+    const { secret } = await service.beginMfaEnrolment(reg.user.id);
+    const { recoveryCodes } = await service.confirmMfaEnrolment(reg.user.id, generateSync({ strategy: "totp", secret }));
+
+    const challenged = await service.login({ email: "mfa@pg.co.za", password: "supersecret" });
+    expect(challenged.status).toBe("mfa_required");
+    if (challenged.status !== "mfa_required") throw new Error("expected a challenge");
+
+    const session = await service.verifyMfaChallenge(challenged.challengeToken, generateSync({ strategy: "totp", secret }));
+    expect(session.context.role).toBe("owner");
+    expect(await service.resolveSession(session.sessionToken)).toBeDefined();
+
+    // A recovery code works once, then is spent.
+    const [code] = recoveryCodes as [string];
+    const again = await service.login({ email: "mfa@pg.co.za", password: "supersecret" });
+    if (again.status !== "mfa_required") throw new Error("expected a challenge");
+    expect(await service.verifyMfaChallenge(again.challengeToken, code)).toBeDefined();
+
+    const third = await service.login({ email: "mfa@pg.co.za", password: "supersecret" });
+    if (third.status !== "mfa_required") throw new Error("expected a challenge");
+    await expect(service.verifyMfaChallenge(third.challengeToken, code)).rejects.toMatchObject({ code: "invalid_mfa_code" });
   });
 
   it("enforces org policy and department budgets in the Postgres hot path", async () => {

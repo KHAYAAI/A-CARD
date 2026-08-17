@@ -120,6 +120,9 @@ export default function Dashboard() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState("");
+  /** Open MFA challenge from a login that needs a second factor, and the code being entered. */
+  const [challenge, setChallenge] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
 
   // modals & inputs
   const [showCreate, setShowCreate] = useState(false);
@@ -206,7 +209,22 @@ export default function Dashboard() {
       const res = await fetch(`${API_URL}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error?.message ?? `request failed (${res.status})`);
+      // MFA users get a challenge instead of a session: hold it and ask for the code.
+      if (body.mfa_required) { setChallenge(body.challenge_token); return; }
       setToken(body.session_token);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+  const submitMfaCode = async () => {
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/v1/auth/mfa/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ challenge_token: challenge, code: mfaCode.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error?.message ?? `request failed (${res.status})`);
+      setChallenge(""); setMfaCode(""); setToken(body.session_token);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const signOut = async () => {
@@ -290,13 +308,36 @@ export default function Dashboard() {
           <div className="login-title">Give your agent<br />a <span className="em">card</span>.</div>
           <div className="login-sub">Sign in to your console.</div>
 
-          <div className="seg" style={{ marginTop: 18 }}>
+          <div className="seg" style={{ marginTop: 18, display: challenge ? "none" : undefined }}>
             <button className={mode === "login" ? "sel" : ""} onClick={() => setMode("login")}>Sign in</button>
             <button className={mode === "register" ? "sel" : ""} onClick={() => setMode("register")}>Create account</button>
             <button className={mode === "apikey" ? "sel" : ""} onClick={() => setMode("apikey")}>API key</button>
           </div>
 
-          {mode === "apikey" ? (
+          {challenge ? (
+            <form onSubmit={(e) => { e.preventDefault(); submitMfaCode(); }}>
+              <div className="field">
+                <label>authentication code</label>
+                <input
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                />
+                <div className="hint" style={{ marginTop: 6 }}>From your authenticator app, or one of your recovery codes.</div>
+              </div>
+              <button type="submit" className="btn btn-green login-btn">Verify</button>
+              <button
+                type="button"
+                className="btn login-btn"
+                style={{ marginTop: 8 }}
+                onClick={() => { setChallenge(""); setMfaCode(""); setError(""); }}
+              >
+                Back
+              </button>
+            </form>
+          ) : mode === "apikey" ? (
             <form onSubmit={(e) => { e.preventDefault(); setToken(apiKeyInput.trim()); }}>
               <div className="field"><label>api key</label><input type="password" placeholder="ak_live_…" value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} /></div>
               <button type="submit" className="btn btn-green login-btn">Connect</button>

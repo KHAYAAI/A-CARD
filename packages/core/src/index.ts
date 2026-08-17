@@ -6,6 +6,7 @@ export * from "./cards.js";
 export * from "./rules.js";
 export * from "./approvals.js";
 export * from "./apikeys.js";
+export * from "./mfa.js";
 export * from "./auth.js";
 export * from "./enterprise.js";
 export * from "./idempotency.js";
