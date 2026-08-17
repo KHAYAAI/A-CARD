@@ -56,6 +56,14 @@ export interface SessionContext {
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
+/**
+ * Per-account login lockout. The WAF rate limit on `/v1/auth/login` (see
+ * `infra/cdk`) stops a flood from one IP; this catches the distributed case —
+ * an attacker rotating IPs against a single email — which no IP-keyed rule can.
+ */
+export const LOGIN_LOCKOUT_THRESHOLD = 5;
+export const LOGIN_LOCKOUT_WINDOW_MS = 1000 * 60 * 15; // 15 minutes
+
 export function hashPassword(password: string): string {
   const salt = randomBytes(16);
   const derived = scryptSync(password, salt, 64);
@@ -88,6 +96,8 @@ export class AuthService {
   private readonly usersByEmail = new Map<string, string>();
   private readonly memberships: Membership[] = [];
   private readonly sessions = new Map<string, Session>();
+  /** email (lowercased) -> timestamps (ms) of recent failed login attempts. Not persisted — resetting on restart is an acceptable trade-off for an in-memory security counter. */
+  private readonly failedLoginAttempts = new Map<string, number[]>();
 
   serialize(): { users: User[]; memberships: Membership[]; sessions: Session[] } {
     return { users: [...this.users.values()], memberships: this.memberships, sessions: [...this.sessions.values()] };
@@ -159,12 +169,35 @@ export class AuthService {
     return this.memberships.find((m) => m.userId === userId && m.accountHolderId === accountHolderId);
   }
 
+  private recentFailedAttempts(email: string): number[] {
+    const key = email.toLowerCase();
+    const windowStart = Date.now() - LOGIN_LOCKOUT_WINDOW_MS;
+    const attempts = (this.failedLoginAttempts.get(key) ?? []).filter((t) => t > windowStart);
+    this.failedLoginAttempts.set(key, attempts);
+    return attempts;
+  }
+
+  private recordFailedLogin(email: string): void {
+    const attempts = this.recentFailedAttempts(email);
+    attempts.push(Date.now());
+    this.failedLoginAttempts.set(email.toLowerCase(), attempts);
+  }
+
+  private clearFailedLogins(email: string): void {
+    this.failedLoginAttempts.delete(email.toLowerCase());
+  }
+
   /** Verify credentials and open a session bound to `accountHolderId`. Returns the raw token once. */
   login(input: { email: string; password: string; accountHolderId?: string }): { token: string; session: Session; context: SessionContext } {
+    if (this.recentFailedAttempts(input.email).length >= LOGIN_LOCKOUT_THRESHOLD) {
+      throw new DomainError("account_locked", "too many failed login attempts — try again in a few minutes", 429);
+    }
     const user = this.getUserByEmail(input.email);
     if (!user || !verifyPassword(input.password, user.passwordHash)) {
+      this.recordFailedLogin(input.email);
       throw new DomainError("invalid_credentials", "invalid email or password", 401);
     }
+    this.clearFailedLogins(input.email);
     const memberships = this.membershipsForUser(user.id);
     const membership =
       (input.accountHolderId && memberships.find((m) => m.accountHolderId === input.accountHolderId)) || memberships[0];

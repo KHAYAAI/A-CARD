@@ -229,6 +229,18 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     expect(await service.resolveSession(reg.sessionToken)).toBeUndefined();
   });
 
+  it("locks out an account after repeated failed logins (shared across instances via the row-level table)", async () => {
+    await service.registerAccount({ email: "locktarget@pg.co.za", name: "Owner", password: "supersecret" });
+
+    for (let i = 0; i < 5; i++) {
+      await expect(service.login({ email: "locktarget@pg.co.za", password: "wrongwrong" })).rejects.toThrow(/invalid/);
+    }
+    // Even the right password is rejected once locked — and with the lockout's own error code.
+    await expect(service.login({ email: "locktarget@pg.co.za", password: "supersecret" })).rejects.toMatchObject({
+      code: "account_locked",
+    });
+  });
+
   it("enforces org policy and department budgets in the Postgres hot path", async () => {
     const holder = await service.signup({ email: `ent${Date.now()}${Math.random()}@x.co.za`, name: "Aurora", currency: "ZAR", accountType: "enterprise" });
     expect(holder.accountType).toBe("enterprise");

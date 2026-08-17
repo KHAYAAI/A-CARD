@@ -81,6 +81,55 @@ describe("auth: register / login / session", () => {
     await withToken("/v1/auth/logout", session_token, { method: "POST" });
     expect((await withToken("/v1/auth/me", session_token)).status).toBe(401);
   });
+
+  it("locks out an account after repeated failed logins, independent of the attacker's IP", async () => {
+    await register("locktarget@acard.co.za");
+    const attempt = () =>
+      app.request("/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: "locktarget@acard.co.za", password: "wrongwrong" }),
+        headers: { "content-type": "application/json" },
+      });
+
+    for (let i = 0; i < 5; i++) {
+      expect((await attempt()).status).toBe(401);
+    }
+    // 6th attempt (even with the right password) is locked out, not just re-declined.
+    const lockedOut = await app.request("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "locktarget@acard.co.za", password: "supersecret" }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(lockedOut.status).toBe(429);
+    expect((await json(lockedOut)).error.code).toBe("account_locked");
+  });
+
+  it("a successful login clears the failed-attempt counter", async () => {
+    await register("resettable@acard.co.za");
+    const failOnce = () =>
+      app.request("/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: "resettable@acard.co.za", password: "wrongwrong" }),
+        headers: { "content-type": "application/json" },
+      });
+    for (let i = 0; i < 3; i++) await failOnce();
+
+    const success = await app.request("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "resettable@acard.co.za", password: "supersecret" }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(success.status).toBe(200);
+
+    // Counter reset — three more failures shouldn't trip the (5-attempt) lockout.
+    for (let i = 0; i < 3; i++) expect((await failOnce()).status).toBe(401);
+    const stillNotLocked = await app.request("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "resettable@acard.co.za", password: "supersecret" }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(stillNotLocked.status).toBe(200);
+  });
 });
 
 describe("RBAC: roles gate what a session can do", () => {

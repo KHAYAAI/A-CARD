@@ -9,6 +9,8 @@ import {
   hashPassword,
   hashSessionToken,
   InvalidStateError,
+  LOGIN_LOCKOUT_THRESHOLD,
+  LOGIN_LOCKOUT_WINDOW_MS,
   newId,
   NotFoundError,
   SUBSCRIPTION_TIERS,
@@ -261,6 +263,16 @@ const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL
   );
+
+  -- Per-account login lockout, shared across API instances (the WAF rate limit
+  -- on /v1/auth/login is IP-keyed and can't catch an attacker rotating IPs
+  -- against one email; this can, because every instance reads the same table).
+  CREATE TABLE IF NOT EXISTS acard_login_attempts (
+    id BIGSERIAL PRIMARY KEY,
+    email TEXT NOT NULL,
+    attempted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS acard_login_attempts_email_idx ON acard_login_attempts(email, attempted_at);
 `;
 
 type Client = pg.PoolClient;
@@ -1164,10 +1176,21 @@ export class PostgresPlatformService implements PlatformService {
 
   async login(input: { email: string; password: string; accountHolderId?: string }): Promise<{ sessionToken: string; context: SessionContext }> {
     const email = input.email.toLowerCase();
+    const windowStart = new Date(Date.now() - LOGIN_LOCKOUT_WINDOW_MS).toISOString();
+    const attemptsRes = await this.pool.query(
+      "SELECT count(*) FROM acard_login_attempts WHERE email = $1 AND attempted_at > $2",
+      [email, windowStart],
+    );
+    if (Number(attemptsRes.rows[0].count) >= LOGIN_LOCKOUT_THRESHOLD) {
+      throw new DomainError("account_locked", "too many failed login attempts — try again in a few minutes", 429);
+    }
+
     const userRes = await this.pool.query("SELECT * FROM acard_users WHERE email = $1", [email]);
     if (!userRes.rowCount || !verifyPassword(input.password, userRes.rows[0].password_hash)) {
+      await this.pool.query("INSERT INTO acard_login_attempts (email) VALUES ($1)", [email]);
       throw new DomainError("invalid_credentials", "invalid email or password", 401);
     }
+    await this.pool.query("DELETE FROM acard_login_attempts WHERE email = $1", [email]);
     const user = userRes.rows[0];
     const memberships = await this.pool.query(
       "SELECT * FROM acard_memberships WHERE user_id = $1 ORDER BY created_at ASC",

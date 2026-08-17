@@ -300,6 +300,29 @@ export class AcardStack extends cdk.Stack {
       visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: "acardWebAcl", sampledRequestsEnabled: true },
       rules: [
         {
+          // Tighter than the general 2000/5min rule below, and evaluated first: a
+          // credential-stuffing run against /v1/auth/login gets cut off long before
+          // it could ever trip the whole-ALB flood limit.
+          name: "LoginRateLimit",
+          priority: 0,
+          action: { block: {} },
+          statement: {
+            rateBasedStatement: {
+              limit: 20,
+              aggregateKeyType: "IP",
+              scopeDownStatement: {
+                byteMatchStatement: {
+                  fieldToMatch: { uriPath: {} },
+                  positionalConstraint: "EXACTLY",
+                  searchString: "/v1/auth/login",
+                  textTransformations: [{ priority: 0, type: "NONE" }],
+                },
+              },
+            },
+          },
+          visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: "loginRateLimit", sampledRequestsEnabled: true },
+        },
+        {
           name: "AWSCommon",
           priority: 1,
           overrideAction: { none: {} },
