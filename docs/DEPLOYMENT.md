@@ -1,6 +1,6 @@
 # A-CARD — AWS Deployment Runbook
 
-_Last updated: 2026-07-20_
+_Last updated: 2026-08-18_
 
 Step-by-step guide to deploying A-CARD to AWS. Pairs with
 [`LAUNCH_PLAN.md`](./LAUNCH_PLAN.md) (strategy) and
@@ -71,6 +71,15 @@ are generated and stored automatically — you never handle them.
 | `PaystackSecretKey` | — | `sk_live_…` / `sk_test_…`. Blank ⇒ unmetered. |
 | `PaystackWebhookSecret` | — | Paystack webhook signing secret. |
 | `SlackApprovalsWebhookUrl` | — | Slack incoming webhook. Blank ⇒ no push. |
+| `WorkOsApiKey` | — | `sk_...` from your WorkOS dashboard. Blank ⇒ no SSO (password + TOTP MFA login is unaffected either way). |
+| `WorkOsClientId` | — | `client_...` from the same dashboard page. Must be set alongside `WorkOsApiKey` or SSO stays off. |
+
+A real card issuer (Sudo Africa or similar) is **not yet a deployable
+parameter** — see §6 below. It exists in code (`Card.issuerCardId`, the
+webhook's dual-lookup path) but the exact request/response wire format is
+unverified against Sudo's actual API, so it isn't wired into this stack the
+way Paystack/WorkOS are. Wiring it is a small, contained change once you have
+their sandbox docs, not a rebuild.
 
 ---
 
@@ -163,11 +172,25 @@ Dashboard → Settings → API Keys & Webhooks. Set the webhook URL to
 Create an Incoming Webhook in your Slack workspace; put the URL in
 `SlackApprovalsWebhookUrl` (redeploy).
 
+### WorkOS (enterprise SSO)
+Additive to password + TOTP MFA login — never a replacement. In your WorkOS
+dashboard, grab the API key and Client ID, set the redirect URI to
+`$ORIGIN/v1/auth/sso/callback` (kept under `/v1/` deliberately — see
+`apps/api/src/app.ts` — so the ALB's existing `/v1/*` rule routes it to the
+API service; a bare `/auth/...` path would silently miss it). Set
+`WorkOsApiKey` / `WorkOsClientId` and redeploy. An org owner then calls
+`POST /v1/sso/setup` from the dashboard's Team tab to get a self-serve WorkOS
+Admin Portal link for their own IT team — no code or A-CARD login on their end.
+
 ### A real card issuer (Phase 3)
-Point the issuer's authorization webhook at `$ORIGIN/webhooks/issuer` and set
-`IssuerWebhookSecret` to the shared secret they give you (or that you give
-them). The webhook contract is issuer-agnostic; only the timestamp/signature
-scheme and field mapping may need a small adapter.
+The webhook contract is issuer-agnostic (`POST /webhooks/issuer`, HMAC
+signed) and a card can already be resolved by either our internal id or the
+issuer's own reference (`Card.issuerCardId`) — see `apps/api/src/sudo.ts` for
+the current, **unverified** client shape. Point the issuer's authorization
+webhook at `$ORIGIN/webhooks/issuer`, set `IssuerWebhookSecret` to the shared
+secret they give you, and confirm their exact request/response field names
+against their sandbox docs before wiring `AppConfig.sudo` into
+`apps/api/src/index.ts` (it deliberately isn't wired yet).
 
 ### MCP (remote)
 ```json
@@ -249,10 +272,21 @@ want deleted by accident).
   baked into images or logged.
 - RDS is unreachable from the internet; only the tasks' security group can
   reach Postgres.
-- WAF fronts the ALB (AWS managed CommonRuleSet + KnownBadInputs + a per-IP
-  rate limit).
-- Passwords are scrypt-hashed; session tokens are stored only as SHA-256
-  hashes; the issuer and Paystack webhooks are HMAC-verified with replay
-  protection.
+- WAF fronts the ALB: AWS managed CommonRuleSet + KnownBadInputs, a per-IP
+  flood limit (2000/5min across the whole ALB), and a **tighter, separately
+  evaluated** rule scoped to `/v1/auth/login` (20/5min per IP) — see
+  `LoginRateLimit` in `infra/cdk/lib/acard-stack.ts`.
+- A login also has a **per-account** lockout (5 failed attempts / 15 min,
+  shared across every API instance via a Postgres table) — this is what
+  catches an attacker rotating IPs, which the WAF's IP-keyed rule can't.
+- Passwords are scrypt-hashed; session tokens, API key secrets, and MFA
+  recovery codes are all stored only as SHA-256 hashes; the issuer and
+  Paystack webhooks are HMAC-verified with replay protection.
+- Human login supports TOTP MFA (enrolled per-user from the dashboard) and,
+  optionally, WorkOS SSO — both additive to the base password flow, never a
+  replacement for it.
+- API keys are scoped: `read_only` maps onto the `viewer` role (refused by
+  the same `requireRole` gate every write route already has), and a key can
+  carry a cumulative spend cap on the card budget it's allowed to provision.
 - Before real cardholder money: enable CloudTrail + GuardDuty, ship WAF/ALB
   logs somewhere queryable, and publish a security contact.
