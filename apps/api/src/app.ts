@@ -780,7 +780,7 @@ export function createApp(config: AppConfig) {
       return c.json({ error: { code: "billing_not_configured", message: "Paystack is not configured on this deployment" } }, 501);
     }
     const holder = c.get("holder");
-    const { tier } = z.object({ tier: z.enum(["basic", "pro"]) }).parse(await c.req.json());
+    const { tier } = z.object({ tier: z.enum(["basic", "pro", "enterprise"]) }).parse(await c.req.json());
     const plan = SUBSCRIPTION_TIERS[tier as SubscriptionTier];
     const reference = subscriptionReference(holder.id, currentBillingPeriod());
     const checkout = await paystack.initializeTransaction({
