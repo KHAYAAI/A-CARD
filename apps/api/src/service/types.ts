@@ -130,6 +130,10 @@ export interface PlatformService {
   listCards(accountHolderId: string): Promise<Card[]>;
   getCard(id: string): Promise<Card | undefined>;
   closeCard(id: string, reason?: string): Promise<Card>;
+  /** Look up a card by the issuing partner's own reference (e.g. Sudo's card token). */
+  getCardByIssuerCardId(issuerCardId: string): Promise<Card | undefined>;
+  /** Attach the issuing partner's reference to a card provisioned after creation. */
+  linkIssuerCard(cardId: string, issuerCardId: string): Promise<Card>;
 
   // ---- transactions --------------------------------------------------------
   listTransactions(filter: { accountHolderId?: string; cardId?: string }): Promise<CardTransaction[]>;

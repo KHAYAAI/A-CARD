@@ -125,6 +125,8 @@ export class Platform {
 
   private readonly accountHolders = new Map<string, AccountHolder>();
   private readonly cards = new Map<string, Card>();
+  /** issuerCardId -> our card id — how a real issuer's webhook resolves to a card. Rebuilt on hydrate, not separately serialized. */
+  private readonly cardsByIssuerId = new Map<string, string>();
   private readonly transactions = new Map<string, CardTransaction>();
   /** Open ledger holds by authorization id, awaiting capture/release. */
   private readonly openHolds = new Map<string, { ledgerTxId: string; transactionId: string }>();
@@ -173,7 +175,10 @@ export class Platform {
       if (!holder.accountType) holder.accountType = "personal";
       platform.accountHolders.set(holder.id, holder);
     }
-    for (const card of snapshot.cards) platform.cards.set(card.id, card);
+    for (const card of snapshot.cards) {
+      platform.cards.set(card.id, card);
+      if (card.issuerCardId) platform.cardsByIssuerId.set(card.issuerCardId, card.id);
+    }
     for (const tx of snapshot.transactions) platform.transactions.set(tx.id, tx);
     for (const [authId, hold] of snapshot.openHolds) platform.openHolds.set(authId, hold);
     platform.events.push(...snapshot.events);
@@ -395,8 +400,12 @@ export class Platform {
         402,
       );
     }
+    if (input.issuerCardId && this.cardsByIssuerId.has(input.issuerCardId)) {
+      throw new InvalidStateError(`issuer card ${input.issuerCardId} is already linked to a different card`);
+    }
     const card = createCard({ ...input, currency, walletAccountId });
     this.cards.set(card.id, card);
+    if (card.issuerCardId) this.cardsByIssuerId.set(card.issuerCardId, card.id);
     this.emit("card.created", { cardId: card.id, accountHolderId: holder.id });
     return card;
   }
@@ -404,6 +413,32 @@ export class Platform {
   getCard(id: string): Card {
     const card = this.cards.get(id);
     if (!card) throw new NotFoundError("card", id);
+    return card;
+  }
+
+  /** Look up a card by the issuing partner's own reference (e.g. Sudo's card token). */
+  getCardByIssuerCardId(issuerCardId: string): Card | undefined {
+    const cardId = this.cardsByIssuerId.get(issuerCardId);
+    return cardId ? this.cards.get(cardId) : undefined;
+  }
+
+  /**
+   * Attach (or update) the issuing partner's reference for a card provisioned
+   * after creation — e.g. issuer provisioning is a separate call that can
+   * fail independently of the card record itself.
+   */
+  linkIssuerCard(cardId: string, issuerCardId: string): Card {
+    const card = this.getCard(cardId);
+    const existingOwner = this.cardsByIssuerId.get(issuerCardId);
+    if (existingOwner && existingOwner !== cardId) {
+      throw new InvalidStateError(`issuer card ${issuerCardId} is already linked to a different card`);
+    }
+    if (card.issuerCardId && card.issuerCardId !== issuerCardId) {
+      this.cardsByIssuerId.delete(card.issuerCardId);
+    }
+    card.issuerCardId = issuerCardId;
+    this.cardsByIssuerId.set(issuerCardId, cardId);
+    this.emit("card.issuer_linked", { cardId, issuerCardId });
     return card;
   }
 
@@ -445,7 +480,10 @@ export class Platform {
       };
     }
 
-    const card = this.cards.get(request.cardId);
+    // Resolve by our id first (the mock issuer echoes it back, so this is
+    // the common case and stays a single Map lookup); a real issuer's
+    // webhook instead carries *their* card reference, so fall back to that.
+    const card = this.cards.get(request.cardId) ?? this.getCardByIssuerCardId(request.cardId);
     if (!card) {
       return this.declineRecord(request, undefined, "card_not_found");
     }
@@ -736,7 +774,10 @@ export class Platform {
   ): AuthorizationDecision {
     const transaction: CardTransaction = {
       id: `ctx_${request.authorizationId}`,
-      cardId: request.cardId,
+      // Prefer the resolved card's own id — request.cardId may be the
+      // issuing partner's reference (see the issuerCardId fallback in
+      // authorize()), and every other transaction listing keys on our id.
+      cardId: card?.id ?? request.cardId,
       accountHolderId: card?.accountHolderId ?? "unknown",
       type: "declined",
       status: "declined",

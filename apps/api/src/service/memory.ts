@@ -125,6 +125,14 @@ export class InMemoryPlatformService implements PlatformService {
     return this.platform.closeCard(id, reason);
   }
 
+  async getCardByIssuerCardId(issuerCardId: string) {
+    return this.platform.getCardByIssuerCardId(issuerCardId);
+  }
+
+  async linkIssuerCard(cardId: string, issuerCardId: string) {
+    return this.platform.linkIssuerCard(cardId, issuerCardId);
+  }
+
   async listTransactions(filter: { accountHolderId?: string; cardId?: string }) {
     return this.platform.listTransactions(filter);
   }

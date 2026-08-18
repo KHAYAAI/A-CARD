@@ -37,6 +37,14 @@ export interface Card {
   expiryMonth: number;
   expiryYear: number;
   label?: string;
+  /**
+   * The issuing partner's own reference for this card (e.g. Sudo's card
+   * token) — never a PAN, just an opaque id. Set once a real issuer
+   * provisions the card. Authorization resolves a card by this id as a
+   * fallback to `id`, since the issuer's webhook identifies the card in
+   * *their* id space, not ours.
+   */
+  issuerCardId?: string;
   createdAt: string;
   closedAt?: string;
   closeReason?: string;
@@ -52,6 +60,7 @@ export interface CreateCardInput {
   allowedMerchantCategories?: string[];
   approvalThreshold?: number;
   label?: string;
+  issuerCardId?: string;
 }
 
 export function createCard(input: CreateCardInput): Card {
@@ -73,6 +82,7 @@ export function createCard(input: CreateCardInput): Card {
     expiryMonth: now.getUTCMonth() + 1,
     expiryYear: now.getUTCFullYear() + 3,
     label: input.label,
+    issuerCardId: input.issuerCardId,
     createdAt: now.toISOString(),
   };
 }

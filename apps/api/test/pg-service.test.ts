@@ -330,6 +330,51 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     expect(second.context.role).toBe("admin"); // the second SSO login did not reset the promotion
   });
 
+  it("links a card to an issuer reference and resolves it via getCardByIssuerCardId, under the unique index", async () => {
+    const holder = await service.signup({ email: `issuer${Date.now()}@x.co.za`, name: "Issuer", currency: "ZAR" });
+    const card = await service.createCard({ accountHolderId: holder.id, issuerCardId: "sudo_card_pg_1" });
+    expect(card.issuerCardId).toBe("sudo_card_pg_1");
+    expect((await service.getCardByIssuerCardId("sudo_card_pg_1"))?.id).toBe(card.id);
+
+    // The real Postgres unique-violation error must actually be caught and
+    // remapped — not just assumed to have the guessed constraint name.
+    await expect(
+      service.createCard({ accountHolderId: holder.id, issuerCardId: "sudo_card_pg_1" }),
+    ).rejects.toMatchObject({ code: "invalid_state" });
+  });
+
+  it("links a card to an issuer reference after the fact, and refuses a reference already claimed elsewhere", async () => {
+    const holder = await service.signup({ email: `issuer2${Date.now()}@x.co.za`, name: "Issuer2", currency: "ZAR" });
+    const a = await service.createCard({ accountHolderId: holder.id, issuerCardId: "sudo_card_pg_taken" });
+    const b = await service.createCard({ accountHolderId: holder.id });
+    expect(b.issuerCardId).toBeUndefined();
+
+    await expect(service.linkIssuerCard(b.id, "sudo_card_pg_taken")).rejects.toMatchObject({ code: "invalid_state" });
+    expect((await service.getCardByIssuerCardId("sudo_card_pg_taken"))?.id).toBe(a.id);
+
+    const linked = await service.linkIssuerCard(b.id, "sudo_card_pg_free");
+    expect(linked.issuerCardId).toBe("sudo_card_pg_free");
+  });
+
+  it("authorizes under the row lock by the issuer's own card reference, recording our card id on the transaction", async () => {
+    const holder = await service.signup({ email: `issuer3${Date.now()}@x.co.za`, name: "Issuer3", currency: "ZAR" });
+    await service.fundWallet(holder.id, 100_000);
+    const card = await service.createCard({ accountHolderId: holder.id, issuerCardId: "sudo_card_pg_auth" });
+
+    const decision = await service.authorize({
+      authorizationId: "auth_pg_via_issuer_ref",
+      cardId: "sudo_card_pg_auth", // the issuer's webhook would send their own reference, not our id
+      amount: 10_000,
+      currency: "ZAR",
+      merchant: { name: "Checkers", category: "5411" },
+    });
+    expect(decision.approved).toBe(true);
+    expect(decision.transaction.cardId).toBe(card.id);
+
+    const txs = await service.listTransactions({ cardId: card.id });
+    expect(txs).toHaveLength(1);
+  });
+
   it("enforces org policy and department budgets in the Postgres hot path", async () => {
     const holder = await service.signup({ email: `ent${Date.now()}${Math.random()}@x.co.za`, name: "Aurora", currency: "ZAR", accountType: "enterprise" });
     expect(holder.accountType).toBe("enterprise");

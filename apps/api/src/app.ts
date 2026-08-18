@@ -20,6 +20,7 @@ import {
 import { PaystackClient, subscriptionReference } from "./paystack.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
+import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
 import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
 
 /**
@@ -57,6 +58,17 @@ export interface AppConfig {
    * the network.
    */
   workos?: WorkOSConfig | WorkOSClient;
+  /**
+   * Real card issuer (optional — omit to stay on the sandbox mock issuer,
+   * which is what every card creation does today: a deterministic `4242…`
+   * test PAN, no network call). When set, card creation also provisions a
+   * real card with the issuer and links it via `Card.issuerCardId`, and the
+   * `/webhooks/issuer` authorization path resolves a card by that reference
+   * as well as by our own id — see `sudo.ts` for the current, unverified
+   * wire format that needs confirming against the issuer's actual API
+   * reference before this goes live with real money.
+   */
+  sudo?: SudoConfig | IssuerCardClient;
   /** Where Paystack should send the customer back after checkout, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -69,6 +81,11 @@ function asService(platform: AppConfig["platform"]): PlatformService {
 function asWorkOSClient(config: WorkOSConfig | WorkOSClient): WorkOSClient {
   // A config object (has `apiKey`) builds the real client; a `WorkOSClient` (tests) passes through.
   return "apiKey" in config ? createWorkOSClient(config) : config;
+}
+
+function asIssuerClient(config: SudoConfig | IssuerCardClient): IssuerCardClient {
+  // A config object (has `baseUrl`) builds the real client; an `IssuerCardClient` (tests) passes through.
+  return "baseUrl" in config ? createSudoClient(config) : config;
 }
 
 type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
@@ -197,6 +214,7 @@ export function createApp(config: AppConfig) {
   const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
   const workos = config.workos ? asWorkOSClient(config.workos) : undefined;
+  const issuer = config.sudo ? asIssuerClient(config.sudo) : undefined;
   const app = new Hono<Env>();
 
   // Auto-provision the default embedded wallet for a brand-new account. Best-effort:
@@ -614,6 +632,30 @@ export function createApp(config: AppConfig) {
       approvalThreshold: body.approval_threshold,
       apiKeyId: c.get("apiKey")?.id,
     });
+    // With a real issuer configured, the card just created is a local record
+    // only — it isn't usable until the issuer actually provisions it. That
+    // provisioning is not best-effort like the wallet auto-provisioning
+    // above: a card nobody issued can never authorize a real charge, so a
+    // failure here closes the card and fails the request rather than
+    // returning a card that looks active but can never work.
+    if (issuer) {
+      try {
+        const provisioned = await issuer.createCard({
+          accountHolderId: holder.id,
+          cardId: card.id,
+          currency: card.currency,
+        });
+        const linked = await platform.linkIssuerCard(card.id, provisioned.issuerCardId);
+        return c.json({ card: linked }, 201);
+      } catch (error) {
+        await platform.closeCard(card.id, "issuer_provisioning_failed").catch(() => {});
+        throw new DomainError(
+          "issuer_provisioning_failed",
+          `the card issuer could not provision this card: ${error instanceof Error ? error.message : String(error)}`,
+          502,
+        );
+      }
+    }
     // Sandbox returns full card credentials once at creation, like issuer
     // sandboxes do. Production would return an issuer-hosted credential URL.
     return c.json({ card }, 201);
@@ -774,6 +816,15 @@ export function createApp(config: AppConfig) {
   });
 
   // ---- issuer webhook (the real-time authorization hot path) ------------------------
+  //
+  // `platform.authorize` resolves `card_id` against our own card id OR
+  // Card.issuerCardId (see packages/core/src/platform.ts and the matching
+  // Postgres query), so this route needs no change for a real issuer whose
+  // webhook echoes their own card reference in this field. If Sudo's actual
+  // webhook payload uses a different field name or signature scheme than
+  // this schema/HMAC assumes (unconfirmed — see sudo.ts), that mapping
+  // belongs here, translating their event into this shape before it reaches
+  // `issuerEventSchema.parse` below.
 
   app.post("/webhooks/issuer", async (c) => {
     const rawBody = await c.req.text();

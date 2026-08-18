@@ -161,6 +161,10 @@ const SCHEMA = `
     expiry_month INT NOT NULL,
     expiry_year INT NOT NULL,
     label TEXT,
+    -- The issuing partner's own reference for this card (e.g. Sudo's card
+    -- token) — never a PAN. A real issuer's webhook identifies the card by
+    -- this, not by our id; see authorize()'s fallback lookup below.
+    issuer_card_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     closed_at TIMESTAMPTZ,
     close_reason TEXT
@@ -328,14 +332,19 @@ export class PostgresPlatformService implements PlatformService {
        ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false;
        ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_recovery_code_hashes JSONB NOT NULL DEFAULT '[]';
        ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS workos_organization_id TEXT;
-       ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS sso_domain TEXT;`,
+       ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS sso_domain TEXT;
+       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS issuer_card_id TEXT;`,
     );
-    // The uniqueness constraint on sso_domain must come after the column
-    // exists on an upgraded (pre-SSO) deployment, so it runs here rather than
-    // as part of the fresh-install SCHEMA above.
+    // These uniqueness constraints must come after their columns exist on an
+    // upgraded (pre-SSO / pre-issuer-linking) deployment, so they run here
+    // rather than as part of the fresh-install SCHEMA above.
     await this.pool.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS acard_account_holders_sso_domain_idx
        ON acard_account_holders(sso_domain) WHERE sso_domain IS NOT NULL`,
+    );
+    await this.pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS acard_cards_issuer_card_id_idx
+       ON acard_cards(issuer_card_id) WHERE issuer_card_id IS NOT NULL`,
     );
     // Backfill: every existing holder's primary wallet becomes its ZAR/USD/…
     // wallet row, so multi-currency lookups work for accounts created before
@@ -838,6 +847,7 @@ export class PostgresPlatformService implements PlatformService {
       expiryMonth: row.expiry_month,
       expiryYear: row.expiry_year,
       label: row.label ?? undefined,
+      issuerCardId: row.issuer_card_id ?? undefined,
       createdAt: new Date(row.created_at).toISOString(),
       closedAt: row.closed_at ? new Date(row.closed_at).toISOString() : undefined,
       closeReason: row.close_reason ?? undefined,
@@ -871,18 +881,25 @@ export class PostgresPlatformService implements PlatformService {
       // card back, and a committed card is always accounted for against the key.
       if (input.apiKeyId) await this.consumeKeySpendAllowance(client, input.apiKeyId, input.limits?.total);
       const card = createCard({ ...input, currency, walletAccountId });
-      await client.query(
-        `INSERT INTO acard_cards
-           (id, account_holder_id, wallet_account_id, department_id, currency, status, single_use, limits, allowed_mccs,
-            approval_threshold, sandbox_pan, last4, expiry_month, expiry_year, label, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-        [
-          card.id, card.accountHolderId, card.walletAccountId, card.departmentId ?? null, card.currency, card.status, card.singleUse,
-          JSON.stringify(card.limits), JSON.stringify(card.allowedMerchantCategories),
-          card.approvalThreshold ?? null, card.sandboxPan, card.last4, card.expiryMonth, card.expiryYear,
-          card.label ?? null, card.createdAt,
-        ],
-      );
+      try {
+        await client.query(
+          `INSERT INTO acard_cards
+             (id, account_holder_id, wallet_account_id, department_id, currency, status, single_use, limits, allowed_mccs,
+              approval_threshold, sandbox_pan, last4, expiry_month, expiry_year, label, issuer_card_id, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+          [
+            card.id, card.accountHolderId, card.walletAccountId, card.departmentId ?? null, card.currency, card.status, card.singleUse,
+            JSON.stringify(card.limits), JSON.stringify(card.allowedMerchantCategories),
+            card.approvalThreshold ?? null, card.sandboxPan, card.last4, card.expiryMonth, card.expiryYear,
+            card.label ?? null, card.issuerCardId ?? null, card.createdAt,
+          ],
+        );
+      } catch (err: any) {
+        if (err?.code === "23505" && err?.constraint === "acard_cards_issuer_card_id_idx") {
+          throw new InvalidStateError(`issuer card ${card.issuerCardId} is already linked to a different card`);
+        }
+        throw err;
+      }
       stage({ type: "card.created", data: { cardId: card.id, accountHolderId: holder.id } });
       return card;
     });
@@ -899,6 +916,38 @@ export class PostgresPlatformService implements PlatformService {
   async getCard(id: string): Promise<Card | undefined> {
     const res = await this.pool.query("SELECT * FROM acard_cards WHERE id = $1", [id]);
     return res.rowCount ? this.mapCard(res.rows[0]) : undefined;
+  }
+
+  /** Look up a card by the issuing partner's own reference (e.g. Sudo's card token). */
+  async getCardByIssuerCardId(issuerCardId: string): Promise<Card | undefined> {
+    const res = await this.pool.query("SELECT * FROM acard_cards WHERE issuer_card_id = $1", [issuerCardId]);
+    return res.rowCount ? this.mapCard(res.rows[0]) : undefined;
+  }
+
+  /**
+   * Attach (or update) the issuing partner's reference for a card provisioned
+   * after creation — e.g. issuer provisioning is a separate call that can
+   * fail independently of the card record itself.
+   */
+  async linkIssuerCard(cardId: string, issuerCardId: string): Promise<Card> {
+    return this.tx(async (client, stage) => {
+      const res = await client.query("SELECT * FROM acard_cards WHERE id = $1 FOR UPDATE", [cardId]);
+      if (!res.rowCount) throw new NotFoundError("card", cardId);
+      let updated;
+      try {
+        updated = await client.query("UPDATE acard_cards SET issuer_card_id = $2 WHERE id = $1 RETURNING *", [
+          cardId,
+          issuerCardId,
+        ]);
+      } catch (err: any) {
+        if (err?.code === "23505" && err?.constraint === "acard_cards_issuer_card_id_idx") {
+          throw new InvalidStateError(`issuer card ${issuerCardId} is already linked to a different card`);
+        }
+        throw err;
+      }
+      stage({ type: "card.issuer_linked", data: { cardId, issuerCardId } });
+      return this.mapCard(updated.rows[0]);
+    });
   }
 
   async closeCard(id: string, reason = "closed_by_user"): Promise<Card> {
@@ -1020,7 +1069,13 @@ export class PostgresPlatformService implements PlatformService {
         return { approved: existing.status !== "declined", declineReason: existing.declineReason, transaction: existing };
       }
 
-      const cardRes = await client.query("SELECT * FROM acard_cards WHERE id = $1", [request.cardId]);
+      // Resolve by our id first (the mock issuer echoes it back — the
+      // common case); a real issuer's webhook instead carries *their* card
+      // reference, so fall back to that in the same query. The unique index
+      // on issuer_card_id guarantees at most one row matches either arm.
+      const cardRes = await client.query("SELECT * FROM acard_cards WHERE id = $1 OR issuer_card_id = $1", [
+        request.cardId,
+      ]);
       if (!cardRes.rowCount) {
         return this.recordDecline(client, stage, request, undefined, "card_not_found");
       }
@@ -1203,7 +1258,10 @@ export class PostgresPlatformService implements PlatformService {
   ): Promise<AuthorizationDecision> {
     const transaction: CardTransaction = {
       id: `ctx_${request.authorizationId}`,
-      cardId: request.cardId,
+      // Prefer the resolved card's own id — request.cardId may be the
+      // issuing partner's reference (see the issuer_card_id fallback in
+      // authorize()), and every other transaction listing keys on our id.
+      cardId: card?.id ?? request.cardId,
       accountHolderId: card?.accountHolderId ?? "unknown",
       type: "declined",
       status: "declined",
