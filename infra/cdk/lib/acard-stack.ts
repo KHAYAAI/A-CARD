@@ -10,6 +10,10 @@ import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as route53targets from "aws-cdk-lib/aws-route53-targets";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
+import * as cloudtrail from "aws-cdk-lib/aws-cloudtrail";
+import * as guardduty from "aws-cdk-lib/aws-guardduty";
+import * as s3 from "aws-cdk-lib/aws-s3";
+import * as firehose from "aws-cdk-lib/aws-kinesisfirehose";
 
 /** Kept out of every Docker build context asset — each Dockerfile does its own npm ci/next build. */
 const DOCKER_ASSET_EXCLUDES = [
@@ -44,10 +48,20 @@ interface DomainConfig {
  *
  *  - ALB in public subnets; Fargate tasks in private-with-egress subnets;
  *    RDS in isolated subnets. Nothing but the ALB has a public route in.
- *  - A single NAT Gateway gives the tasks outbound access (ECR image pulls,
- *    Paystack, Slack) without exposing them.
+ *  - Two NAT Gateways (one per AZ) give the tasks outbound access (ECR image
+ *    pulls, Paystack, Slack, WorkOS) without exposing them, and without a
+ *    single-AZ outbound failure point.
  *  - Optional ACM/TLS + custom domain with an HTTP→HTTPS redirect.
- *  - A WAFv2 WebACL (AWS managed rule sets + a rate limit) fronts the ALB.
+ *  - A WAFv2 WebACL (AWS managed rule sets + a rate limit) fronts the ALB,
+ *    with full request logs shipped to S3 via Kinesis Data Firehose, and the
+ *    ALB's own access logs going straight to the same bucket.
+ *  - CloudTrail records every AWS API call against this account; GuardDuty
+ *    watches for threats. Neither touches the application — both are
+ *    account/region-level AWS services turned on alongside it.
+ *  - RDS runs Multi-AZ: a synchronously replicated standby in a second AZ
+ *    that RDS fails over to automatically if the primary's AZ has an issue.
+ *  - The API, MCP, and dashboard services scale out on CPU utilization —
+ *    desiredCount is now a floor (minCapacity), not a fixed count.
  *  - The API runs the Postgres multi-writer store, so desiredCount can exceed 1.
  */
 export class AcardStack extends cdk.Stack {
@@ -98,7 +112,11 @@ export class AcardStack extends cdk.Stack {
 
     const vpc = new ec2.Vpc(this, "Vpc", {
       maxAzs: 2,
-      natGateways: 1,
+      // One per AZ: the single-NAT MVP tradeoff was an AZ-level outbound
+      // failure point (a NAT in AZ-A going down takes outbound access with
+      // it for tasks scheduled there, even though AZ-B is fine). CDK places
+      // one NAT per AZ automatically when natGateways == maxAzs.
+      natGateways: 2,
       subnetConfiguration: [
         { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
         { name: "private", subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS, cidrMask: 24 },
@@ -129,6 +147,11 @@ export class AcardStack extends cdk.Stack {
       backupRetention: cdk.Duration.days(7),
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.SNAPSHOT,
+      // Synchronously replicated standby in the second AZ; RDS fails over to
+      // it automatically on an AZ outage or instance failure. Roughly
+      // doubles the instance's own cost (the standby is billed the same as
+      // the primary) — storage and backups are not duplicated again on top.
+      multiAz: true,
     });
 
     const databaseUrlSecret = new secretsmanager.Secret(this, "DatabaseUrlSecret", {
@@ -233,6 +256,14 @@ export class AcardStack extends cdk.Stack {
     });
     db.connections.allowFrom(apiService, ec2.Port.tcp(5432));
 
+    // `desiredCount` above is the floor these scale back down to (and what a
+    // stack update briefly resets the running count to, before the next CPU
+    // evaluation lets Application Auto Scaling correct it again — a known,
+    // benign interaction between CloudFormation and ECS service autoscaling).
+    apiService
+      .autoScaleTaskCount({ minCapacity: 2, maxCapacity: 6 })
+      .scaleOnCpuUtilization("ApiCpuScaling", { targetUtilizationPercent: 65, scaleInCooldown: cdk.Duration.minutes(2), scaleOutCooldown: cdk.Duration.seconds(60) });
+
     primaryListener.addTargets("ApiTargets", {
       port: 8787,
       protocol: elbv2.ApplicationProtocol.HTTP,
@@ -264,6 +295,9 @@ export class AcardStack extends cdk.Stack {
       securityGroups: [serviceSecurityGroup],
       vpcSubnets: serviceVpcSubnets,
     });
+    mcpService
+      .autoScaleTaskCount({ minCapacity: 1, maxCapacity: 3 })
+      .scaleOnCpuUtilization("McpCpuScaling", { targetUtilizationPercent: 65, scaleInCooldown: cdk.Duration.minutes(2), scaleOutCooldown: cdk.Duration.seconds(60) });
 
     primaryListener.addTargets("McpTargets", {
       port: 8788,
@@ -299,6 +333,9 @@ export class AcardStack extends cdk.Stack {
       securityGroups: [serviceSecurityGroup],
       vpcSubnets: serviceVpcSubnets,
     });
+    dashboardService
+      .autoScaleTaskCount({ minCapacity: 1, maxCapacity: 3 })
+      .scaleOnCpuUtilization("DashboardCpuScaling", { targetUtilizationPercent: 65, scaleInCooldown: cdk.Duration.minutes(2), scaleOutCooldown: cdk.Duration.seconds(60) });
 
     primaryListener.addTargetGroups("DefaultDashboard", {
       targetGroups: [
@@ -310,6 +347,37 @@ export class AcardStack extends cdk.Stack {
           healthCheck: { path: "/" },
         }),
       ],
+    });
+
+    // ---- durable access logs (S3, behind ALB + WAF) ----------------------------
+    //
+    // Previously only sampled requests reached CloudWatch metrics — nothing
+    // captured the full request stream anywhere durable. This bucket holds
+    // both: ALB access logs written directly (AWS's ELB log-delivery service
+    // account, granted automatically by `logAccessLogs`), and WAF's full
+    // request log delivered via Kinesis Data Firehose — WAF cannot write to
+    // S3 directly, only through Firehose, and AWS requires that delivery
+    // stream's name to start with `aws-waf-logs-` or WAF refuses to accept it
+    // as a logging destination.
+
+    const accessLogsBucket = new s3.Bucket(this, "AccessLogsBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      lifecycleRules: [{ expiration: cdk.Duration.days(180) }],
+      // Access/audit logs: keep the bucket if the stack is ever torn down,
+      // same reasoning as RDS's SNAPSHOT removal policy above.
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    alb.logAccessLogs(accessLogsBucket, "alb");
+
+    const wafLogDeliveryStream = new firehose.DeliveryStream(this, "WafLogDeliveryStream", {
+      deliveryStreamName: "aws-waf-logs-acard",
+      destination: new firehose.S3Bucket(accessLogsBucket, {
+        dataOutputPrefix: "waf/",
+        compression: firehose.Compression.GZIP,
+      }),
     });
 
     // ---- WAF: AWS managed rule sets + a rate limit, associated with the ALB ----
@@ -369,6 +437,28 @@ export class AcardStack extends cdk.Stack {
     new wafv2.CfnWebACLAssociation(this, "WebAclAssociation", {
       resourceArn: alb.loadBalancerArn,
       webAclArn: webAcl.attrArn,
+    });
+
+    new wafv2.CfnLoggingConfiguration(this, "WafLoggingConfig", {
+      resourceArn: webAcl.attrArn,
+      logDestinationConfigs: [wafLogDeliveryStream],
+    });
+
+    // ---- account-level audit & threat detection (CloudTrail + GuardDuty) ------
+    //
+    // Neither of these touches the application or the VPC — they're AWS
+    // services watching the account itself: every AWS API call made against
+    // it (CloudTrail), and automated analysis of VPC/DNS/CloudTrail activity
+    // for known threat patterns (GuardDuty).
+
+    new cloudtrail.Trail(this, "Trail"); // multi-region, all management events, log-file integrity validation — all on by default
+
+    // One detector per account per region: if GuardDuty is already enabled
+    // on this account/region outside this stack, this resource fails to
+    // create on deploy — import the existing detector instead of duplicating it.
+    new guardduty.CfnDetector(this, "GuardDutyDetector", {
+      enable: true,
+      findingPublishingFrequency: "FIFTEEN_MINUTES",
     });
 
     // ---- optional DNS alias ---------------------------------------------------

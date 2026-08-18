@@ -6,10 +6,12 @@ Step-by-step guide to deploying A-CARD to AWS. Pairs with
 [`LAUNCH_PLAN.md`](./LAUNCH_PLAN.md) (strategy) and
 [`../infra/cdk/README.md`](../infra/cdk/README.md) (stack reference).
 
-The stack: one VPC (public + private + isolated subnets, one NAT Gateway),
-one RDS Postgres, one Application Load Balancer with a WAF, and three Fargate
-services (`api`, `mcp`, `dashboard`) sharing the ALB by path. The API runs the
-multi-writer Postgres store at `desiredCount: 2`.
+The stack: one VPC (public + private + isolated subnets, two NAT Gateways —
+one per AZ), one Multi-AZ RDS Postgres, one Application Load Balancer with a
+WAF, and three Fargate services (`api`, `mcp`, `dashboard`) sharing the ALB by
+path, each scaling out on CPU utilization. CloudTrail and GuardDuty watch the
+account; ALB access logs and WAF's full request log both land in S3. The API
+runs the multi-writer Postgres store at a floor of 2 tasks.
 
 ```
 Internet ──► WAF ──► ALB (public subnets) ──► /v1/*, /webhooks/*  → api  (private)
@@ -232,23 +234,31 @@ only for a single instance.
 
 ---
 
-## 8. Cost estimate (MVP, af-south-1, monthly)
+## 8. Cost estimate (hardened baseline, af-south-1, monthly)
 
-Rough order of magnitude — verify with the AWS pricing calculator.
+Rough order of magnitude — verify with the AWS pricing calculator. This is
+the **hardened** baseline (§ below) — Multi-AZ RDS, two NAT Gateways,
+autoscaling, CloudTrail, GuardDuty, and durable WAF/ALB logging are all on by
+default in this stack, not an opt-in add-on.
 
 | Item | Approx. USD/mo |
 |---|---|
-| 3 × Fargate (0.25 vCPU / 0.5 GB), API×2 + mcp + dashboard | ~$45–70 |
-| RDS `db.t4g.micro`, 20 GB, 7-day backups | ~$18–25 |
+| 3–12 × Fargate (0.25 vCPU / 0.5 GB) at rest, scaling out under load | ~$45–90+ |
+| RDS `db.t4g.micro`, Multi-AZ, 20 GB, 7-day backups | ~$36–50 |
 | Application Load Balancer | ~$18–22 |
-| NAT Gateway (1) + data processing | ~$33+ |
-| WAF (WebACL + 3 rules + requests) | ~$8–15 |
+| NAT Gateways (2, one per AZ) + data processing | ~$66+ |
+| WAF (WebACL + 4 rules + requests) | ~$8–15 |
+| WAF/ALB access log pipeline (S3 + Kinesis Firehose) | ~$5–15 |
+| CloudTrail (S3 storage for management events) | ~$1–3 |
+| GuardDuty (usage-based, scales with log volume) | ~$10–30 |
 | Secrets Manager, CloudWatch, Route 53 | ~$5–10 |
-| **Total** | **~$130–200/mo** |
+| **Total** | **~$195–330+/mo at rest, more under real load** |
 
-To trim pre-revenue: drop API to `desiredCount: 1`, or (only for a throwaway
-sandbox) run without NAT. Do not cut NAT/WAF/TLS for anything handling real
-money.
+To trim pre-revenue and accept the MVP tradeoffs instead: drop `natGateways`
+back to `1`, remove `multiAz: true`, and pull the `autoScaleTaskCount(...)`
+calls back to fixed `desiredCount`s in `infra/cdk/lib/acard-stack.ts` — that
+reverts to the ~$130–200/mo MVP baseline this stack shipped with before this
+hardening pass. Do not cut WAF or TLS for anything handling real money.
 
 ---
 
@@ -262,7 +272,16 @@ npx cdk destroy
 ```
 
 RDS leaves a final snapshot behind (deliberate — the one resource you don't
-want deleted by accident).
+want deleted by accident). The `AccessLogsBucket` (ALB + WAF logs) is set to
+`RemovalPolicy.RETAIN` for the same reason — `cdk destroy` leaves it in place;
+delete it by hand once you've confirmed you don't need those logs.
+
+**GuardDuty note:** only one detector is allowed per AWS account per region.
+If this stack's `cdk deploy` fails on `GuardDutyDetector` because one already
+exists (enabled another way — Organizations, the console, another stack),
+either remove the `guardduty.CfnDetector` block from
+`infra/cdk/lib/acard-stack.ts` and rely on the existing detector, or import it
+into this stack (`cdk import`) instead of letting CDK try to create a second one.
 
 ---
 
@@ -288,5 +307,45 @@ want deleted by accident).
 - API keys are scoped: `read_only` maps onto the `viewer` role (refused by
   the same `requireRole` gate every write route already has), and a key can
   carry a cumulative spend cap on the card budget it's allowed to provision.
-- Before real cardholder money: enable CloudTrail + GuardDuty, ship WAF/ALB
-  logs somewhere queryable, and publish a security contact.
+- CloudTrail records every AWS API call against this account (multi-region,
+  all management events, log-file integrity validation); GuardDuty analyzes
+  account activity for known threat patterns. Both are account/region-level
+  AWS services, not application code — see §11.
+- Full WAF request logs and ALB access logs both land in the `AccessLogsBucket`
+  (encrypted, TLS-only bucket policy, 180-day lifecycle) — WAF via a Kinesis
+  Data Firehose delivery stream (`aws-waf-logs-acard`; WAF cannot write to S3
+  directly), ALB directly. Previously only sampled requests reached CloudWatch
+  metrics; nothing captured the full stream anywhere durable.
+- RDS runs Multi-AZ — a synchronously replicated standby RDS fails over to
+  automatically on an AZ outage, without a manual restore.
+- Two NAT Gateways (one per AZ) — a single NAT going down no longer takes
+  outbound connectivity with it for every task scheduled in that AZ.
+- **Still worth doing before real cardholder money at meaningful scale:** a
+  process to actually review CloudTrail/GuardDuty findings (turning them on
+  is not the same as someone watching them), and a published security contact.
+
+---
+
+## 11. What changed in the hardening pass
+
+Everything in this section used to be the documented "not yet" list. It now
+ships by default in `infra/cdk/lib/acard-stack.ts`:
+
+| Item | What it does | Where |
+|---|---|---|
+| **CloudTrail** | Records every AWS API call against the account | `new cloudtrail.Trail(this, "Trail")` |
+| **GuardDuty** | Automated threat detection over VPC/DNS/CloudTrail activity | `new guardduty.CfnDetector(...)` — one per account/region, see §9's note |
+| **Second NAT Gateway** | Removes the single-AZ outbound-connectivity failure point | `natGateways: 2` on the VPC |
+| **Autoscaling** | API/MCP/dashboard scale out on CPU utilization instead of a fixed task count | `service.autoScaleTaskCount(...).scaleOnCpuUtilization(...)` on all three services |
+| **Durable WAF/ALB logs** | Full request logs (not just sampled metrics) land in S3 | `AccessLogsBucket` + `alb.logAccessLogs(...)` + a Firehose delivery stream + `wafv2.CfnLoggingConfiguration` |
+| **Multi-AZ RDS** | Automatic failover to a synchronous standby on an AZ outage | `multiAz: true` on the `DatabaseInstance` |
+
+**Time to apply:** about 1–1.5 days of engineering (this pass), most of it on
+the WAF/ALB logging pipeline — Kinesis Firehose is the fiddliest part, and its
+delivery stream name is required by AWS to start with `aws-waf-logs-` or WAF
+refuses it as a logging destination. The other five are each under an hour of
+code, plus normal `cdk deploy` time (RDS's Multi-AZ conversion and NAT
+Gateway creation can each take 15–30+ minutes on top of the usual deploy).
+
+**Incremental cost:** roughly +$70–115/mo over the previous MVP baseline — see
+the updated §8 cost table.

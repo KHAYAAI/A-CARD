@@ -57,6 +57,10 @@ The product surface:
   (`owner > admin > member > viewer`) alongside the programmatic API key.
 - **Deployment hardening** — private subnets, WAF, encrypted RDS, and one-flag
   TLS with a custom domain.
+- **Production hardening pass** — Multi-AZ RDS, a second NAT Gateway (one per
+  AZ), CPU-based autoscaling on all three Fargate services, CloudTrail,
+  GuardDuty, and durable WAF/ALB request logging to S3 via Kinesis Firehose.
+  See `docs/DEPLOYMENT.md` §11 for what changed and the incremental cost.
 
 ---
 
@@ -135,8 +139,9 @@ Grouped by when you need them.
 
 ### Recommended operational add-ons
 
-- **CloudTrail + GuardDuty** (AWS-native audit + threat detection) — cents to a
-  few dollars/month at this scale.
+- ~~CloudTrail + GuardDuty~~ — shipped by default in `infra/cdk` now (see
+  DEPLOYMENT.md §11). What's still missing: someone/something actually
+  reviewing what they find.
 - **Error/uptime monitoring** (Sentry, Better Stack, or CloudWatch alarms).
 - **A security contact / disclosure address** (`security@yourdomain`).
 
@@ -154,7 +159,8 @@ Grouped by when you need them.
 - [ ] Deploy the hardened stack **with TLS** (see DEPLOYMENT.md).
 - [ ] Smoke-test: register an owner, fund, create a card, simulate a purchase,
       confirm RBAC (viewer can't write).
-- [ ] Turn on CloudTrail + a couple of CloudWatch alarms (5xx rate, RDS CPU).
+- [x] CloudTrail + GuardDuty deploy automatically with the stack now; still
+      add a couple of CloudWatch alarms (5xx rate, RDS CPU) on top.
 - [ ] Publish docs: how to sign up, create an API key, connect the MCP server.
 - [ ] **Announce as a sandbox/preview.** Real cards are explicitly not live yet.
 
@@ -175,7 +181,8 @@ Grouped by when you need them.
 
 ### Phase 4 — General availability
 - [ ] Load/security review, penetration test.
-- [ ] Multi-AZ RDS, second NAT, autoscaling on the API service.
+- [x] Multi-AZ RDS, second NAT, autoscaling on the API/MCP/dashboard services
+      — all in `infra/cdk/lib/acard-stack.ts` by default now, not a GA-time addition.
 - [ ] Published SLAs, status page, support process.
 - [ ] Public launch with real cards.
 
@@ -190,8 +197,10 @@ Do **not** move real cardholder money until every box is ticked:
 - [ ] Legal sign-off on SARB / NPS Act / FICA and customer T&Cs.
 - [ ] Real funding rail settling into wallets.
 - [ ] TLS on a real domain; secrets in Secrets Manager (already wired).
-- [ ] RDS Multi-AZ + tested restore from backup.
-- [ ] CloudTrail, GuardDuty, WAF logging, alerting, on-call runbook.
+- [x] RDS Multi-AZ (`multiAz: true`) — restore-from-backup still needs a test run, not just the config.
+- [x] CloudTrail, GuardDuty, WAF logging — all deployed by default; still needs
+      a process for someone to actually review the findings, and alerting/an
+      on-call runbook on top.
 - [ ] Incident response + security disclosure process published.
 
 ---
@@ -202,7 +211,7 @@ Do **not** move real cardholder money until every box is ticked:
   which is the correct sequencing; ML scoring is a post-launch layer.
 - **KYC/FICA** is intentionally not built in-house — it rides the issuing
   partner's compliance.
-- **Single NAT Gateway** in the default stack trades AZ-failover for cost; add
-  a second before GA.
 - The **snapshot persistence mode** remains for single-instance simplicity but
   the multi-writer Postgres store is the default and the path to scale.
+- Turning on CloudTrail/GuardDuty/WAF logging is not the same as someone
+  watching them — no alerting or on-call process sits on top of them yet.
