@@ -9,8 +9,6 @@ const port = Number(process.env.PORT ?? 8787);
 const issuerWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET ?? "whsec_sandbox_secret";
 const databaseUrl = process.env.DATABASE_URL;
 const dashboardUrl = process.env.DASHBOARD_URL;
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const payfastMerchantId = process.env.PAYFAST_MERCHANT_ID;
 const payfastMerchantKey = process.env.PAYFAST_MERCHANT_KEY;
 const payfastPassphrase = process.env.PAYFAST_PASSPHRASE;
@@ -59,12 +57,9 @@ const app = createApp({
   issuerWebhookSecret,
   dashboardUrl,
   onMutation,
-  stripe:
-    stripeSecretKey && stripeWebhookSecret
-      ? { secretKey: stripeSecretKey, webhookSecret: stripeWebhookSecret }
-      : undefined,
-  // Real ZAR wallet funding. Omit to keep /v1/wallet/fund's instant sandbox
-  // credit; set to switch to PayFast checkout + ITN-confirmed settlement.
+  // Real ZAR wallet funding AND subscription billing both route through
+  // PayFast (see app.ts's /webhooks/payfast). Omit to keep /v1/wallet/fund's
+  // instant sandbox credit and unmetered billing.
   payfast:
     payfastMerchantId && payfastMerchantKey && payfastPassphrase
       ? { merchantId: payfastMerchantId, merchantKey: payfastMerchantKey, passphrase: payfastPassphrase, sandbox: payfastSandbox }

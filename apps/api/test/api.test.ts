@@ -1,5 +1,4 @@
-import { createHmac } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { Platform, signWebhook } from "@acard/core";
 import { createApp } from "../src/app.js";
 
@@ -208,84 +207,5 @@ describe("API end to end", () => {
   });
 });
 
-describe("Stripe billing", () => {
-  const stripeSecret = "sk_test_123";
-  const webhookSecret = "whsec_stripe_test";
-  let billingApp: ReturnType<typeof createApp>;
-  let billingKey: string;
-  let billingHolderId: string;
-
-  beforeEach(async () => {
-    billingApp = createApp({
-      platform: new Platform(),
-      issuerWebhookSecret: SECRET,
-      stripe: { secretKey: stripeSecret, webhookSecret },
-    });
-    const res = await billingApp.request("/v1/signup", {
-      method: "POST",
-      body: JSON.stringify({ email: "billing@example.co.za", name: "Billing" }),
-      headers: { "content-type": "application/json" },
-    });
-    const body = await json(res);
-    billingKey = body.api_key;
-    billingHolderId = body.account_holder.id;
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("starts a Stripe checkout for a paid tier", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" }))),
-    );
-
-    const res = await billingApp.request("/v1/billing/checkout", {
-      method: "POST",
-      body: JSON.stringify({ tier: "basic" }),
-      headers: { authorization: `Bearer ${billingKey}`, "content-type": "application/json" },
-    });
-    expect(res.status).toBe(200);
-    const body = await json(res);
-    expect(body.checkout_url).toBe("https://checkout.stripe.com/c/pay/cs_test_1");
-  });
-
-  it("upgrades the account tier on a verified checkout.session.completed webhook", async () => {
-    const payload = JSON.stringify({
-      id: "evt_1",
-      type: "checkout.session.completed",
-      data: { object: { metadata: { accountHolderId: billingHolderId, tier: "pro" } } },
-    });
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signature = createHmac("sha256", webhookSecret).update(`${timestamp}.${payload}`).digest("hex");
-
-    const res = await billingApp.request("/webhooks/stripe", {
-      method: "POST",
-      body: payload,
-      headers: { "stripe-signature": `t=${timestamp},v1=${signature}` },
-    });
-    expect(res.status).toBe(200);
-
-    // Confirm the upgrade actually raised the plan limit (pro = 100 cards/month).
-    for (let i = 0; i < 6; i++) {
-      const cardRes = await billingApp.request("/v1/cards", {
-        method: "POST",
-        body: JSON.stringify({}),
-        headers: { authorization: `Bearer ${billingKey}`, "content-type": "application/json" },
-      });
-      expect(cardRes.status).toBe(201);
-    }
-  });
-
-  it("rejects a Stripe webhook with a bad signature", async () => {
-    const payload = JSON.stringify({ type: "checkout.session.completed", data: { object: {} } });
-    const timestamp = Math.floor(Date.now() / 1000);
-    const res = await billingApp.request("/webhooks/stripe", {
-      method: "POST",
-      body: payload,
-      headers: { "stripe-signature": `t=${timestamp},v1=not-a-real-signature` },
-    });
-    expect(res.status).toBe(401);
-  });
-});
+// Subscription billing (PayFast) is covered in payfast.test.ts, alongside
+// wallet funding — both share the same processor and webhook handler.

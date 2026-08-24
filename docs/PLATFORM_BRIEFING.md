@@ -116,7 +116,7 @@ A-CARD is built in layers with clear responsibilities and full test coverage:
 - **Hardened AWS stack** (private subnets, WAF, encrypted RDS, TLS)
 - **Multi-currency** (ZAR + USD)
 - **RBAC** (user roles, team management, audit trail)
-- **Billing integration** (Stripe USD subscriptions)
+- **Billing integration** (PayFast USD subscriptions)
 - **Agent integration** (MCP: stdio + HTTP)
 
 ### ⚡ Immediate Path to Revenue (Production)
@@ -139,7 +139,7 @@ The only technical blocker is **operational readiness**. Payment rails are not a
 |-------|------|----------|
 | **Phase 0** | AWS account, domain, cdk bootstrap | 0.5 day |
 | **Phase 1** | Deploy hardened stack, smoke test, publish docs | 1 day |
-| **Phase 2** | Stripe billing, Slack notifications | 0.5–1 day |
+| **Phase 2** | PayFast billing, Slack notifications | 0.5–1 day |
 | **Phase 3** | Issuer integration (partner-gated) | Weeks–months |
 | **Phase 4** | Multi-AZ RDS, autoscaling, pentest, GA | 2–4 weeks |
 
@@ -167,7 +167,7 @@ Calculation: ~2.1M agents globally by 2027 × $2,500–3,500 avg spend/month × 
 | **Pro** | R499 | ~$27 | 100 | Org-scale, enterprise |
 
 ### Revenue Model
-- **Subscriptions (80%):** Monthly plan tiers via Stripe (USD)
+- **Subscriptions (80%):** Monthly plan tiers via PayFast (USD, pending PayFast confirming USD billing on the merchant account)
 - **Per-transaction fees (15%):** On real authorizations (1%, tiered down at scale)
 - **Issuer revenue share (5%):** Interchange or partnership fees
 

@@ -70,19 +70,25 @@ are generated and stored automatically — you never handle them.
 | Parameter | Required | What it is |
 |---|---|---|
 | `IssuerWebhookSecret` | ✅ | HMAC secret for `/webhooks/issuer`. |
-| `StripeSecretKey` | — | `sk_live_…` / `sk_test_…` for USD subscription billing. Blank ⇒ unmetered. |
-| `StripeWebhookSecret` | — | Stripe webhook signing secret from Developers → Webhooks. |
 | `SlackApprovalsWebhookUrl` | — | Slack incoming webhook. Blank ⇒ no push. |
 | `WorkOsApiKey` | — | `sk_...` from your WorkOS dashboard. Blank ⇒ no SSO (password + TOTP MFA login is unaffected either way). |
 | `WorkOsClientId` | — | `client_...` from the same dashboard page. Must be set alongside `WorkOsApiKey` or SSO stays off. |
-| `PayFastMerchantId` / `PayFastMerchantKey` / `PayFastPassphrase` | — | From your PayFast dashboard's Integration settings. Blank ⇒ `/v1/wallet/fund` keeps its instant sandbox credit. Set all three ⇒ real ZAR wallet funding via PayFast checkout + ITN, and instant funding is disabled. |
+| `PayFastMerchantId` / `PayFastMerchantKey` / `PayFastPassphrase` | — | From your PayFast dashboard's Integration settings. Blank ⇒ both `/v1/wallet/fund` keeps its instant sandbox credit AND subscriptions stay unmetered. Set all three ⇒ real wallet funding **and** subscription billing both route through PayFast checkout + ITN (see the warning below), and instant wallet funding is disabled. |
 | `PayFastSandbox` | — | `"true"` to use `sandbox.payfast.co.za` instead of the live host. Defaults to `"false"`. |
+
+⚠️ **PayFast's checkout has no currency parameter.** The `basic`/`pro`/`enterprise`
+tiers in `packages/core/src/billing.ts` are priced in USD ($8/$28/$2,800), but
+PayFast bills in whatever currency the merchant account itself is configured
+for. Confirm with PayFast that this account is set up to bill USD before
+relying on `/v1/billing/checkout` for real charges — otherwise the same
+number is charged in ZAR (e.g. $28 → R28). See `apps/api/src/payfast.ts`'s
+header comment.
 
 A real card issuer (Sudo Africa or similar) is **not yet a deployable
 parameter** — see §6 below. It exists in code (`Card.issuerCardId`, the
 webhook's dual-lookup path) but the exact request/response wire format is
 unverified against Sudo's actual API, so it isn't wired into this stack the
-way Stripe/PayFast/WorkOS are. Wiring it is a small, contained change once you
+way PayFast/WorkOS are. Wiring it is a small, contained change once you
 have their sandbox docs, not a rebuild.
 
 ---
@@ -103,8 +109,9 @@ Provide your domain and its hosted zone via `-c` context (all three required):
 ```bash
 npx cdk deploy \
   --parameters IssuerWebhookSecret="<the-secret-you-saved>" \
-  --parameters StripeSecretKey="sk_live_..." \
-  --parameters StripeWebhookSecret="whsec_..." \
+  --parameters PayFastMerchantId="..." \
+  --parameters PayFastMerchantKey="..." \
+  --parameters PayFastPassphrase="..." \
   --parameters SlackApprovalsWebhookUrl="https://hooks.slack.com/services/..." \
   -c domain=app.example.com \
   -c hostedZoneId=Z0123456789ABCDEFGHIJ \
@@ -167,15 +174,6 @@ Expect `approved: true` and a wallet `posted` of `75000`. Confirm health at
 
 ## 6. Connecting integrations
 
-### Stripe (USD subscription billing)
-Dashboard → Developers → Webhooks → Add endpoint. Set the endpoint URL to
-`$ORIGIN/webhooks/stripe`, listening for `checkout.session.completed`. The
-signing secret it gives you goes in the `StripeWebhookSecret` parameter, and
-your secret key in `StripeSecretKey` (redeploy to apply). Pricing itself
-(`free`/`basic`/`pro`/`enterprise` — $0/$8/$28/$2,800 per month) lives in
-`packages/core/src/billing.ts`, independent of what currency an account's
-wallets are actually denominated in.
-
 ### Slack (approval notifications)
 Create an Incoming Webhook in your Slack workspace; put the URL in
 `SlackApprovalsWebhookUrl` (redeploy).
@@ -190,17 +188,30 @@ API service; a bare `/auth/...` path would silently miss it). Set
 `POST /v1/sso/setup` from the dashboard's Team tab to get a self-serve WorkOS
 Admin Portal link for their own IT team — no code or A-CARD login on their end.
 
-### PayFast (real ZAR wallet funding)
+### PayFast (real wallet funding AND subscription billing)
 Dashboard → Settings → Integration. Set the notify (ITN) URL to
-`$ORIGIN/webhooks/payfast`. Set `PayFastMerchantId`, `PayFastMerchantKey`,
-and `PayFastPassphrase` (redeploy to apply) — once all three are set,
-`POST /v1/wallet/fund` (the instant sandbox credit) returns `409` and
-`POST /v1/wallet/fund/checkout` takes over: it returns a signed field set
-for the dashboard to submit as a form POST to PayFast, and the wallet is
-only credited when PayFast's ITN passes signature + source-host +
-server-confirm validation (all three, not just the signature — see
-`apps/api/src/payfast.ts`). Test against `PayFastSandbox=true` before
+`$ORIGIN/webhooks/payfast` — the **same** URL for both flows; a checkout is
+tagged `custom_str2: "fund"` or `"sub:<tier>"` so the one webhook handler can
+tell them apart. Set `PayFastMerchantId`, `PayFastMerchantKey`, and
+`PayFastPassphrase` (redeploy to apply) — once all three are set:
+
+- `POST /v1/wallet/fund` (the instant sandbox credit) returns `409` and
+  `POST /v1/wallet/fund/checkout` takes over.
+- `POST /v1/billing/checkout` starts a real subscription checkout instead of
+  running unmetered.
+
+Both build a signed field set for the dashboard to submit as a form POST to
+PayFast, and both only take effect once PayFast's ITN passes signature +
+source-host + server-confirm validation (all three, not just the signature —
+see `apps/api/src/payfast.ts`). Test against `PayFastSandbox=true` before
 flipping it off.
+
+⚠️ **PayFast's checkout has no currency parameter.** Pricing
+(`free`/`basic`/`pro`/`enterprise` — $0/$8/$28/$2,800/month) lives in
+`packages/core/src/billing.ts`, but PayFast bills in whatever currency the
+merchant account itself is configured for. Confirm with PayFast that this
+account bills in USD before relying on it for real subscription
+charges — otherwise, e.g., $28 is charged as R28.
 
 ### A real card issuer (Phase 3)
 The webhook contract is issuer-agnostic (`POST /webhooks/issuer`, HMAC
@@ -317,11 +328,11 @@ into this stack (`cdk import`) instead of letting CDK try to create a second one
   shared across every API instance via a Postgres table) — this is what
   catches an attacker rotating IPs, which the WAF's IP-keyed rule can't.
 - Passwords are scrypt-hashed; session tokens, API key secrets, and MFA
-  recovery codes are all stored only as SHA-256 hashes; the issuer and Stripe
-  webhooks are HMAC-verified with replay protection (Stripe's is additionally
-  timestamp-bound, a 5-minute tolerance against a replayed payload); PayFast's
-  ITN goes further still — signature, source-host resolution, and a
-  server-to-server confirm-back to PayFast itself, all three required.
+  recovery codes are all stored only as SHA-256 hashes; the issuer webhook is
+  HMAC-verified with replay protection. PayFast's ITN (used for both wallet
+  funding and subscription billing) goes further still — signature,
+  source-host resolution, and a server-to-server confirm-back to PayFast
+  itself, all three required, not just the signature.
 - Human login supports TOTP MFA (enrolled per-user from the dashboard) and,
   optionally, WorkOS SSO — both additive to the base password flow, never a
   replacement for it.

@@ -17,7 +17,6 @@ import {
   type SubscriptionTier,
 } from "@acard/core";
 import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
-import { createStripeClient, type StripeClient, type StripeConfig } from "./stripe.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
 import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
@@ -41,8 +40,6 @@ export interface AppConfig {
   issuerWebhookSecret: string;
   /** Called after any request that might have mutated platform state (snapshot persistence hook). */
   onMutation?: () => void;
-  /** Stripe integration for USD subscription billing (optional — omit to run unmetered). */
-  stripe?: StripeConfig | StripeClient;
   /**
    * PayFast integration for real ZAR wallet funding (optional — omit to keep
    * the instant sandbox-credit behavior on `/v1/wallet/fund`). When set,
@@ -78,7 +75,7 @@ export interface AppConfig {
    * reference before this goes live with real money.
    */
   sudo?: SudoConfig | IssuerCardClient;
-  /** Where Stripe checkout should send the customer back, and where the SSO callback redirects with a session. */
+  /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
 
@@ -100,11 +97,6 @@ function asIssuerClient(config: SudoConfig | IssuerCardClient): IssuerCardClient
 function asPayFastClient(config: PayFastConfig | PayFastClient): PayFastClient {
   // A config object (has `merchantId`) builds the real client; a `PayFastClient` (tests) passes through.
   return "merchantId" in config ? createPayFastClient(config) : config;
-}
-
-function asStripeClient(config: StripeConfig | StripeClient): StripeClient {
-  // A config object (has `secretKey`) builds the real client; a `StripeClient` (tests) passes through.
-  return "secretKey" in config ? createStripeClient(config) : config;
 }
 
 type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
@@ -234,7 +226,6 @@ const issuerEventSchema = z.object({
 export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl } = config;
   const platform = asService(config.platform);
-  const stripe = config.stripe ? asStripeClient(config.stripe) : undefined;
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
   const workos = config.workos ? asWorkOSClient(config.workos) : undefined;
@@ -632,6 +623,7 @@ export function createApp(config: AppConfig) {
       // point PayFast's confirmation at an endpoint of their choosing.
       notifyUrl: `${origin}/webhooks/payfast`,
       customStr1: holder.id,
+      customStr2: "fund",
     });
     return c.json({ action: checkout.action, fields: checkout.fields, reference });
   });
@@ -828,48 +820,38 @@ export function createApp(config: AppConfig) {
     return c.json({ portal_url: portalUrl });
   });
 
-  // ---- billing (freemium tiers, USD subscriptions via Stripe) ------------------------
+  // ---- billing (freemium tiers, subscriptions via PayFast) ------------------------
+  //
+  // Same processor as wallet funding, same webhook (/webhooks/payfast) — a
+  // checkout is tagged `custom_str2: "fund"` or `"sub:<tier>"` so the one
+  // ITN handler below can tell them apart. See payfast.ts's header for the
+  // important caveat: PayFast's checkout has no currency field, so this
+  // only bills the tiers' priceUsdCents figures correctly in USD if the
+  // PayFast merchant account itself is confirmed (with PayFast) to bill in
+  // USD — otherwise the same number is charged in the account's native ZAR.
 
   app.get("/v1/billing/plans", (c) => c.json({ plans: SUBSCRIPTION_TIERS }));
 
   app.post("/v1/billing/checkout", requireRole("admin"), async (c) => {
-    if (!stripe) {
-      return c.json({ error: { code: "billing_not_configured", message: "Stripe is not configured on this deployment" } }, 501);
+    if (!payfast) {
+      return c.json({ error: { code: "billing_not_configured", message: "PayFast is not configured on this deployment" } }, 501);
     }
     const holder = c.get("holder");
     const { tier } = z.object({ tier: z.enum(["basic", "pro", "enterprise"]) }).parse(await c.req.json());
     const plan = SUBSCRIPTION_TIERS[tier as SubscriptionTier];
     const origin = (dashboardUrl ?? "").replace(/\/$/, "");
-    const checkout = await stripe.createCheckoutSession({
+    const checkout = payfast.buildCheckout({
+      amountMinorUnits: plan.priceUsdCents,
+      itemName: `A-CARD ${tier} plan`,
+      reference: `${holder.id}:${tier}:${Date.now()}`,
       email: holder.email,
-      amountUsdCents: plan.priceUsdCents,
-      tier,
-      accountHolderId: holder.id,
-      successUrl: `${origin}/billing?upgraded=1`,
+      returnUrl: `${origin}/billing?upgraded=1`,
       cancelUrl: `${origin}/billing?upgraded=0`,
+      notifyUrl: `${origin}/webhooks/payfast`,
+      customStr1: holder.id,
+      customStr2: `sub:${tier}`,
     });
-    return c.json({ checkout_url: checkout.checkoutUrl, session_id: checkout.sessionId });
-  });
-
-  app.post("/webhooks/stripe", async (c) => {
-    if (!stripe) return c.json({ error: { code: "billing_not_configured", message: "Stripe is not configured" } }, 501);
-    const rawBody = await c.req.text();
-    if (!stripe.verifyWebhookSignature(rawBody, c.req.header("stripe-signature"))) {
-      return c.json({ error: { code: "invalid_signature", message: "bad Stripe signature" } }, 401);
-    }
-    const event = JSON.parse(rawBody) as {
-      id: string;
-      type: string;
-      data: { object: { metadata?: { accountHolderId?: string; tier?: SubscriptionTier } } };
-    };
-    if (!(await platform.markEvent(`stripe:${event.id}`))) {
-      return c.json({ received: true, duplicate: true });
-    }
-    if (event.type === "checkout.session.completed") {
-      const { accountHolderId, tier } = event.data.object.metadata ?? {};
-      if (accountHolderId && tier) await platform.setSubscriptionTier(accountHolderId, tier);
-    }
-    return c.json({ received: true });
+    return c.json({ action: checkout.action, fields: checkout.fields });
   });
 
   app.post("/webhooks/payfast", async (c) => {
@@ -886,10 +868,18 @@ export function createApp(config: AppConfig) {
     if (paymentId && !(await platform.markEvent(`payfast:${paymentId}`))) {
       return c.json({ received: true, duplicate: true });
     }
+    if (fields.payment_status !== "COMPLETE") return c.json({ received: true });
+
     const accountHolderId = fields.custom_str1;
-    const amountRand = Number(fields.amount_gross ?? fields.amount ?? "0");
-    if (fields.payment_status === "COMPLETE" && accountHolderId && amountRand > 0) {
-      await platform.fundWallet(accountHolderId, Math.round(amountRand * 100), "ZAR", fields.m_payment_id);
+    const purpose = fields.custom_str2 ?? "fund";
+    if (!accountHolderId) return c.json({ received: true });
+
+    if (purpose.startsWith("sub:")) {
+      const tier = purpose.slice("sub:".length) as SubscriptionTier;
+      await platform.setSubscriptionTier(accountHolderId, tier);
+    } else {
+      const amountRand = Number(fields.amount_gross ?? fields.amount ?? "0");
+      if (amountRand > 0) await platform.fundWallet(accountHolderId, Math.round(amountRand * 100), "ZAR", fields.m_payment_id);
     }
     return c.json({ received: true });
   });

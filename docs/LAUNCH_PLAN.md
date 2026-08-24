@@ -128,7 +128,7 @@ Grouped by when you need them.
 
 | Dependency | Purpose | Where / how | Cost |
 |---|---|---|---|
-| **Stripe account** | USD subscription collection (`free`/`basic`/`pro`/`enterprise` — $0/$8/$28/$2,800/mo) | dashboard.stripe.com → Developers → API keys & Webhooks | ~2.9% + $0.30 per charge |
+| **PayFast account** | Subscription collection — same processor and account as wallet funding (`free`/`basic`/`pro`/`enterprise` — $0/$8/$28/$2,800/mo) | my.payfast.co.za → Settings → Integration | ~2.9-3.5%+ per charge. ⚠️ USD billing must be confirmed with PayFast for this account — see §3 below and DEPLOYMENT.md. |
 | **Slack workspace** (optional) | Approval push notifications | Slack → Incoming Webhooks → copy URL | free |
 
 ### Needed to process real payments (Phase 3 — the real gate)
@@ -138,7 +138,7 @@ Grouped by when you need them.
 | **Card issuing partner (BIN sponsor)** | Actually issues Visa/Mastercard, hosts PANs (keeps you out of PCI scope), provides the real authorization webhook | Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stitch, or Stripe Issuing — start a commercial conversation | Deal-dependent (setup + per-card + interchange share) |
 | **KYC/FICA provider** | Identity verification of account holders | Usually via the issuing partner; standalone options: Smile ID, Onfido | Per-verification |
 | **Compliance/legal counsel** | SARB / NPS Act / FICA posture, T&Cs | SA fintech counsel | Project fee |
-| **Production funding rail** | Real wallet top-ups that settle | PayFast — wired, needs real-sandbox verification (see §3 above) | ~2.9-3.5%+ per transaction |
+| **Production funding rail** | Real wallet top-ups that settle | PayFast — wired (same processor/webhook as subscription billing above), needs real-sandbox verification | ~2.9-3.5%+ per transaction |
 
 ### Recommended operational add-ons
 
@@ -168,9 +168,14 @@ Grouped by when you need them.
 - [ ] **Announce as a sandbox/preview.** Real cards are explicitly not live yet.
 
 ### Phase 2 — Billing + notifications (0.5–1 day)
-- [ ] Create Stripe account; add `StripeSecretKey` / `StripeWebhookSecret`.
-- [ ] Point Stripe's webhook at `https://<domain>/webhooks/stripe`, listening
-      for `checkout.session.completed`.
+- [ ] Create/confirm PayFast account (same one used for wallet funding); add
+      `PayFastMerchantId` / `PayFastMerchantKey` / `PayFastPassphrase`.
+- [ ] Confirm with PayFast that this merchant account bills in USD — its
+      checkout has no currency parameter, so an unconfirmed account silently
+      bills the tier's number in ZAR instead (e.g. $28 → R28).
+- [ ] Point PayFast's notify (ITN) URL at `https://<domain>/webhooks/payfast`
+      — same URL used for wallet funding; the two are disambiguated by
+      `custom_str2` (`"fund"` vs `"sub:<tier>"`).
 - [ ] (Optional) Create a Slack incoming webhook; set
       `SlackApprovalsWebhookUrl`.
 - [ ] Verify a test upgrade raises the card cap.

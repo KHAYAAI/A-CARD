@@ -286,3 +286,83 @@ describe("PayFast configured", () => {
     expect(after.wallet.posted).toBe(20_000); // credited exactly once
   });
 });
+
+describe("PayFast subscription billing", () => {
+  it("/v1/billing/checkout is 501 when PayFast isn't configured", async () => {
+    const app = createApp({ platform: new Platform(), issuerWebhookSecret: SECRET });
+    const signup = await json(
+      await app.request("/v1/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "dev@acard.co.za", name: "Dev" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const res = await withToken(app, "/v1/billing/checkout", signup.api_key, { method: "POST", body: JSON.stringify({ tier: "basic" }) });
+    expect(res.status).toBe(501);
+  });
+
+  it("checkout tags the purpose as sub:<tier>, distinct from wallet funding", async () => {
+    let captured: any;
+    const app = createApp({
+      platform: new Platform(),
+      issuerWebhookSecret: SECRET,
+      dashboardUrl: "https://app.example.com",
+      payfast: fakePayFast({
+        buildCheckout: (input) => {
+          captured = input;
+          return { action: "https://sandbox.payfast.co.za/eng/process", fields: { signature: "fake" } };
+        },
+      }),
+    });
+    const signup = await json(
+      await app.request("/v1/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "dev@acard.co.za", name: "Dev" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const res = await withToken(app, "/v1/billing/checkout", signup.api_key, { method: "POST", body: JSON.stringify({ tier: "pro" }) });
+    expect(res.status).toBe(200);
+    expect(captured.customStr2).toBe("sub:pro");
+    expect(captured.customStr1).toBe(signup.account_holder.id);
+    expect(captured.amountMinorUnits).toBe(2_800); // packages/core/src/billing.ts's pro priceUsdCents
+    expect(captured.notifyUrl).toBe("https://app.example.com/webhooks/payfast"); // same webhook as wallet funding
+  });
+
+  it("upgrades the account tier on a valid sub: ITN, distinct from a wallet-funding ITN", async () => {
+    const app = createApp({
+      platform: new Platform(),
+      issuerWebhookSecret: SECRET,
+      dashboardUrl: "https://app.example.com",
+      payfast: fakePayFast(),
+    });
+    const signup = await json(
+      await app.request("/v1/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "dev@acard.co.za", name: "Dev" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const body = new URLSearchParams({
+      m_payment_id: "pf_sub_1",
+      pf_payment_id: "sub_998877",
+      payment_status: "COMPLETE",
+      amount_gross: "28.00",
+      custom_str1: signup.account_holder.id,
+      custom_str2: "sub:pro",
+      signature: "irrelevant-because-fake-validates-true",
+    }).toString();
+    const res = await app.request("/webhooks/payfast", { method: "POST", body, headers: { "content-type": "application/x-www-form-urlencoded" } });
+    expect(res.status).toBe(200);
+
+    // Confirms the upgrade actually raised the plan limit (pro = 100 cards/month) —
+    // and that the wallet was NOT credited, unlike the "fund" purpose.
+    for (let i = 0; i < 6; i++) {
+      const cardRes = await withToken(app, "/v1/cards", signup.api_key, { method: "POST", body: "{}" });
+      expect(cardRes.status).toBe(201);
+    }
+    const wallet = await json(await withToken(app, "/v1/wallet", signup.api_key));
+    expect(wallet.wallet.posted).toBe(0);
+  });
+});

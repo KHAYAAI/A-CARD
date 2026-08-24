@@ -232,7 +232,7 @@ export class Platform {
     return holder;
   }
 
-  /** Called by the Stripe webhook once a subscription payment settles. */
+  /** Called by the PayFast webhook once a subscription payment settles. */
   setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): AccountHolder {
     const holder = this.getAccountHolder(accountHolderId);
     holder.subscriptionTier = tier;

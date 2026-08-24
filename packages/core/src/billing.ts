@@ -2,8 +2,11 @@ import { DomainError } from "./errors.js";
 import type { CardLimits } from "./cards.js";
 
 /**
- * Freemium tiers. Subscription pricing is USD (billed via Stripe — see
- * apps/api/src/stripe.ts), independent of what currency an account's
+ * Freemium tiers. Subscription pricing is USD (billed via PayFast — see
+ * apps/api/src/payfast.ts, and its header note on the currency risk:
+ * PayFast's checkout has no currency field, so this only bills correctly
+ * in USD if the merchant account itself is confirmed with PayFast as USD),
+ * independent of what currency an account's
  * wallets/cards are actually denominated in. Two limits per tier: a
  * card-creation cap per calendar month, and a per-card spend cap.
  */

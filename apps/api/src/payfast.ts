@@ -2,7 +2,20 @@ import { createHash } from "node:crypto";
 import { resolve4 } from "node:dns/promises";
 
 /**
- * PayFast integration for real ZAR wallet funding. Unlike Paystack (a REST
+ * PayFast integration for both real wallet funding and subscription
+ * billing (see app.ts's /v1/wallet/fund/checkout and /v1/billing/checkout —
+ * both build a signed form via this client and land on the same
+ * /webhooks/payfast ITN handler, disambiguated by `custom_str2`).
+ *
+ * IMPORTANT: PayFast's standard checkout has no currency parameter — the
+ * `amount` field bills in whatever currency the merchant account itself is
+ * configured for. There is no code-level way to force USD here; if the
+ * PayFast account isn't confirmed (with PayFast) as billing in USD, an
+ * amount like 2800 (meant as $28.00) will be charged as R28.00 instead.
+ * Verify this with PayFast before relying on it for the USD-priced
+ * subscription tiers in packages/core/src/billing.ts.
+ *
+ * Unlike Paystack (a REST
  * "initialize transaction" call that returns a checkout URL), PayFast's
  * checkout is a client-submitted HTML form POST of signed fields to their
  * `/eng/process` endpoint — there's no server-to-server "create a checkout"
@@ -44,6 +57,8 @@ export interface PayFastCheckoutInput {
   notifyUrl: string;
   /** Passed through untouched on the ITN — used here to carry the account holder id. */
   customStr1?: string;
+  /** Passed through untouched on the ITN — used to tag purpose: "fund" (wallet top-up) or "sub:<tier>" (subscription). */
+  customStr2?: string;
 }
 
 export interface PayFastItn {
@@ -92,6 +107,7 @@ export class RealPayFastClient implements PayFastClient {
       ["amount", (input.amountMinorUnits / 100).toFixed(2)],
       ["item_name", input.itemName],
       ["custom_str1", input.customStr1 ?? ""],
+      ["custom_str2", input.customStr2 ?? ""],
     ];
     const signature = signFields(ordered, this.config.passphrase);
     const fields = Object.fromEntries(ordered.filter(([, v]) => v !== ""));

@@ -7,7 +7,7 @@ import type { WorkOSClient, WorkOSProfile } from "../src/workos.js";
  * WorkOS SSO over the real HTTP surface. A fake `WorkOSClient` stands in for
  * `@workos-inc/node` so these tests exercise the actual routes and the
  * account-linking-by-email logic without any network call — the same
- * dependency-injection pattern EmbeddedWalletClient and StripeClient use
+ * dependency-injection pattern EmbeddedWalletClient and PayFastClient use
  * elsewhere in this codebase, just via a swappable client object instead of
  * a mocked `fetch`.
  *

@@ -4,14 +4,14 @@ Virtual cards for AI agents, over MCP — an Agentcard.sh-style platform targeti
 
 Agents get scoped, budget-capped, single-use virtual cards funded from a prepaid wallet — each org holds **ZAR and USD wallets side by side** (and any other supported currency), fully independent, with cards drawing from their own currency. Every charge runs through a real-time authorization path: rules engine → human-in-the-loop approval → double-entry ledger hold. The sandbox ships with a mock issuer (deterministic `4242…` PANs) so the whole system runs locally with zero external dependencies; the issuer integration point is a single signed webhook, designed to be swapped for a real BIN-sponsored partner (Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stripe Issuing).
 
-State is durable and **multi-writer** (a Postgres row-level ledger with per-wallet locks, so several API instances can share one database), access is guarded by both a programmatic API key and human **login with role-based access control**, it's billable (Stripe USD subscriptions), and it's deployable to a hardened AWS stack today (private subnets, WAF, optional TLS) — see `infra/cdk`.
+State is durable and **multi-writer** (a Postgres row-level ledger with per-wallet locks, so several API instances can share one database), access is guarded by both a programmatic API key and human **login with role-based access control**, it's billable (PayFast USD subscriptions), and it's deployable to a hardened AWS stack today (private subnets, WAF, optional TLS) — see `infra/cdk`.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `packages/core` | Domain logic: double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
-| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding (PayFast), cards, transactions, approvals, billing (Stripe), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
+| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
 | `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management |
@@ -66,9 +66,11 @@ Registration picks a **workspace type** (`account_type: personal | enterprise`).
 
 All of it lives in `packages/core/src/enterprise.ts`, is enforced in `Platform.authorize`, and is implemented in **both** the in-memory and Postgres multi-writer stores (new `acard_departments` / `acard_org_policies` tables; `account_type` and `department_id` columns added idempotently for existing deployments). The dashboard renders Departments, Policies, and Audit tabs plus a spend-by-department overview for enterprise accounts only. See `apps/demo/enterprise.html` for the standalone pitch demo of the same model.
 
-### Billing (Stripe, USD subscriptions)
+### Billing (PayFast, USD subscriptions)
 
-Four tiers — `free` ($0/mo, 5 cards, up to $50/card), `basic` ($8/mo, 25 cards, up to $500/card), `pro` ($28/mo, 100 cards, up to $1,000/card), `enterprise` ($2,800/mo, effectively unlimited cards, uncapped) — enforced in `packages/core/src/billing.ts`. The per-card cap only applies to USD-denominated cards (no FX conversion exists in this codebase to apply a USD number against a ZAR/NGN/KES card). Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (see the external dependencies list) to enable `POST /v1/billing/checkout` and the `/webhooks/stripe` upgrade flow. Omit both and every account just stays on the free tier.
+Four tiers — `free` ($0/mo, 5 cards, up to $50/card), `basic` ($8/mo, 25 cards, up to $500/card), `pro` ($28/mo, 100 cards, up to $1,000/card), `enterprise` ($2,800/mo, effectively unlimited cards, uncapped) — enforced in `packages/core/src/billing.ts`. The per-card cap only applies to USD-denominated cards (no FX conversion exists in this codebase to apply a USD number against a ZAR/NGN/KES card). Same processor and webhook as wallet funding: set `PAYFAST_MERCHANT_ID` / `PAYFAST_MERCHANT_KEY` / `PAYFAST_PASSPHRASE` (see the external dependencies list) to enable `POST /v1/billing/checkout` and the `/webhooks/payfast` upgrade flow (disambiguated from a funding ITN by `custom_str2`). Omit them and every account just stays on the free tier.
+
+⚠️ PayFast's checkout has no currency parameter — an amount only bills correctly in USD if PayFast has confirmed the merchant account itself is configured to bill in USD; otherwise the same figure is charged in ZAR. See `apps/api/src/payfast.ts`'s header.
 
 ### Approval notifications (Slack)
 
