@@ -91,13 +91,14 @@ describe("API end to end", () => {
     expect(card.currency).toBe("USD");
     const purchase = await json(
       await authed("/v1/simulate/purchase", {
+        // Kept under the free tier's $50 per-card cap (see billing.ts's applyCardCap).
         method: "POST",
-        body: JSON.stringify({ card_id: card.id, amount: 15_000, merchant: { name: "OpenAI", category: "5734" } }),
+        body: JSON.stringify({ card_id: card.id, amount: 3_000, merchant: { name: "OpenAI", category: "5734" } }),
       }),
     );
     expect(purchase.approved).toBe(true);
     expect(purchase.wallet.currency).toBe("USD");
-    expect(purchase.wallet.posted).toBe(25_000);
+    expect(purchase.wallet.posted).toBe(37_000);
 
     // ZAR wallet is untouched.
     const after = await json(await authed("/v1/wallet?currency=ZAR"));
@@ -207,9 +208,9 @@ describe("API end to end", () => {
   });
 });
 
-describe("Paystack billing", () => {
-  const paystackSecret = "sk_test_123";
-  const webhookSecret = "whsec_paystack_test";
+describe("Stripe billing", () => {
+  const stripeSecret = "sk_test_123";
+  const webhookSecret = "whsec_stripe_test";
   let billingApp: ReturnType<typeof createApp>;
   let billingKey: string;
   let billingHolderId: string;
@@ -218,7 +219,7 @@ describe("Paystack billing", () => {
     billingApp = createApp({
       platform: new Platform(),
       issuerWebhookSecret: SECRET,
-      paystack: { secretKey: paystackSecret, webhookSecret },
+      stripe: { secretKey: stripeSecret, webhookSecret },
     });
     const res = await billingApp.request("/v1/signup", {
       method: "POST",
@@ -234,18 +235,10 @@ describe("Paystack billing", () => {
     vi.unstubAllGlobals();
   });
 
-  it("starts a Paystack checkout for a paid tier", async () => {
+  it("starts a Stripe checkout for a paid tier", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            status: true,
-            message: "ok",
-            data: { authorization_url: "https://checkout.paystack.com/abc", access_code: "abc", reference: "ref_1" },
-          }),
-        ),
-      ),
+      vi.fn(async () => new Response(JSON.stringify({ id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" }))),
     );
 
     const res = await billingApp.request("/v1/billing/checkout", {
@@ -255,21 +248,22 @@ describe("Paystack billing", () => {
     });
     expect(res.status).toBe(200);
     const body = await json(res);
-    expect(body.checkout_url).toBe("https://checkout.paystack.com/abc");
+    expect(body.checkout_url).toBe("https://checkout.stripe.com/c/pay/cs_test_1");
   });
 
-  it("upgrades the account tier on a verified charge.success webhook", async () => {
+  it("upgrades the account tier on a verified checkout.session.completed webhook", async () => {
     const payload = JSON.stringify({
-      event: "charge.success",
       id: "evt_1",
-      data: { reference: "ref_1", metadata: { accountHolderId: billingHolderId, tier: "pro" } },
+      type: "checkout.session.completed",
+      data: { object: { metadata: { accountHolderId: billingHolderId, tier: "pro" } } },
     });
-    const signature = createHmac("sha512", webhookSecret).update(payload).digest("hex");
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = createHmac("sha256", webhookSecret).update(`${timestamp}.${payload}`).digest("hex");
 
-    const res = await billingApp.request("/webhooks/paystack", {
+    const res = await billingApp.request("/webhooks/stripe", {
       method: "POST",
       body: payload,
-      headers: { "x-paystack-signature": signature },
+      headers: { "stripe-signature": `t=${timestamp},v1=${signature}` },
     });
     expect(res.status).toBe(200);
 
@@ -284,12 +278,13 @@ describe("Paystack billing", () => {
     }
   });
 
-  it("rejects a Paystack webhook with a bad signature", async () => {
-    const payload = JSON.stringify({ event: "charge.success", data: {} });
-    const res = await billingApp.request("/webhooks/paystack", {
+  it("rejects a Stripe webhook with a bad signature", async () => {
+    const payload = JSON.stringify({ type: "checkout.session.completed", data: { object: {} } });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const res = await billingApp.request("/webhooks/stripe", {
       method: "POST",
       body: payload,
-      headers: { "x-paystack-signature": "not-a-real-signature" },
+      headers: { "stripe-signature": `t=${timestamp},v1=not-a-real-signature` },
     });
     expect(res.status).toBe(401);
   });

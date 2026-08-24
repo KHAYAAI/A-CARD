@@ -1,28 +1,57 @@
+import { DomainError } from "./errors.js";
+import type { CardLimits } from "./cards.js";
+
 /**
- * Freemium tiers. Deliberately simple — a card-creation cap per calendar
- * month per tier — because that's the one limit that actually needs
- * enforcing before a paid plan exists. Usage-based metering (Lago) and
- * per-feature entitlements are a later layer, not needed to charge a
- * monthly ZAR subscription fee.
+ * Freemium tiers. Subscription pricing is USD (billed via Stripe — see
+ * apps/api/src/stripe.ts), independent of what currency an account's
+ * wallets/cards are actually denominated in. Two limits per tier: a
+ * card-creation cap per calendar month, and a per-card spend cap.
  */
 
 export type SubscriptionTier = "free" | "basic" | "pro" | "enterprise";
 
 export interface TierLimits {
   cardsPerMonth: number;
-  priceZarCents: number;
+  priceUsdCents: number;
+  /**
+   * Maximum total budget (`Card.limits.total`) a single card on this tier
+   * may carry, in USD minor units. `null` = uncapped (enterprise only).
+   * Enforcement only applies to USD-denominated cards today — there's no
+   * FX conversion in this codebase, so a ZAR/NGN/KES card isn't capped
+   * against a USD number without inventing an exchange rate. See
+   * `Platform.createCard`.
+   */
+  perCardCapCents: number | null;
 }
 
-// $2,800/mo enterprise price is fixed in ZAR cents at signing, not floated
-// against spot FX on every read — R51,800 reflects ~R18.50/$1 at the time
-// this tier was priced. Repricing is a deliberate edit here, not automatic.
 export const SUBSCRIPTION_TIERS: Record<SubscriptionTier, TierLimits> = {
-  free: { cardsPerMonth: 5, priceZarCents: 0 },
-  basic: { cardsPerMonth: 25, priceZarCents: 14_900 }, // R149/mo
-  pro: { cardsPerMonth: 100, priceZarCents: 49_900 }, // R499/mo
-  enterprise: { cardsPerMonth: 100_000, priceZarCents: 5_180_000 }, // R51,800/mo (~$2,800)
+  free: { cardsPerMonth: 5, priceUsdCents: 0, perCardCapCents: 5_000 }, // $0/mo, up to $50/card
+  basic: { cardsPerMonth: 25, priceUsdCents: 800, perCardCapCents: 50_000 }, // $8/mo, up to $500/card
+  pro: { cardsPerMonth: 100, priceUsdCents: 2_800, perCardCapCents: 100_000 }, // $28/mo, up to $1,000/card
+  enterprise: { cardsPerMonth: 100_000, priceUsdCents: 280_000, perCardCapCents: null }, // $2,800/mo, effectively unlimited
 };
 
 export function currentBillingPeriod(now = new Date()): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Applies a tier's per-card cap to the limits a card is being created with.
+ * Only enforced for USD-denominated cards (see `perCardCapCents`'s doc).
+ * An unset `total` defaults to the cap rather than staying uncapped, so a
+ * plain `createCard()` call still respects the plan; an explicit `total`
+ * above the cap is rejected outright. Shared by both the in-memory and
+ * Postgres backends so the rule can't drift between them.
+ */
+export function applyCardCap(tier: SubscriptionTier, currency: string, limits: CardLimits | undefined): CardLimits | undefined {
+  const cap = SUBSCRIPTION_TIERS[tier].perCardCapCents;
+  if (cap === null || currency !== "USD") return limits;
+  if (limits?.total !== undefined && limits.total > cap) {
+    throw new DomainError(
+      "plan_card_cap_exceeded",
+      `${tier} plan caps each card's total budget at $${(cap / 100).toFixed(2)}; lower the requested total or upgrade`,
+      402,
+    );
+  }
+  return { ...limits, total: limits?.total ?? cap };
 }

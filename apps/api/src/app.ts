@@ -3,7 +3,6 @@ import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import {
-  currentBillingPeriod,
   DomainError,
   redactCard,
   roleAtLeast,
@@ -17,8 +16,8 @@ import {
   type Role,
   type SubscriptionTier,
 } from "@acard/core";
-import { PaystackClient, subscriptionReference } from "./paystack.js";
 import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
+import { createStripeClient, type StripeClient, type StripeConfig } from "./stripe.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
 import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
@@ -42,8 +41,8 @@ export interface AppConfig {
   issuerWebhookSecret: string;
   /** Called after any request that might have mutated platform state (snapshot persistence hook). */
   onMutation?: () => void;
-  /** Paystack integration for ZAR subscription billing (optional — omit to run unmetered). */
-  paystack?: { secretKey: string; webhookSecret: string };
+  /** Stripe integration for USD subscription billing (optional — omit to run unmetered). */
+  stripe?: StripeConfig | StripeClient;
   /**
    * PayFast integration for real ZAR wallet funding (optional — omit to keep
    * the instant sandbox-credit behavior on `/v1/wallet/fund`). When set,
@@ -79,7 +78,7 @@ export interface AppConfig {
    * reference before this goes live with real money.
    */
   sudo?: SudoConfig | IssuerCardClient;
-  /** Where Paystack should send the customer back after checkout, and where the SSO callback redirects with a session. */
+  /** Where Stripe checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
 
@@ -101,6 +100,11 @@ function asIssuerClient(config: SudoConfig | IssuerCardClient): IssuerCardClient
 function asPayFastClient(config: PayFastConfig | PayFastClient): PayFastClient {
   // A config object (has `merchantId`) builds the real client; a `PayFastClient` (tests) passes through.
   return "merchantId" in config ? createPayFastClient(config) : config;
+}
+
+function asStripeClient(config: StripeConfig | StripeClient): StripeClient {
+  // A config object (has `secretKey`) builds the real client; a `StripeClient` (tests) passes through.
+  return "secretKey" in config ? createStripeClient(config) : config;
 }
 
 type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
@@ -230,7 +234,7 @@ const issuerEventSchema = z.object({
 export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl } = config;
   const platform = asService(config.platform);
-  const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
+  const stripe = config.stripe ? asStripeClient(config.stripe) : undefined;
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
   const workos = config.workos ? asWorkOSClient(config.workos) : undefined;
@@ -824,45 +828,45 @@ export function createApp(config: AppConfig) {
     return c.json({ portal_url: portalUrl });
   });
 
-  // ---- billing (freemium tiers, ZAR collection via Paystack) ------------------------
+  // ---- billing (freemium tiers, USD subscriptions via Stripe) ------------------------
 
   app.get("/v1/billing/plans", (c) => c.json({ plans: SUBSCRIPTION_TIERS }));
 
   app.post("/v1/billing/checkout", requireRole("admin"), async (c) => {
-    if (!paystack) {
-      return c.json({ error: { code: "billing_not_configured", message: "Paystack is not configured on this deployment" } }, 501);
+    if (!stripe) {
+      return c.json({ error: { code: "billing_not_configured", message: "Stripe is not configured on this deployment" } }, 501);
     }
     const holder = c.get("holder");
     const { tier } = z.object({ tier: z.enum(["basic", "pro", "enterprise"]) }).parse(await c.req.json());
     const plan = SUBSCRIPTION_TIERS[tier as SubscriptionTier];
-    const reference = subscriptionReference(holder.id, currentBillingPeriod());
-    const checkout = await paystack.initializeTransaction({
+    const origin = (dashboardUrl ?? "").replace(/\/$/, "");
+    const checkout = await stripe.createCheckoutSession({
       email: holder.email,
-      amountMinorUnits: plan.priceZarCents,
-      reference,
-      callbackUrl: dashboardUrl,
-      metadata: { accountHolderId: holder.id, tier },
+      amountUsdCents: plan.priceUsdCents,
+      tier,
+      accountHolderId: holder.id,
+      successUrl: `${origin}/billing?upgraded=1`,
+      cancelUrl: `${origin}/billing?upgraded=0`,
     });
-    return c.json({ checkout_url: checkout.authorizationUrl, reference: checkout.reference });
+    return c.json({ checkout_url: checkout.checkoutUrl, session_id: checkout.sessionId });
   });
 
-  app.post("/webhooks/paystack", async (c) => {
-    if (!paystack) return c.json({ error: { code: "billing_not_configured", message: "Paystack is not configured" } }, 501);
+  app.post("/webhooks/stripe", async (c) => {
+    if (!stripe) return c.json({ error: { code: "billing_not_configured", message: "Stripe is not configured" } }, 501);
     const rawBody = await c.req.text();
-    if (!paystack.verifyWebhookSignature(rawBody, c.req.header("x-paystack-signature"))) {
-      return c.json({ error: { code: "invalid_signature", message: "bad Paystack signature" } }, 401);
+    if (!stripe.verifyWebhookSignature(rawBody, c.req.header("stripe-signature"))) {
+      return c.json({ error: { code: "invalid_signature", message: "bad Stripe signature" } }, 401);
     }
     const event = JSON.parse(rawBody) as {
-      event: string;
-      id?: string;
-      data: { reference?: string; metadata?: { accountHolderId?: string; tier?: SubscriptionTier } };
+      id: string;
+      type: string;
+      data: { object: { metadata?: { accountHolderId?: string; tier?: SubscriptionTier } } };
     };
-    const eventId = String(event.id ?? event.data.reference ?? "");
-    if (eventId && !(await platform.markEvent(`paystack:${eventId}`))) {
+    if (!(await platform.markEvent(`stripe:${event.id}`))) {
       return c.json({ received: true, duplicate: true });
     }
-    if (event.event === "charge.success") {
-      const { accountHolderId, tier } = event.data.metadata ?? {};
+    if (event.type === "checkout.session.completed") {
+      const { accountHolderId, tier } = event.data.object.metadata ?? {};
       if (accountHolderId && tier) await platform.setSubscriptionTier(accountHolderId, tier);
     }
     return c.json({ received: true });

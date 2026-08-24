@@ -70,8 +70,8 @@ are generated and stored automatically — you never handle them.
 | Parameter | Required | What it is |
 |---|---|---|
 | `IssuerWebhookSecret` | ✅ | HMAC secret for `/webhooks/issuer`. |
-| `PaystackSecretKey` | — | `sk_live_…` / `sk_test_…`. Blank ⇒ unmetered. |
-| `PaystackWebhookSecret` | — | Paystack webhook signing secret. |
+| `StripeSecretKey` | — | `sk_live_…` / `sk_test_…` for USD subscription billing. Blank ⇒ unmetered. |
+| `StripeWebhookSecret` | — | Stripe webhook signing secret from Developers → Webhooks. |
 | `SlackApprovalsWebhookUrl` | — | Slack incoming webhook. Blank ⇒ no push. |
 | `WorkOsApiKey` | — | `sk_...` from your WorkOS dashboard. Blank ⇒ no SSO (password + TOTP MFA login is unaffected either way). |
 | `WorkOsClientId` | — | `client_...` from the same dashboard page. Must be set alongside `WorkOsApiKey` or SSO stays off. |
@@ -82,8 +82,8 @@ A real card issuer (Sudo Africa or similar) is **not yet a deployable
 parameter** — see §6 below. It exists in code (`Card.issuerCardId`, the
 webhook's dual-lookup path) but the exact request/response wire format is
 unverified against Sudo's actual API, so it isn't wired into this stack the
-way Paystack/WorkOS are. Wiring it is a small, contained change once you have
-their sandbox docs, not a rebuild.
+way Stripe/PayFast/WorkOS are. Wiring it is a small, contained change once you
+have their sandbox docs, not a rebuild.
 
 ---
 
@@ -103,8 +103,8 @@ Provide your domain and its hosted zone via `-c` context (all three required):
 ```bash
 npx cdk deploy \
   --parameters IssuerWebhookSecret="<the-secret-you-saved>" \
-  --parameters PaystackSecretKey="sk_live_..." \
-  --parameters PaystackWebhookSecret="whsec_..." \
+  --parameters StripeSecretKey="sk_live_..." \
+  --parameters StripeWebhookSecret="whsec_..." \
   --parameters SlackApprovalsWebhookUrl="https://hooks.slack.com/services/..." \
   -c domain=app.example.com \
   -c hostedZoneId=Z0123456789ABCDEFGHIJ \
@@ -167,10 +167,14 @@ Expect `approved: true` and a wallet `posted` of `75000`. Confirm health at
 
 ## 6. Connecting integrations
 
-### Paystack (billing)
-Dashboard → Settings → API Keys & Webhooks. Set the webhook URL to
-`$ORIGIN/webhooks/paystack`. The signing secret goes in the
-`PaystackWebhookSecret` parameter (redeploy to apply).
+### Stripe (USD subscription billing)
+Dashboard → Developers → Webhooks → Add endpoint. Set the endpoint URL to
+`$ORIGIN/webhooks/stripe`, listening for `checkout.session.completed`. The
+signing secret it gives you goes in the `StripeWebhookSecret` parameter, and
+your secret key in `StripeSecretKey` (redeploy to apply). Pricing itself
+(`free`/`basic`/`pro`/`enterprise` — $0/$8/$28/$2,800 per month) lives in
+`packages/core/src/billing.ts`, independent of what currency an account's
+wallets are actually denominated in.
 
 ### Slack (approval notifications)
 Create an Incoming Webhook in your Slack workspace; put the URL in
@@ -313,8 +317,11 @@ into this stack (`cdk import`) instead of letting CDK try to create a second one
   shared across every API instance via a Postgres table) — this is what
   catches an attacker rotating IPs, which the WAF's IP-keyed rule can't.
 - Passwords are scrypt-hashed; session tokens, API key secrets, and MFA
-  recovery codes are all stored only as SHA-256 hashes; the issuer and
-  Paystack webhooks are HMAC-verified with replay protection.
+  recovery codes are all stored only as SHA-256 hashes; the issuer and Stripe
+  webhooks are HMAC-verified with replay protection (Stripe's is additionally
+  timestamp-bound, a 5-minute tolerance against a replayed payload); PayFast's
+  ITN goes further still — signature, source-host resolution, and a
+  server-to-server confirm-back to PayFast itself, all three required.
 - Human login supports TOTP MFA (enrolled per-user from the dashboard) and,
   optionally, WorkOS SSO — both additive to the base password flow, never a
   replacement for it.

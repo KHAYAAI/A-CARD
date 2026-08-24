@@ -22,7 +22,7 @@ import {
 } from "./ledger.js";
 import type { Currency } from "./money.js";
 import { evaluateRules, type AuthorizationContext } from "./rules.js";
-import { currentBillingPeriod, SUBSCRIPTION_TIERS, type SubscriptionTier } from "./billing.js";
+import { applyCardCap, currentBillingPeriod, SUBSCRIPTION_TIERS, type SubscriptionTier } from "./billing.js";
 import { WalletLinkService, type Chain, type ExternalWalletConnector, type LinkedWallet } from "./wallets.js";
 
 /**
@@ -232,7 +232,7 @@ export class Platform {
     return holder;
   }
 
-  /** Called by the Paystack webhook once a subscription payment settles. */
+  /** Called by the Stripe webhook once a subscription payment settles. */
   setSubscriptionTier(accountHolderId: string, tier: SubscriptionTier): AccountHolder {
     const holder = this.getAccountHolder(accountHolderId);
     holder.subscriptionTier = tier;
@@ -316,7 +316,7 @@ export class Platform {
 
   /**
    * Fund a wallet (sandbox: instant settle; production: driven by a
-   * Paystack/EFT top-up webhook). Double entry: debit the platform settlement
+   * PayFast/EFT top-up webhook). Double entry: debit the platform settlement
    * asset account, credit the customer's wallet liability account. Currency
    * defaults to the holder's primary currency; any supported currency creates
    * (or tops up) that currency's wallet.
@@ -403,7 +403,8 @@ export class Platform {
     if (input.issuerCardId && this.cardsByIssuerId.has(input.issuerCardId)) {
       throw new InvalidStateError(`issuer card ${input.issuerCardId} is already linked to a different card`);
     }
-    const card = createCard({ ...input, currency, walletAccountId });
+    const limits = applyCardCap(holder.subscriptionTier, currency, input.limits);
+    const card = createCard({ ...input, currency, walletAccountId, limits });
     this.cards.set(card.id, card);
     if (card.issuerCardId) this.cardsByIssuerId.set(card.issuerCardId, card.id);
     this.emit("card.created", { cardId: card.id, accountHolderId: holder.id });

@@ -128,7 +128,7 @@ Grouped by when you need them.
 
 | Dependency | Purpose | Where / how | Cost |
 |---|---|---|---|
-| **Paystack account** | ZAR subscription collection (`free`/`basic`/`pro`) | paystack.com → Settings → API Keys & Webhooks | ~2.9% + fees per charge |
+| **Stripe account** | USD subscription collection (`free`/`basic`/`pro`/`enterprise` — $0/$8/$28/$2,800/mo) | dashboard.stripe.com → Developers → API keys & Webhooks | ~2.9% + $0.30 per charge |
 | **Slack workspace** (optional) | Approval push notifications | Slack → Incoming Webhooks → copy URL | free |
 
 ### Needed to process real payments (Phase 3 — the real gate)
@@ -168,8 +168,9 @@ Grouped by when you need them.
 - [ ] **Announce as a sandbox/preview.** Real cards are explicitly not live yet.
 
 ### Phase 2 — Billing + notifications (0.5–1 day)
-- [ ] Create Paystack account; add `PaystackSecretKey` / `PaystackWebhookSecret`.
-- [ ] Point Paystack's webhook at `https://<domain>/webhooks/paystack`.
+- [ ] Create Stripe account; add `StripeSecretKey` / `StripeWebhookSecret`.
+- [ ] Point Stripe's webhook at `https://<domain>/webhooks/stripe`, listening
+      for `checkout.session.completed`.
 - [ ] (Optional) Create a Slack incoming webhook; set
       `SlackApprovalsWebhookUrl`.
 - [ ] Verify a test upgrade raises the card cap.

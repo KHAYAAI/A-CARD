@@ -49,7 +49,7 @@ interface DomainConfig {
  *  - ALB in public subnets; Fargate tasks in private-with-egress subnets;
  *    RDS in isolated subnets. Nothing but the ALB has a public route in.
  *  - Two NAT Gateways (one per AZ) give the tasks outbound access (ECR image
- *    pulls, Paystack, Slack, WorkOS) without exposing them, and without a
+ *    pulls, Stripe, PayFast, Slack, WorkOS) without exposing them, and without a
  *    single-AZ outbound failure point.
  *  - Optional ACM/TLS + custom domain with an HTTP→HTTPS redirect.
  *  - A WAFv2 WebACL (AWS managed rule sets + a rate limit) fronts the ALB,
@@ -77,17 +77,17 @@ export class AcardStack extends cdk.Stack {
       noEcho: true,
       description: "Shared HMAC secret with the issuer (or the sandbox simulator) for /webhooks/issuer",
     });
-    const paystackSecretKeyParam = new cdk.CfnParameter(this, "PaystackSecretKey", {
+    const stripeSecretKeyParam = new cdk.CfnParameter(this, "StripeSecretKey", {
       type: "String",
       noEcho: true,
       default: "",
-      description: "Paystack secret key (sk_live_... / sk_test_...). Leave blank to run unmetered.",
+      description: "Stripe secret key (sk_live_... / sk_test_...) for USD subscription billing. Leave blank to run unmetered.",
     });
-    const paystackWebhookSecretParam = new cdk.CfnParameter(this, "PaystackWebhookSecret", {
+    const stripeWebhookSecretParam = new cdk.CfnParameter(this, "StripeWebhookSecret", {
       type: "String",
       noEcho: true,
       default: "",
-      description: "Paystack webhook signing secret from the dashboard's API Keys & Webhooks page.",
+      description: "Stripe webhook signing secret from Developers → Webhooks → your endpoint.",
     });
     const slackWebhookUrlParam = new cdk.CfnParameter(this, "SlackApprovalsWebhookUrl", {
       type: "String",
@@ -197,11 +197,11 @@ export class AcardStack extends cdk.Stack {
     const issuerWebhookSecret = new secretsmanager.Secret(this, "IssuerWebhookSecretValue", {
       secretStringValue: cdk.SecretValue.cfnParameter(issuerWebhookSecretParam),
     });
-    const paystackSecretKey = new secretsmanager.Secret(this, "PaystackSecretKeyValue", {
-      secretStringValue: cdk.SecretValue.cfnParameter(paystackSecretKeyParam),
+    const stripeSecretKey = new secretsmanager.Secret(this, "StripeSecretKeyValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(stripeSecretKeyParam),
     });
-    const paystackWebhookSecret = new secretsmanager.Secret(this, "PaystackWebhookSecretValue", {
-      secretStringValue: cdk.SecretValue.cfnParameter(paystackWebhookSecretParam),
+    const stripeWebhookSecret = new secretsmanager.Secret(this, "StripeWebhookSecretValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(stripeWebhookSecretParam),
     });
     const slackWebhookUrlSecret = new secretsmanager.Secret(this, "SlackApprovalsWebhookUrlValue", {
       secretStringValue: cdk.SecretValue.cfnParameter(slackWebhookUrlParam),
@@ -270,8 +270,8 @@ export class AcardStack extends cdk.Stack {
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrlSecret),
         ISSUER_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(issuerWebhookSecret),
-        PAYSTACK_SECRET_KEY: ecs.Secret.fromSecretsManager(paystackSecretKey),
-        PAYSTACK_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(paystackWebhookSecret),
+        STRIPE_SECRET_KEY: ecs.Secret.fromSecretsManager(stripeSecretKey),
+        STRIPE_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(stripeWebhookSecret),
         SLACK_APPROVALS_WEBHOOK_URL: ecs.Secret.fromSecretsManager(slackWebhookUrlSecret),
         WORKOS_API_KEY: ecs.Secret.fromSecretsManager(workosApiKeySecret),
         WORKOS_CLIENT_ID: ecs.Secret.fromSecretsManager(workosClientIdSecret),

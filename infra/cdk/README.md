@@ -22,12 +22,12 @@ npx cdk bootstrap aws://<ACCOUNT_ID>/<REGION>   # e.g. af-south-1 for Cape Town
 ```bash
 npx cdk deploy \
   --parameters IssuerWebhookSecret="$(openssl rand -hex 32)" \
-  --parameters PaystackSecretKey="sk_live_..." \
-  --parameters PaystackWebhookSecret="whsec_..." \
+  --parameters StripeSecretKey="sk_live_..." \
+  --parameters StripeWebhookSecret="whsec_..." \
   --parameters SlackApprovalsWebhookUrl="https://hooks.slack.com/services/..."
 ```
 
-Only `IssuerWebhookSecret` is required — the Paystack and Slack parameters default to empty, which just runs the platform unmetered/without approval push notifications. Save whatever you pass for `IssuerWebhookSecret`; it's also what the sandbox purchase simulator and any real issuer integration need to sign webhooks with.
+Only `IssuerWebhookSecret` is required — the Stripe, PayFast, WorkOS, and Slack parameters all default to empty, which just runs the platform unmetered/without real wallet funding/without SSO/without approval push notifications. Save whatever you pass for `IssuerWebhookSecret`; it's also what the sandbox purchase simulator and any real issuer integration need to sign webhooks with.
 
 Deploy takes 10–15 minutes the first time (mostly RDS). Subsequent deploys of code changes are a few minutes — CDK only rebuilds/pushes the Docker images that changed.
 

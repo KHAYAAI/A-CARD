@@ -37,21 +37,23 @@ describe("multi-currency wallets", () => {
 
     const decision = platform.authorize({
       authorizationId: "usd_auth_1",
+      // Kept under the free tier's $50 per-card cap (see billing.ts's
+      // applyCardCap) — this test is about currency isolation, not billing.
       cardId: usdCard.id,
-      amount: 15_000,
+      amount: 3_000,
       currency: "USD",
       merchant: { name: "OpenAI", category: "5734" },
     });
     expect(decision.approved).toBe(true);
 
     // USD wallet reflects the hold; ZAR wallet is completely untouched.
-    expect(platform.walletBalance(holderId, "USD").available).toBe(25_000);
-    expect(platform.walletBalance(holderId, "USD").held).toBe(15_000);
+    expect(platform.walletBalance(holderId, "USD").available).toBe(37_000);
+    expect(platform.walletBalance(holderId, "USD").held).toBe(3_000);
     expect(platform.walletBalance(holderId, "ZAR").available).toBe(100_000);
     expect(platform.walletBalance(holderId, "ZAR").held).toBe(0);
 
     platform.capture("usd_auth_1");
-    expect(platform.walletBalance(holderId, "USD").posted).toBe(25_000);
+    expect(platform.walletBalance(holderId, "USD").posted).toBe(37_000);
     expect(platform.walletBalance(holderId, "ZAR").posted).toBe(100_000);
   });
 

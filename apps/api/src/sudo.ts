@@ -4,7 +4,7 @@
  * the sandbox's mock issuer.
  *
  * ⚠️ THE WIRE FORMAT BELOW IS UNVERIFIED. Everything else in this codebase's
- * issuer integrations (Paystack, WorkOS) was built against a real SDK's type
+ * issuer integrations (Stripe, WorkOS) was built against a real SDK's type
  * declarations or a live API call — this repo has no Sudo API documentation,
  * Postman collection, or sandbox credentials attached to it, so the request
  * path, request body, and response field names in `createCard` below are

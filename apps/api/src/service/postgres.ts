@@ -15,6 +15,7 @@ import {
   LOGIN_LOCKOUT_THRESHOLD,
   LOGIN_LOCKOUT_WINDOW_MS,
   MFA_CHALLENGE_TTL_MS,
+  applyCardCap,
   mfaKeyUri,
   newId,
   NotFoundError,
@@ -877,10 +878,13 @@ export class PostgresPlatformService implements PlatformService {
           402,
         );
       }
+      const limits = applyCardCap(holder.subscriptionTier, currency, input.limits);
       // Inside the same transaction as the insert: a refused charge rolls the
       // card back, and a committed card is always accounted for against the key.
-      if (input.apiKeyId) await this.consumeKeySpendAllowance(client, input.apiKeyId, input.limits?.total);
-      const card = createCard({ ...input, currency, walletAccountId });
+      // Checked against the tier-capped total, not the raw input, so the two
+      // caps (plan and key) compose correctly instead of racing each other.
+      if (input.apiKeyId) await this.consumeKeySpendAllowance(client, input.apiKeyId, limits?.total);
+      const card = createCard({ ...input, currency, walletAccountId, limits });
       try {
         await client.query(
           `INSERT INTO acard_cards
