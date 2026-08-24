@@ -11,6 +11,10 @@ const databaseUrl = process.env.DATABASE_URL;
 const dashboardUrl = process.env.DASHBOARD_URL;
 const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 const paystackWebhookSecret = process.env.PAYSTACK_WEBHOOK_SECRET;
+const payfastMerchantId = process.env.PAYFAST_MERCHANT_ID;
+const payfastMerchantKey = process.env.PAYFAST_MERCHANT_KEY;
+const payfastPassphrase = process.env.PAYFAST_PASSPHRASE;
+const payfastSandbox = process.env.PAYFAST_SANDBOX === "true";
 const slackWebhookUrl = process.env.SLACK_APPROVALS_WEBHOOK_URL;
 const workosApiKey = process.env.WORKOS_API_KEY;
 const workosClientId = process.env.WORKOS_CLIENT_ID;
@@ -58,6 +62,12 @@ const app = createApp({
   paystack:
     paystackSecretKey && paystackWebhookSecret
       ? { secretKey: paystackSecretKey, webhookSecret: paystackWebhookSecret }
+      : undefined,
+  // Real ZAR wallet funding. Omit to keep /v1/wallet/fund's instant sandbox
+  // credit; set to switch to PayFast checkout + ITN-confirmed settlement.
+  payfast:
+    payfastMerchantId && payfastMerchantKey && payfastPassphrase
+      ? { merchantId: payfastMerchantId, merchantKey: payfastMerchantKey, passphrase: payfastPassphrase, sandbox: payfastSandbox }
       : undefined,
   // SSO is purely additive to password + MFA login — omit these three and the
   // deployment runs exactly as before, no code path changes. The callback

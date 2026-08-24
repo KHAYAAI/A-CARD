@@ -18,6 +18,7 @@ import {
   type SubscriptionTier,
 } from "@acard/core";
 import { PaystackClient, subscriptionReference } from "./paystack.js";
+import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
 import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
@@ -43,6 +44,15 @@ export interface AppConfig {
   onMutation?: () => void;
   /** Paystack integration for ZAR subscription billing (optional — omit to run unmetered). */
   paystack?: { secretKey: string; webhookSecret: string };
+  /**
+   * PayFast integration for real ZAR wallet funding (optional — omit to keep
+   * the instant sandbox-credit behavior on `/v1/wallet/fund`). When set,
+   * `/v1/wallet/fund` is disabled (crediting your own wallet for free would
+   * be a real hole once this is live) in favor of
+   * `/v1/wallet/fund/checkout` + the `/webhooks/payfast` ITN handler, which
+   * only credits the wallet once PayFast confirms settlement.
+   */
+  payfast?: PayFastConfig | PayFastClient;
   /**
    * Embedded-wallet provider (optional — omit to run without crypto wallets
    * at all). When set, every new account gets a wallet auto-provisioned on
@@ -86,6 +96,11 @@ function asWorkOSClient(config: WorkOSConfig | WorkOSClient): WorkOSClient {
 function asIssuerClient(config: SudoConfig | IssuerCardClient): IssuerCardClient {
   // A config object (has `baseUrl`) builds the real client; an `IssuerCardClient` (tests) passes through.
   return "baseUrl" in config ? createSudoClient(config) : config;
+}
+
+function asPayFastClient(config: PayFastConfig | PayFastClient): PayFastClient {
+  // A config object (has `merchantId`) builds the real client; a `PayFastClient` (tests) passes through.
+  return "merchantId" in config ? createPayFastClient(config) : config;
 }
 
 type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
@@ -172,6 +187,10 @@ const fundSchema = z.object({
   reference: z.string().optional(),
 });
 
+const payfastCheckoutSchema = z.object({
+  amount: z.number().int().positive(),
+});
+
 const createCardSchema = z.object({
   label: z.string().optional(),
   currency: currencySchema.optional(),
@@ -212,6 +231,7 @@ export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl } = config;
   const platform = asService(config.platform);
   const paystack = config.paystack ? new PaystackClient(config.paystack) : undefined;
+  const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
   const workos = config.workos ? asWorkOSClient(config.workos) : undefined;
   const issuer = config.sudo ? asIssuerClient(config.sudo) : undefined;
@@ -573,10 +593,39 @@ export function createApp(config: AppConfig) {
   });
 
   app.post("/v1/wallet/fund", requireRole("member"), async (c) => {
+    if (payfast) {
+      return c.json(
+        { error: { code: "instant_funding_disabled", message: "Real funding is configured — use POST /v1/wallet/fund/checkout" } },
+        409,
+      );
+    }
     const holder = c.get("holder");
     const body = fundSchema.parse(await c.req.json());
     const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.currency, body.reference);
     return c.json({ ledger_transaction: ledgerTransaction, wallet, wallets: await platform.walletBalances(holder.id) }, 201);
+  });
+
+  app.post("/v1/wallet/fund/checkout", requireRole("member"), async (c) => {
+    if (!payfast) {
+      return c.json({ error: { code: "funding_not_configured", message: "PayFast is not configured on this deployment" } }, 501);
+    }
+    const holder = c.get("holder");
+    const body = payfastCheckoutSchema.parse(await c.req.json());
+    const reference = `${holder.id}:${Date.now()}`;
+    const origin = (dashboardUrl ?? "").replace(/\/$/, "");
+    const checkout = payfast.buildCheckout({
+      amountMinorUnits: body.amount,
+      itemName: "A-CARD wallet top-up",
+      reference,
+      email: holder.email,
+      returnUrl: `${origin}/wallet?funded=1`,
+      cancelUrl: `${origin}/wallet?funded=0`,
+      // Fixed to our own webhook — never client-supplied, or a caller could
+      // point PayFast's confirmation at an endpoint of their choosing.
+      notifyUrl: `${origin}/webhooks/payfast`,
+      customStr1: holder.id,
+    });
+    return c.json({ action: checkout.action, fields: checkout.fields, reference });
   });
 
   // ---- crypto wallets: embedded by default, external optional ----------------
@@ -811,6 +860,28 @@ export function createApp(config: AppConfig) {
     if (event.event === "charge.success") {
       const { accountHolderId, tier } = event.data.metadata ?? {};
       if (accountHolderId && tier) await platform.setSubscriptionTier(accountHolderId, tier);
+    }
+    return c.json({ received: true });
+  });
+
+  app.post("/webhooks/payfast", async (c) => {
+    if (!payfast) return c.json({ error: { code: "funding_not_configured", message: "PayFast is not configured" } }, 501);
+    const rawBody = await c.req.text();
+    const fields = Object.fromEntries(new URLSearchParams(rawBody)) as Record<string, string>;
+    // Behind the ALB, the real client is the first hop in X-Forwarded-For.
+    const remoteIp = (c.req.header("x-forwarded-for") ?? "").split(",")[0]?.trim() ?? "";
+    const valid = await payfast.validateItn({ fields, rawBody, remoteIp });
+    if (!valid) {
+      return c.json({ error: { code: "invalid_itn", message: "PayFast ITN failed signature, source, or confirm-back validation" } }, 401);
+    }
+    const paymentId = fields.pf_payment_id ?? fields.m_payment_id ?? "";
+    if (paymentId && !(await platform.markEvent(`payfast:${paymentId}`))) {
+      return c.json({ received: true, duplicate: true });
+    }
+    const accountHolderId = fields.custom_str1;
+    const amountRand = Number(fields.amount_gross ?? fields.amount ?? "0");
+    if (fields.payment_status === "COMPLETE" && accountHolderId && amountRand > 0) {
+      await platform.fundWallet(accountHolderId, Math.round(amountRand * 100), "ZAR", fields.m_payment_id);
     }
     return c.json({ received: true });
   });

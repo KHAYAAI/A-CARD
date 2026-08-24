@@ -107,6 +107,30 @@ export class AcardStack extends cdk.Stack {
       default: "",
       description: "WorkOS Client ID (client_...). Leave blank alongside WorkOsApiKey to run without SSO.",
     });
+    const payfastMerchantIdParam = new cdk.CfnParameter(this, "PayFastMerchantId", {
+      type: "String",
+      noEcho: true,
+      default: "",
+      description: "PayFast merchant ID. Leave blank alongside the other PayFast params to keep instant sandbox wallet funding.",
+    });
+    const payfastMerchantKeyParam = new cdk.CfnParameter(this, "PayFastMerchantKey", {
+      type: "String",
+      noEcho: true,
+      default: "",
+      description: "PayFast merchant key.",
+    });
+    const payfastPassphraseParam = new cdk.CfnParameter(this, "PayFastPassphrase", {
+      type: "String",
+      noEcho: true,
+      default: "",
+      description: "PayFast security passphrase, set in the PayFast dashboard — signs every checkout and ITN.",
+    });
+    const payfastSandboxParam = new cdk.CfnParameter(this, "PayFastSandbox", {
+      type: "String",
+      default: "false",
+      allowedValues: ["true", "false"],
+      description: "\"true\" to use sandbox.payfast.co.za instead of the live PayFast host.",
+    });
 
     // ---- networking: public ALB, private tasks, isolated database -------------
 
@@ -188,6 +212,15 @@ export class AcardStack extends cdk.Stack {
     const workosClientIdSecret = new secretsmanager.Secret(this, "WorkOsClientIdValue", {
       secretStringValue: cdk.SecretValue.cfnParameter(workosClientIdParam),
     });
+    const payfastMerchantIdSecret = new secretsmanager.Secret(this, "PayFastMerchantIdValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(payfastMerchantIdParam),
+    });
+    const payfastMerchantKeySecret = new secretsmanager.Secret(this, "PayFastMerchantKeyValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(payfastMerchantKeyParam),
+    });
+    const payfastPassphraseSecret = new secretsmanager.Secret(this, "PayFastPassphraseValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(payfastPassphraseParam),
+    });
 
     // ---- cluster + load balancer ----------------------------------------------
 
@@ -233,7 +266,7 @@ export class AcardStack extends cdk.Stack {
     const apiContainer = apiTaskDef.addContainer("api", {
       image: ecs.ContainerImage.fromAsset("../..", { file: "apps/api/Dockerfile", exclude: DOCKER_ASSET_EXCLUDES }),
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: "api", logGroup: logGroup("ApiLogGroup") }),
-      environment: { PORT: "8787", NODE_ENV: "production", DASHBOARD_URL: publicOrigin },
+      environment: { PORT: "8787", NODE_ENV: "production", DASHBOARD_URL: publicOrigin, PAYFAST_SANDBOX: payfastSandboxParam.valueAsString },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrlSecret),
         ISSUER_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(issuerWebhookSecret),
@@ -242,6 +275,9 @@ export class AcardStack extends cdk.Stack {
         SLACK_APPROVALS_WEBHOOK_URL: ecs.Secret.fromSecretsManager(slackWebhookUrlSecret),
         WORKOS_API_KEY: ecs.Secret.fromSecretsManager(workosApiKeySecret),
         WORKOS_CLIENT_ID: ecs.Secret.fromSecretsManager(workosClientIdSecret),
+        PAYFAST_MERCHANT_ID: ecs.Secret.fromSecretsManager(payfastMerchantIdSecret),
+        PAYFAST_MERCHANT_KEY: ecs.Secret.fromSecretsManager(payfastMerchantKeySecret),
+        PAYFAST_PASSPHRASE: ecs.Secret.fromSecretsManager(payfastPassphraseSecret),
       },
     });
     apiContainer.addPortMappings({ containerPort: 8787 });

@@ -93,9 +93,12 @@ is contracted.** These are two different bars.
    issuing cards implicates SARB, the National Payment System Act, and
    FICA/KYC. In practice you ride the issuing partner's licences and compliance
    rails — but that must be contractually in place before real money flows.
-3. **Real funding rail.** Today wallet top-ups are instant/sandbox. Production
-   needs a real pay-in (Paystack/EFT/card) that credits the wallet only on
-   settlement.
+3. **Real funding rail.** PayFast is wired (`apps/api/src/payfast.ts`) —
+   `/v1/wallet/fund/checkout` + `/webhooks/payfast` credit the wallet only on
+   PayFast's confirmed settlement, and instant top-ups are disabled the
+   moment `PayFastMerchantId`/`PayFastMerchantKey`/`PayFastPassphrase` are
+   set. What's left: run it against PayFast's real sandbox end-to-end and
+   confirm live before switching `PayFastSandbox` off.
 4. **Operational readiness.** Backups tested, alerting wired, an on-call
    runbook, and a disclosed security contact.
 
@@ -135,7 +138,7 @@ Grouped by when you need them.
 | **Card issuing partner (BIN sponsor)** | Actually issues Visa/Mastercard, hosts PANs (keeps you out of PCI scope), provides the real authorization webhook | Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stitch, or Stripe Issuing — start a commercial conversation | Deal-dependent (setup + per-card + interchange share) |
 | **KYC/FICA provider** | Identity verification of account holders | Usually via the issuing partner; standalone options: Smile ID, Onfido | Per-verification |
 | **Compliance/legal counsel** | SARB / NPS Act / FICA posture, T&Cs | SA fintech counsel | Project fee |
-| **Production funding rail** | Real wallet top-ups that settle | Paystack / bank EFT / card acquiring | Per-transaction |
+| **Production funding rail** | Real wallet top-ups that settle | PayFast — wired, needs real-sandbox verification (see §3 above) | ~2.9-3.5%+ per transaction |
 
 ### Recommended operational add-ons
 

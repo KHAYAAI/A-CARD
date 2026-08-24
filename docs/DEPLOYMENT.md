@@ -75,6 +75,8 @@ are generated and stored automatically — you never handle them.
 | `SlackApprovalsWebhookUrl` | — | Slack incoming webhook. Blank ⇒ no push. |
 | `WorkOsApiKey` | — | `sk_...` from your WorkOS dashboard. Blank ⇒ no SSO (password + TOTP MFA login is unaffected either way). |
 | `WorkOsClientId` | — | `client_...` from the same dashboard page. Must be set alongside `WorkOsApiKey` or SSO stays off. |
+| `PayFastMerchantId` / `PayFastMerchantKey` / `PayFastPassphrase` | — | From your PayFast dashboard's Integration settings. Blank ⇒ `/v1/wallet/fund` keeps its instant sandbox credit. Set all three ⇒ real ZAR wallet funding via PayFast checkout + ITN, and instant funding is disabled. |
+| `PayFastSandbox` | — | `"true"` to use `sandbox.payfast.co.za` instead of the live host. Defaults to `"false"`. |
 
 A real card issuer (Sudo Africa or similar) is **not yet a deployable
 parameter** — see §6 below. It exists in code (`Card.issuerCardId`, the
@@ -183,6 +185,18 @@ API service; a bare `/auth/...` path would silently miss it). Set
 `WorkOsApiKey` / `WorkOsClientId` and redeploy. An org owner then calls
 `POST /v1/sso/setup` from the dashboard's Team tab to get a self-serve WorkOS
 Admin Portal link for their own IT team — no code or A-CARD login on their end.
+
+### PayFast (real ZAR wallet funding)
+Dashboard → Settings → Integration. Set the notify (ITN) URL to
+`$ORIGIN/webhooks/payfast`. Set `PayFastMerchantId`, `PayFastMerchantKey`,
+and `PayFastPassphrase` (redeploy to apply) — once all three are set,
+`POST /v1/wallet/fund` (the instant sandbox credit) returns `409` and
+`POST /v1/wallet/fund/checkout` takes over: it returns a signed field set
+for the dashboard to submit as a form POST to PayFast, and the wallet is
+only credited when PayFast's ITN passes signature + source-host +
+server-confirm validation (all three, not just the signature — see
+`apps/api/src/payfast.ts`). Test against `PayFastSandbox=true` before
+flipping it off.
 
 ### A real card issuer (Phase 3)
 The webhook contract is issuer-agnostic (`POST /webhooks/issuer`, HMAC
