@@ -60,7 +60,7 @@ describe("PayFast signature scheme", () => {
       notifyUrl: "https://x/webhooks/payfast",
     });
     const { signature, ...rest } = fields;
-    const reordered = Object.fromEntries([...Object.entries(rest).reverse(), ["signature", signature]]);
+    const reordered = Object.fromEntries([...Object.entries(rest).reverse(), ["signature", signature]]) as Record<string, string>;
     expect(client.verifyItnSignature({ fields: reordered, rawBody: "", remoteIp: "" })).toBe(false);
   });
 
@@ -147,6 +147,22 @@ describe("PayFast configured", () => {
     const res = await withToken(app, "/v1/wallet/fund", signup.api_key, { method: "POST", body: JSON.stringify({ amount: 1_000 }) });
     expect(res.status).toBe(409);
     expect((await json(res)).error.code).toBe("instant_funding_disabled");
+  });
+
+  it("leaves instant funding available for non-ZAR currencies — PayFast only ever settles ZAR", async () => {
+    const app = createApp({ platform: new Platform(), issuerWebhookSecret: SECRET, payfast: fakePayFast(), dashboardUrl: "https://app.example.com" });
+    const signup = await json(
+      await app.request("/v1/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "dev@acard.co.za", name: "Dev" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const res = await withToken(app, "/v1/wallet/fund", signup.api_key, {
+      method: "POST",
+      body: JSON.stringify({ amount: 1_000, currency: "USD" }),
+    });
+    expect(res.status).toBe(201);
   });
 
   it("checkout returns a signed form the frontend can submit, with our own notify_url — never client-supplied", async () => {

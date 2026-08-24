@@ -69,6 +69,27 @@ function fmt(cents: number, ccy: string) {
   return `${SYM[ccy] ?? ccy} ${(cents / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/**
+ * PayFast checkout is a signed HTML form POST, not a URL redirect — this
+ * builds a throwaway hidden form from the fields `/v1/wallet/fund/checkout`
+ * returned and submits it, navigating the browser to PayFast. Nothing here
+ * touches the signature; the API already computed it.
+ */
+function submitPayFastForm(action: string, fields: Record<string, string>) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = action;
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
 type NavItem = { view: string; label: string; icon: string; crumb?: string; min?: Role; enterprise?: boolean };
 const NAV: NavItem[] = [
   { view: "overview", label: "Home", icon: "home", crumb: "Home" },
@@ -208,6 +229,13 @@ export default function Dashboard() {
       window.history.replaceState({}, "", window.location.pathname);
       return;
     }
+    // Landing back from a PayFast checkout (return_url / cancel_url both
+    // point here — see PayFastClient.buildCheckout's returnUrl/cancelUrl).
+    const funded = params.get("funded");
+    if (funded !== null) {
+      flash(funded === "1" ? "Funds received — updating wallet." : "Payment cancelled.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
     const s = localStorage.getItem("acard_token");
     if (s) setToken(s);
   }, []);
@@ -318,8 +346,34 @@ export default function Dashboard() {
   const doFund = async () => {
     try {
       const amt = parseInt(fundAmt, 10);
-      if (amt > 0) { await call("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: amt, currency: fundCcy }) }); flash(`Added ${fmt(amt, fundCcy)}.`); }
-      setShowFund(false); refresh();
+      if (!(amt > 0)) { setShowFund(false); return; }
+
+      // PayFast only ever settles ZAR — every other currency stays on the
+      // instant sandbox credit regardless of whether real funding is live.
+      if (fundCcy !== "ZAR") {
+        await call("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: amt, currency: fundCcy }) });
+        flash(`Added ${fmt(amt, fundCcy)}.`);
+        setShowFund(false); refresh();
+        return;
+      }
+
+      // Try the real PayFast checkout first; a 501 means this deployment
+      // hasn't configured PayFast, so fall back to the instant credit —
+      // the dashboard doesn't need to know ahead of time which mode it's in.
+      const res = await fetch(`${API_URL}/v1/wallet/fund/checkout`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ amount: amt }),
+      });
+      if (res.status === 501) {
+        await call("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: amt, currency: fundCcy }) });
+        flash(`Added ${fmt(amt, fundCcy)}.`);
+        setShowFund(false); refresh();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error?.message ?? `request failed (${res.status})`);
+      submitPayFastForm(body.action, body.fields); // navigates away to PayFast — nothing left to do here
     } catch (e) { flash(e instanceof Error ? e.message : "Could not add funds"); }
   };
   const decide = async (id: string, ok: boolean) => {

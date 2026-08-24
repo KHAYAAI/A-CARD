@@ -593,14 +593,18 @@ export function createApp(config: AppConfig) {
   });
 
   app.post("/v1/wallet/fund", requireRole("member"), async (c) => {
-    if (payfast) {
+    const holder = c.get("holder");
+    const body = fundSchema.parse(await c.req.json());
+    // PayFast only ever settles ZAR — instant credit stays available for
+    // every other currency (still sandbox behavior there) even once real
+    // ZAR funding is live. Only ZAR (the default when unspecified) routes
+    // through the real rail.
+    if (payfast && (body.currency ?? "ZAR") === "ZAR") {
       return c.json(
-        { error: { code: "instant_funding_disabled", message: "Real funding is configured — use POST /v1/wallet/fund/checkout" } },
+        { error: { code: "instant_funding_disabled", message: "Real ZAR funding is configured — use POST /v1/wallet/fund/checkout" } },
         409,
       );
     }
-    const holder = c.get("holder");
-    const body = fundSchema.parse(await c.req.json());
     const { ledgerTransaction, wallet } = await platform.fundWallet(holder.id, body.amount, body.currency, body.reference);
     return c.json({ ledger_transaction: ledgerTransaction, wallet, wallets: await platform.walletBalances(holder.id) }, 201);
   });
