@@ -10,3 +10,8 @@ coverage/
 .acard/
 cdk.out/
 cdk.context.json
+
+# Tutorial recording intermediates (raw takes; published videos live in tutorials/*.webm)
+tutorials/.raw/
+tutorials/production/node_modules/
+tutorials/production/scenes.json

@@ -1,0 +1,7 @@
+{
+  "name": "acard-tutorials",
+  "private": true,
+  "type": "module",
+  "description": "Production scripts for the A-CARD video tutorial series.",
+  "dependencies": { "playwright": "^1.49.0" }
+}
