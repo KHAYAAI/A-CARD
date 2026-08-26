@@ -12,7 +12,7 @@ actual stdout.
 | `lib.mjs` | Recording harness — Playwright video capture, caption bar, animated cursor, title/end cards, and the terminal player. |
 | `capture.mjs` | **Runs each demo command for real** against the live API and writes its genuine output to `scenes.json`. |
 | `ep01…ep09.mjs` | One file per episode. |
-| `finalize.sh` | Copies the newest take of each episode into `tutorials/` under its published name. |
+| `finalize.sh` | Transcodes the newest take of each episode to H.264/MP4 and writes it into `tutorials/` under its published name. |
 
 The separation matters: `capture.mjs` executes, the episode scripts only
 *replay*. If the platform's behaviour changes, re-running `capture.mjs`
@@ -27,7 +27,7 @@ cd apps/dashboard && NEXT_PUBLIC_ACARD_API_URL=http://localhost:8787 npx next de
 
 # 2. install Playwright for the recorder
 cd tutorials/production
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install   # playwright + ffmpeg-static
 
 # 3. capture real command output, then record
 node capture.mjs
@@ -42,8 +42,9 @@ repeatable — no shared fixture to reset between runs.
 
 - `lib.mjs` points `executablePath` at the preinstalled Chromium. Change it if
   yours lives elsewhere, or drop the line to let Playwright resolve its own.
-- Output is VP8/WebM at 1280×720. Transcode to MP4 with a full ffmpeg if a
-  target platform needs H.264.
+- Playwright captures VP8/WebM at 1280×720; `finalize.sh` transcodes to
+  H.264/MP4 (CRF 20, `+faststart`), which plays everywhere and is about half
+  the size. Raw takes stay in `tutorials/.raw/` and are gitignored.
 - `page.setContent()` replaces the SPA, so any episode that shows a full-screen
   slide and then returns to the dashboard must call `resume(page)` first. That
   bug is easy to reintroduce.

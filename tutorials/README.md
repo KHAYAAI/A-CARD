@@ -12,15 +12,15 @@ episode covers, and the points worth pausing on.
 
 | # | Episode | Length | What it covers |
 |---|---|---|---|
-| 1 | `01-what-acard-is.webm` | 1:52 | The problem, the four-part answer, the codebase layout, a tour of the live dashboard |
-| 2 | `02-setup-and-first-run.webm` | 1:29 | Prerequisites, install, the test suite, running the API, the three persistence modes |
-| 3 | `03-wallet-and-first-card.webm` | 2:50 | Signing up, funding a prepaid wallet, issuing a card, and every guardrail on it |
-| 4 | `04-the-authorization-engine.webm` | 2:25 | The ~2-second hot path, and four purchases — one approved, three refused |
-| 5 | `05-human-approvals.webm` | 2:37 | Holding a charge, the approval queue, one-time consumable grants |
-| 6 | `06-team-roles-and-access.webm` | 2:19 | Four roles, server-side enforcement, scoped API keys, MFA and lockout |
-| 7 | `07-enterprise.webm` | 2:07 | Departments and shared budgets, org policy, the real decision order, audit log |
-| 8 | `08-connecting-an-agent.webm` | 1:49 | MCP setup, the seven agent tools, and an honest look at what's still missing |
-| 9 | `09-deploying-to-aws.webm` | 2:43 | The CDK stack, bootstrap and deploy, hardening defaults, and the real launch gate |
+| 1 | `01-what-acard-is.mp4` | 1:52 | The problem, the four-part answer, the codebase layout, a tour of the live dashboard |
+| 2 | `02-setup-and-first-run.mp4` | 1:29 | Prerequisites, install, the test suite, running the API, the three persistence modes |
+| 3 | `03-wallet-and-first-card.mp4` | 2:50 | Signing up, funding a prepaid wallet, issuing a card, and every guardrail on it |
+| 4 | `04-the-authorization-engine.mp4` | 2:25 | The ~2-second hot path, and four purchases — one approved, three refused |
+| 5 | `05-human-approvals.mp4` | 2:37 | Holding a charge, the approval queue, one-time consumable grants |
+| 6 | `06-team-roles-and-access.mp4` | 2:19 | Four roles, server-side enforcement, scoped API keys, MFA and lockout |
+| 7 | `07-enterprise.mp4` | 2:07 | Departments and shared budgets, org policy, the real decision order, audit log |
+| 8 | `08-connecting-an-agent.mp4` | 1:49 | MCP setup, the seven agent tools, and an honest look at what's still missing |
+| 9 | `09-deploying-to-aws.mp4` | 2:43 | The CDK stack, bootstrap and deploy, hardening defaults, and the real launch gate |
 
 **Total runtime: 20 minutes 10 seconds.** Watch in order — each one assumes the previous.
 
@@ -346,13 +346,11 @@ actual stdout) followed by the episode scripts. See `tutorials/production/`.
 
 ## Format note
 
-Recordings are **VP8 / WebM at 1280×720**. That plays natively in Chrome, Edge,
-Firefox, and any modern browser, and imports into every major editor. Only
-`libvpx` and `png` encoders were available in this environment, so there is no
-H.264/MP4 build — if you need MP4 for a specific platform, transcode with a full
-ffmpeg:
+Recordings are **H.264 / MP4 at 1280×720**, encoded at CRF 20 with
+`+faststart` so they begin playing before the whole file has downloaded. That
+plays everywhere without conversion — browsers, QuickTime, VLC, Slack, Google
+Drive, Notion, PowerPoint, Keynote, and every major NLE.
 
-```bash
-ffmpeg -i 04-the-authorization-engine.webm -c:v libx264 -crf 20 -preset slow \
-  -pix_fmt yuv420p 04-the-authorization-engine.mp4
-```
+Playwright captures VP8/WebM natively; `finalize.sh` transcodes to MP4, which is
+both more portable and roughly half the size (47 MB → 22 MB across the series).
+The raw WebM takes are kept out of git by `.gitignore`.
