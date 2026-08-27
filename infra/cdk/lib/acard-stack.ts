@@ -77,6 +77,16 @@ export class AcardStack extends cdk.Stack {
       noEcho: true,
       description: "Shared HMAC secret with the issuer (or the sandbox simulator) for /webhooks/issuer",
     });
+    const encryptionKeyParam = new cdk.CfnParameter(this, "EncryptionKey", {
+      type: "String",
+      noEcho: true,
+      default: "",
+      description:
+        "AES-256-GCM key (64 hex chars = 32 bytes; `openssl rand -hex 32`) for card data at rest in Postgres. " +
+        "Leave blank and the API falls back to a random per-process key — fine for a first look, but every " +
+        "ECS task restart (deploys, autoscaling) then makes previously-encrypted data undecryptable. Set a " +
+        "real key before this stack holds anything beyond sandbox test PANs.",
+    });
     const slackWebhookUrlParam = new cdk.CfnParameter(this, "SlackApprovalsWebhookUrl", {
       type: "String",
       noEcho: true,
@@ -185,6 +195,9 @@ export class AcardStack extends cdk.Stack {
     const issuerWebhookSecret = new secretsmanager.Secret(this, "IssuerWebhookSecretValue", {
       secretStringValue: cdk.SecretValue.cfnParameter(issuerWebhookSecretParam),
     });
+    const encryptionKeySecret = new secretsmanager.Secret(this, "EncryptionKeyValue", {
+      secretStringValue: cdk.SecretValue.cfnParameter(encryptionKeyParam),
+    });
     const slackWebhookUrlSecret = new secretsmanager.Secret(this, "SlackApprovalsWebhookUrlValue", {
       secretStringValue: cdk.SecretValue.cfnParameter(slackWebhookUrlParam),
     });
@@ -248,10 +261,24 @@ export class AcardStack extends cdk.Stack {
     const apiContainer = apiTaskDef.addContainer("api", {
       image: ecs.ContainerImage.fromAsset("../..", { file: "apps/api/Dockerfile", exclude: DOCKER_ASSET_EXCLUDES }),
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: "api", logGroup: logGroup("ApiLogGroup") }),
-      environment: { PORT: "8787", NODE_ENV: "production", DASHBOARD_URL: publicOrigin, PAYFAST_SANDBOX: payfastSandboxParam.valueAsString },
+      environment: {
+        PORT: "8787",
+        NODE_ENV: "production",
+        DASHBOARD_URL: publicOrigin,
+        PAYFAST_SANDBOX: payfastSandboxParam.valueAsString,
+        // Only refuse plain-HTTP /v1/* requests when this deployment actually
+        // has TLS configured (domainConfig/certificate) — NODE_ENV=production
+        // is set unconditionally above (it also governs the Secure cookie
+        // flag), but the plain-HTTP :80 deployment path this stack
+        // deliberately still supports (see infra/cdk/README.md) would
+        // otherwise have every request rejected by its own ALB's
+        // X-Forwarded-Proto: http.
+        ACARD_REQUIRE_HTTPS: domainConfig ? "true" : "false",
+      },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(databaseUrlSecret),
         ISSUER_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(issuerWebhookSecret),
+        ACARD_ENCRYPTION_KEY: ecs.Secret.fromSecretsManager(encryptionKeySecret),
         SLACK_APPROVALS_WEBHOOK_URL: ecs.Secret.fromSecretsManager(slackWebhookUrlSecret),
         WORKOS_API_KEY: ecs.Secret.fromSecretsManager(workosApiKeySecret),
         WORKOS_CLIENT_ID: ecs.Secret.fromSecretsManager(workosClientIdSecret),

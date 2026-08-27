@@ -199,14 +199,15 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     const decision = await service.authorize({
       authorizationId: "pg_usd_1",
       cardId: usdCard.id,
-      amount: 15_000,
+      // Kept under the free tier's $50 per-card cap (see billing.ts's applyCardCap).
+      amount: 3_000,
       currency: "USD",
       merchant: { name: "OpenAI", category: "5734" },
     });
     expect(decision.approved).toBe(true);
 
     // USD moved; ZAR untouched.
-    expect((await service.walletBalance(holder.id, "USD")).available).toBe(25_000);
+    expect((await service.walletBalance(holder.id, "USD")).available).toBe(37_000);
     expect((await service.walletBalance(holder.id, "ZAR")).available).toBe(100_000);
   });
 
@@ -328,6 +329,25 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     const second = await service.completeSsoLogin({ accountHolderId: holder.id, email: "person@acme2.co.za", name: "Person" });
     expect(second.context.user.id).toBe(first.context.user.id);
     expect(second.context.role).toBe("admin"); // the second SSO login did not reset the promotion
+  });
+
+  it("stores the card PAN encrypted at rest, and still round-trips the plaintext through getCard", async () => {
+    const holder = await service.signup({ email: `enc${Date.now()}@x.co.za`, name: "Enc", currency: "ZAR" });
+    const card = await service.createCard({ accountHolderId: holder.id });
+    expect(card.sandboxPan.startsWith("4242")).toBe(true); // the caller gets plaintext back
+
+    const row = await (service as unknown as { pool: { query: (sql: string, params: unknown[]) => Promise<{ rows: any[] }> } }).pool.query(
+      "SELECT sandbox_pan FROM acard_cards WHERE id = $1",
+      [card.id],
+    );
+    const stored: string = row.rows[0].sandbox_pan;
+    expect(stored).not.toBe(card.sandboxPan); // not plaintext in the column
+    expect(stored).not.toContain("4242"); // no fragment of the PAN leaks into the ciphertext
+    // iv (12B) + authTag (16B) + ciphertext, base64-encoded — always longer than the raw PAN.
+    expect(Buffer.from(stored, "base64").length).toBeGreaterThan(28);
+
+    const fetched = await service.getCard(card.id);
+    expect(fetched?.sandboxPan).toBe(card.sandboxPan); // decrypts back to the original on read
   });
 
   it("links a card to an issuer reference and resolves it via getCardByIssuerCardId, under the unique index", async () => {

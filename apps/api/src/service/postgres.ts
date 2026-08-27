@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { decryptField, encryptField, loadEncryptionKey } from "../encryption.js";
 import {
   createCard,
   currentBillingPeriod,
@@ -313,9 +314,11 @@ type Client = pg.PoolClient;
 export class PostgresPlatformService implements PlatformService {
   private readonly pool: pg.Pool;
   private readonly listeners: Array<(event: PlatformEvent) => void> = [];
+  private readonly encryptionKey: Buffer;
 
-  constructor(connectionString: string) {
+  constructor(connectionString: string, encryptionKey: Buffer = loadEncryptionKey()) {
     this.pool = new pg.Pool({ connectionString, max: 10 });
+    this.encryptionKey = encryptionKey;
   }
 
   async migrate(): Promise<void> {
@@ -831,6 +834,22 @@ export class PostgresPlatformService implements PlatformService {
 
   // ---- cards ----------------------------------------------------------------
 
+  /**
+   * A card written before AES-256-GCM encryption was added stores the PAN as
+   * plaintext, not as `iv+tag+ciphertext`. GCM's authentication tag makes a
+   * false-positive decrypt of unrelated data cryptographically impossible, so
+   * a decrypt failure here reliably means "pre-encryption row," not
+   * corruption or a wrong key — same reasoning as every other upgrade-path
+   * column in this file (see pg-migrate.test.ts).
+   */
+  private decryptSandboxPan(value: string): string {
+    try {
+      return decryptField(value, this.encryptionKey);
+    } catch {
+      return value;
+    }
+  }
+
   private mapCard(row: any): Card {
     return {
       id: row.id,
@@ -843,7 +862,7 @@ export class PostgresPlatformService implements PlatformService {
       limits: row.limits ?? {},
       allowedMerchantCategories: row.allowed_mccs ?? [],
       approvalThreshold: row.approval_threshold === null ? undefined : Number(row.approval_threshold),
-      sandboxPan: row.sandbox_pan,
+      sandboxPan: this.decryptSandboxPan(row.sandbox_pan),
       last4: row.last4,
       expiryMonth: row.expiry_month,
       expiryYear: row.expiry_year,
@@ -894,7 +913,7 @@ export class PostgresPlatformService implements PlatformService {
           [
             card.id, card.accountHolderId, card.walletAccountId, card.departmentId ?? null, card.currency, card.status, card.singleUse,
             JSON.stringify(card.limits), JSON.stringify(card.allowedMerchantCategories),
-            card.approvalThreshold ?? null, card.sandboxPan, card.last4, card.expiryMonth, card.expiryYear,
+            card.approvalThreshold ?? null, encryptField(card.sandboxPan, this.encryptionKey), card.last4, card.expiryMonth, card.expiryYear,
             card.label ?? null, card.issuerCardId ?? null, card.createdAt,
           ],
         );

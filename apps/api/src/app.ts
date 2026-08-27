@@ -253,6 +253,35 @@ export function createApp(config: AppConfig) {
     if (onMutation && c.req.method !== "GET" && c.res.status < 400) onMutation();
   });
 
+  // On a deployment that has TLS configured, refuse any credentialed /v1/*
+  // request that arrived over plain HTTP — checked from the real transport
+  // signal (X-Forwarded-Proto, set by the ALB), not just the session
+  // cookie's Secure flag, which only constrains the browser and says
+  // nothing about a Bearer API key header or a proxy misconfiguration
+  // upstream of this process. The ALB already redirects HTTP→HTTPS at the
+  // edge when TLS is configured (see infra/cdk), so a legitimate request
+  // should never carry `x-forwarded-proto: http` here — this is
+  // defense-in-depth for the case where something bypasses that redirect.
+  //
+  // Deliberately keyed on ACARD_REQUIRE_HTTPS, not NODE_ENV: this stack
+  // also supports a documented plain-HTTP :80 deployment path (no domain
+  // configured) that still runs with NODE_ENV=production — that path's own
+  // ALB forwards `x-forwarded-proto: http` on every request, so gating on
+  // NODE_ENV alone would make it reject all of its own traffic.
+  //
+  // Scoped to /v1/*, not /health or /webhooks/*: the ALB's target-group
+  // health check hits the container over plain HTTP even when the public
+  // listener is HTTPS, and webhook callers authenticate with an HMAC
+  // signature, not a bearer credential this check is protecting.
+  if (process.env.ACARD_REQUIRE_HTTPS === "true") {
+    app.use("/v1/*", async (c, next) => {
+      if (c.req.header("x-forwarded-proto") === "http") {
+        return c.json({ error: { code: "https_required", message: "this deployment requires HTTPS" } }, 400);
+      }
+      await next();
+    });
+  }
+
   app.get("/health", (c) => c.json({ ok: true, service: "acard-api" }));
 
   // ---- public: signup -------------------------------------------------------

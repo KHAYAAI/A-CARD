@@ -70,6 +70,7 @@ are generated and stored automatically — you never handle them.
 | Parameter | Required | What it is |
 |---|---|---|
 | `IssuerWebhookSecret` | ✅ | HMAC secret for `/webhooks/issuer`. |
+| `EncryptionKey` | — | AES-256-GCM key (`openssl rand -hex 32`) for card data at rest in Postgres. Blank ⇒ a random per-process key — encrypted data becomes undecryptable on every ECS task restart. Set a real key before this holds anything beyond sandbox test PANs. |
 | `SlackApprovalsWebhookUrl` | — | Slack incoming webhook. Blank ⇒ no push. |
 | `WorkOsApiKey` | — | `sk_...` from your WorkOS dashboard. Blank ⇒ no SSO (password + TOTP MFA login is unaffected either way). |
 | `WorkOsClientId` | — | `client_...` from the same dashboard page. Must be set alongside `WorkOsApiKey` or SSO stays off. |
@@ -109,6 +110,7 @@ Provide your domain and its hosted zone via `-c` context (all three required):
 ```bash
 npx cdk deploy \
   --parameters IssuerWebhookSecret="<the-secret-you-saved>" \
+  --parameters EncryptionKey="$(openssl rand -hex 32)" \
   --parameters PayFastMerchantId="..." \
   --parameters PayFastMerchantKey="..." \
   --parameters PayFastPassphrase="..." \
@@ -333,6 +335,22 @@ into this stack (`cdk import`) instead of letting CDK try to create a second one
   funding and subscription billing) goes further still — signature,
   source-host resolution, and a server-to-server confirm-back to PayFast
   itself, all three required, not just the signature.
+- Card data (`sandbox_pan`, and whatever a real issuer's PAN would occupy the
+  same column) is AES-256-GCM encrypted at rest in Postgres, keyed by
+  `EncryptionKey`. **This is a `CfnParameter`, not a persisted value** — every
+  `cdk deploy` must pass the same key, or CloudFormation resets it to blank
+  and the API generates a new random one on next boot, permanently orphaning
+  everything encrypted under the old key. Save the key the same way you save
+  `IssuerWebhookSecret`, and pass it on every deploy.
+- When this stack has TLS configured (a domain was supplied), CDK sets
+  `ACARD_REQUIRE_HTTPS=true` and every `/v1/*` request is refused with
+  `400 https_required` if `X-Forwarded-Proto` says `http` — a server-side
+  check independent of the session cookie's `Secure` flag, which only
+  constrains the browser and says nothing about a leaked Bearer API key. The
+  ALB already redirects HTTP→HTTPS at the edge in that case; this is
+  defense-in-depth for whatever bypasses that. The plain-HTTP `:80`
+  deployment path (§3a, no domain) deliberately leaves this off, since its
+  own ALB otherwise forwards `x-forwarded-proto: http` on every request.
 - Human login supports TOTP MFA (enrolled per-user from the dashboard) and,
   optionally, WorkOS SSO — both additive to the base password flow, never a
   replacement for it.
