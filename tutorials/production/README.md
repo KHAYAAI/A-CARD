@@ -13,6 +13,7 @@ actual stdout.
 | `capture.mjs` | **Runs each demo command for real** against the live API and writes its genuine output to `scenes.json`. |
 | `ep01…ep09.mjs` | One file per episode. |
 | `finalize.sh` | Transcodes the newest take of each episode to H.264/MP4 and writes it into `tutorials/` under its published name. |
+| `stills.mjs` | Captures high-resolution (2×, 2560×1600) dashboard stills into `tutorials/stills/`, dark and light. Seeds its own on-brand demo account first (SA merchants, ZAR, real decline reasons). Built for marketing/motion-design use, where a screen gets tilted and pushed into hard enough that a 1× grab goes soft. |
 
 The separation matters: `capture.mjs` executes, the episode scripts only
 *replay*. If the platform's behaviour changes, re-running `capture.mjs`
@@ -48,3 +49,19 @@ repeatable — no shared fixture to reset between runs.
 - `page.setContent()` replaces the SPA, so any episode that shows a full-screen
   slide and then returns to the dashboard must call `resume(page)` first. That
   bug is easy to reintroduce.
+
+## Marketing stills
+
+```bash
+# with the platform running (see above)
+node stills.mjs
+```
+
+Writes 12 PNGs to `tutorials/stills/` — six views (overview, cards, spending,
+wallet, approvals, connect) × dark and light. The seeded data is deliberately
+on-brand rather than generic: ZAR amounts, South African merchants (Checkers
+Sixty60, Bolt, FlySafair, a Bree Street taxi rank), and a spend history that
+shows the product's actual behaviour on screen — completed charges, a
+`per_transaction_limit_exceeded` decline, and a `pending_human_approval` hold.
+
+Each run seeds a fresh account, so re-running regenerates everything cleanly.
