@@ -15,3 +15,7 @@ cdk.context.json
 tutorials/.raw/
 tutorials/production/node_modules/
 tutorials/production/scenes.json
+
+# Personal Claude Code settings (permissions etc). Shared settings belong in
+# .claude/settings.json, which stays tracked.
+.claude/settings.local.json
