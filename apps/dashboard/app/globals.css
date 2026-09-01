@@ -234,6 +234,7 @@ svg { display: block; }
 table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.grid th { text-align: left; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 500; padding: 0 10px 10px; }
 table.grid td { padding: 11px 10px; border-top: 1px solid var(--border-soft); vertical-align: middle; }
+table.grid tr.row-sel td { background: var(--green-bg); }
 .pill { display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 999px; }
 .pill.active, .pill.completed { background: var(--green-bg); color: var(--green-deep); }
 .pill.closed { background: var(--track); color: var(--muted); }

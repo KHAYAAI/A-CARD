@@ -17,12 +17,16 @@ import {
   type Role,
   type SubscriptionTier,
   type MerchantDirectory,
+  type MerchantAuthService,
+  type MerchantRole,
+  type MerchantSessionContext,
 } from "@acard/core";
 import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
 import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
 import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
+import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantAuthKitConfig } from "./merchantAuthKit.js";
 
 /**
  * A-CARD REST API.
@@ -86,6 +90,21 @@ export interface AppConfig {
    * flow, which is what keeps this layer clear of funds custody.
    */
   merchants?: MerchantDirectory;
+  /**
+   * The merchant-portal identity service (optional — omit and the whole
+   * portal surface, `/merchant-auth/*` and `/merchant-portal/*`, is
+   * unmounted). Requires `merchants` too: there is nothing to log a
+   * merchant user into without a directory record for them.
+   */
+  merchantAuth?: MerchantAuthService;
+  /**
+   * WorkOS AuthKit for the merchant portal (optional — omit and portal
+   * invites can still be generated via the operator console, but the login
+   * link they produce has nowhere to send the merchant; `/merchant-auth/*`
+   * stays unmounted). A config object builds the real client; a
+   * `MerchantAuthKitClient` (tests) passes through.
+   */
+  merchantAuthKit?: MerchantAuthKitConfig | MerchantAuthKitClient;
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -110,7 +129,21 @@ function asPayFastClient(config: PayFastConfig | PayFastClient): PayFastClient {
   return "merchantId" in config ? createPayFastClient(config) : config;
 }
 
-type Env = { Variables: { holder: AccountHolder; role: Role; apiKey?: ApiKey; sessionUser?: PublicUser } };
+function asMerchantAuthKitClient(config: MerchantAuthKitConfig | MerchantAuthKitClient): MerchantAuthKitClient {
+  // A config object (has `apiKey`) builds the real client; a `MerchantAuthKitClient` (tests) passes through.
+  return "apiKey" in config ? createMerchantAuthKitClient(config) : config;
+}
+
+type Env = {
+  Variables: {
+    holder: AccountHolder;
+    role: Role;
+    apiKey?: ApiKey;
+    sessionUser?: PublicUser;
+    /** Set only on `/v1/merchant-portal/*` routes — a wholly separate identity from `holder` above. */
+    merchantSession?: MerchantSessionContext;
+  };
+};
 
 const SESSION_COOKIE = "acard_session";
 const currencySchema = z.enum(["ZAR", "USD", "NGN", "KES"]);
@@ -312,8 +345,11 @@ const searchQuerySchema = z.object({
   limit: z.number().int().positive().max(100).optional(),
 });
 
+const portalInviteSchema = z.object({ role: z.enum(["owner", "staff"]).optional() });
+
 export function createApp(config: AppConfig) {
-  const { issuerWebhookSecret, onMutation, dashboardUrl, merchants } = config;
+  const { issuerWebhookSecret, onMutation, dashboardUrl, merchants, merchantAuth } = config;
+  const merchantAuthKit = config.merchantAuthKit ? asMerchantAuthKitClient(config.merchantAuthKit) : undefined;
   const platform = asService(config.platform);
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
@@ -518,6 +554,14 @@ export function createApp(config: AppConfig) {
   ]);
   app.use("/v1/*", async (c, next) => {
     if (PUBLIC_V1.has(c.req.path)) return next();
+    // The merchant portal is a second, narrower identity system (see
+    // merchantAuth.ts) — a merchant user has no A-CARD API key or session,
+    // so it can never satisfy this guard. Its own routes carry their own
+    // cookie-based auth below; this only has to stay out of their way. Kept
+    // as a prefix check on this one guard rather than moving the routes out
+    // from under /v1/*, since the ALB only forwards /v1/*, /webhooks/*, and
+    // /health to this service (see infra/cdk) — anything else never reaches it.
+    if (c.req.path.startsWith("/v1/merchant-auth/") || c.req.path.startsWith("/v1/merchant-portal/")) return next();
     const header = c.req.header("authorization") ?? "";
     const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
 
@@ -1165,6 +1209,33 @@ export function createApp(config: AppConfig) {
       return c.json({ merchant });
     });
 
+    // The only door into the merchant portal — see `merchantAuthKit`/`merchantAuth`
+    // below. No open signup: an operator who has already run KYB on this
+    // merchant is the one vouching for whoever redeems the link.
+    if (merchantAuth) {
+      app.post("/v1/merchants/:id/portal-invites", requireRole("admin"), async (c) => {
+        const merchantId = c.req.param("id");
+        merchants.get(merchantId); // 404s if the merchant doesn't exist
+        const body = portalInviteSchema.parse(await c.req.json().catch(() => ({})));
+        const issuedBy = c.get("sessionUser")?.email ?? c.get("holder").email;
+        const { invite, token } = merchantAuth.createInvite(merchantId, body.role ?? "owner", issuedBy);
+        const base = (dashboardUrl ?? "").replace(/\/$/, "");
+        return c.json(
+          {
+            invite,
+            // The merchant clicks this; it starts the WorkOS AuthKit hosted
+            // login/signup and lands them in their own catalog when done.
+            invite_url: `${base}/v1/merchant-auth/authorize?invite=${encodeURIComponent(token)}`,
+          },
+          201,
+        );
+      });
+
+      app.get("/v1/merchants/:id/portal-invites", requireRole("admin"), async (c) => {
+        return c.json({ invites: merchantAuth.listInvites(c.req.param("id")) });
+      });
+    }
+
     app.patch("/v1/merchants/:id", requireRole("admin"), async (c) => {
       const body = updateMerchantSchema.parse(await c.req.json());
       const merchant = merchants.updateProfile(c.req.param("id"), {
@@ -1277,6 +1348,144 @@ export function createApp(config: AppConfig) {
       const status = c.req.query("status") as ReturnType<typeof merchants.list>[number]["status"] | undefined;
       return c.json({ merchants: merchants.list(status ? { status } : {}).map(publicMerchant) });
     });
+
+    // ---- merchant portal: WorkOS AuthKit login + the merchant's own view -------
+    //
+    // A second, narrower identity system (see merchantAuth.ts) — cookie name,
+    // session store, and role model are all separate from A-CARD's own
+    // login, on purpose, so nothing here can reach a wallet or a card.
+    if (merchantAuth && merchantAuthKit) {
+      const MERCHANT_SESSION_COOKIE = "acard_merchant_session";
+      const setMerchantSessionCookie = (c: Context<Env>, token: string) =>
+        setCookie(c, MERCHANT_SESSION_COOKIE, token, {
+          httpOnly: true,
+          sameSite: "Lax",
+          path: "/",
+          secure: secureCookies,
+          maxAge: 60 * 60 * 24 * 7,
+        });
+
+      // Starts the hosted WorkOS login/signup. `invite` is the one-time token
+      // from `POST /v1/merchants/:id/portal-invites` — it never touches
+      // WorkOS itself, only rides along as opaque `state` so the callback can
+      // recover which merchant this login is for.
+      app.get("/v1/merchant-auth/authorize", async (c) => {
+        const invite = c.req.query("invite") ?? "";
+        const pending = merchantAuth.peekInvite(invite);
+        if (!pending) {
+          return c.json({ error: { code: "invalid_invite", message: "this invite link is invalid or has expired" } }, 400);
+        }
+        if (pending.consumedAt) {
+          return c.json({ error: { code: "invite_used", message: "this invite link has already been used" } }, 400);
+        }
+        if (Date.parse(pending.expiresAt) < Date.now()) {
+          return c.json({ error: { code: "invite_expired", message: "this invite link has expired" } }, 400);
+        }
+        return c.redirect(merchantAuthKit.getAuthorizationUrl(invite), 302);
+      });
+
+      app.get("/v1/merchant-auth/callback", async (c) => {
+        const code = c.req.query("code");
+        const inviteToken = c.req.query("state");
+        const base = (dashboardUrl ?? "").replace(/\/$/, "");
+        if (!code || !inviteToken) {
+          return c.redirect(`${base}/merchant?portal_error=${encodeURIComponent("missing code or invite")}`, 302);
+        }
+        try {
+          const profile = await merchantAuthKit.authenticateWithCode(code);
+          const user = merchantAuth.redeemInvite(inviteToken, profile);
+          const { token } = merchantAuth.createSession(user);
+          setMerchantSessionCookie(c, token);
+          if (!base) return c.json({ portal_token: token });
+          // Cross-origin dev (dashboard on :3000, API on :8787) can't rely on
+          // the cookie landing on the dashboard's own origin — same fallback
+          // pattern as the A-CARD SSO callback: hand the token back in the
+          // query string too, and the dashboard stores it itself.
+          return c.redirect(`${base}/merchant?portal_token=${encodeURIComponent(token)}`, 302);
+        } catch (error) {
+          const message = error instanceof DomainError ? error.message : "sign-in failed";
+          return c.redirect(`${base}/merchant?portal_error=${encodeURIComponent(message)}`, 302);
+        }
+      });
+
+      const requireMerchantSession = async (c: Context<Env>, next: () => Promise<void>) => {
+        const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/, "");
+        const token = bearer || getCookie(c, MERCHANT_SESSION_COOKIE);
+        const ctx = token ? merchantAuth.resolveSession(token) : undefined;
+        if (!ctx) return c.json({ error: { code: "unauthorized", message: "sign in to the merchant portal" } }, 401);
+        c.set("merchantSession", ctx);
+        await next();
+      };
+
+      app.post("/v1/merchant-portal/logout", requireMerchantSession, async (c) => {
+        const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/, "");
+        const token = bearer || getCookie(c, MERCHANT_SESSION_COOKIE);
+        if (token) merchantAuth.revokeSession(token);
+        deleteCookie(c, MERCHANT_SESSION_COOKIE, { path: "/" });
+        return c.json({ ok: true });
+      });
+
+      app.get("/v1/merchant-portal/me", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const merchant = merchants.get(ctx.merchantId);
+        return c.json({
+          user: merchantAuth.getUser(ctx.merchantUserId),
+          // The portal gets exactly the agent-facing view of its own
+          // profile — never the KYB pack, same redaction as `publicMerchant`
+          // applies to every other reader of this record.
+          merchant: publicMerchant(merchant),
+        });
+      });
+
+      app.get("/v1/merchant-portal/items", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        return c.json({ items: merchants.listItems(ctx.merchantId) });
+      });
+
+      app.put("/v1/merchant-portal/items", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const body = upsertItemSchema.parse(await c.req.json());
+        const item = merchants.upsertItem(ctx.merchantId, {
+          sku: body.sku,
+          name: body.name,
+          description: body.description,
+          unit: body.unit,
+          unitPriceCents: body.unit_price_cents,
+          currency: body.currency,
+          availability: body.availability,
+          quantityAvailable: body.quantity_available,
+          leadTimeDays: body.lead_time_days,
+        });
+        return c.json({ item });
+      });
+
+      // The one-tap "still have it / out of stock" flow — the single most
+      // important write in the whole portal, see merchants.ts.
+      app.post("/v1/merchant-portal/items/:itemId/restate", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const item = merchants.getItem(c.req.param("itemId") as string);
+        if (item.merchantId !== ctx.merchantId) {
+          return c.json({ error: { code: "not_found", message: "item does not belong to your shop" } }, 404);
+        }
+        const body = restateSchema.parse(await c.req.json());
+        return c.json({ item: merchants.restate(item.id, { availability: body.availability, quantityAvailable: body.quantity_available }) });
+      });
+
+      app.delete("/v1/merchant-portal/items/:itemId", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const item = merchants.getItem(c.req.param("itemId") as string);
+        if (item.merchantId !== ctx.merchantId) {
+          return c.json({ error: { code: "not_found", message: "item does not belong to your shop" } }, 404);
+        }
+        merchants.removeItem(item.id);
+        return c.json({ deleted: true });
+      });
+
+      app.get("/v1/merchant-portal/health", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        return c.json(merchants.catalogHealth(ctx.merchantId));
+      });
+    }
   }
 
   // ---- error handling ---------------------------------------------------------------

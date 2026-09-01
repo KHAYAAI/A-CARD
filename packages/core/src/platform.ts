@@ -25,6 +25,7 @@ import { evaluateRules, type AuthorizationContext } from "./rules.js";
 import { applyCardCap, currentBillingPeriod, SUBSCRIPTION_TIERS, type SubscriptionTier } from "./billing.js";
 import { WalletLinkService, type Chain, type ExternalWalletConnector, type LinkedWallet } from "./wallets.js";
 import { MerchantDirectory, type SerializedMerchantDirectory } from "./merchants.js";
+import { MerchantAuthService, type SerializedMerchantAuth } from "./merchantAuth.js";
 
 /**
  * The platform service: everything the API, MCP server, and CLI need, backed
@@ -106,6 +107,7 @@ export interface PlatformSnapshot {
   enterprise?: { departments: Department[]; policies: Array<[string, OrgPolicy]> };
   linkedWallets?: LinkedWallet[];
   merchants?: SerializedMerchantDirectory;
+  merchantAuth?: SerializedMerchantAuth;
   accountHolders: AccountHolder[];
   cards: Card[];
   transactions: CardTransaction[];
@@ -126,6 +128,8 @@ export class Platform {
   readonly linkedWallets = new WalletLinkService();
   /** A-MERCHANT: the supply-side directory. Read side only — no orders, no settlement. */
   readonly merchants = new MerchantDirectory();
+  /** A-MERCHANT: merchant-portal identity — separate from A-CARD's AuthService. */
+  readonly merchantAuth = new MerchantAuthService();
 
   private readonly accountHolders = new Map<string, AccountHolder>();
   private readonly cards = new Map<string, Card>();
@@ -155,6 +159,7 @@ export class Platform {
       enterprise: this.enterprise.serialize(),
       linkedWallets: this.linkedWallets.serialize(),
       merchants: this.merchants.serialize(),
+      merchantAuth: this.merchantAuth.serialize(),
       accountHolders: [...this.accountHolders.values()],
       cards: [...this.cards.values()],
       transactions: [...this.transactions.values()],
@@ -178,6 +183,9 @@ export class Platform {
     // Back-compat: snapshots taken before A-MERCHANT have no directory.
     if (snapshot.merchants) {
       (platform as { merchants: MerchantDirectory }).merchants = MerchantDirectory.hydrate(snapshot.merchants);
+    }
+    if (snapshot.merchantAuth) {
+      (platform as { merchantAuth: MerchantAuthService }).merchantAuth = MerchantAuthService.hydrate(snapshot.merchantAuth);
     }
     for (const holder of snapshot.accountHolders) {
       // Back-compat: snapshots from before enterprise default to personal.

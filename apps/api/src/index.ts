@@ -62,8 +62,12 @@ if (slackWebhookUrl) attachSlackNotifications(platform, slackWebhookUrl, dashboa
  * and say why.
  */
 const merchants = platform instanceof InMemoryPlatformService ? platform.platform.merchants : undefined;
+const merchantAuth = platform instanceof InMemoryPlatformService ? platform.platform.merchantAuth : undefined;
 if (!merchants) {
   console.log("A-CARD API: A-MERCHANT routes disabled — the directory has no Postgres adapter yet (use ACARD_PERSISTENCE=snapshot)");
+}
+if (merchants && !workosApiKey) {
+  console.log("A-CARD API: merchant portal disabled — set WORKOS_API_KEY/WORKOS_CLIENT_ID to let merchants log in and restate stock themselves");
 }
 
 const app = createApp({
@@ -72,6 +76,17 @@ const app = createApp({
   dashboardUrl,
   onMutation,
   merchants,
+  merchantAuth,
+  // AuthKit is a separate WorkOS product from the org-SSO `workos` config
+  // below — same API key and project, but this logs an individual merchant
+  // user in (password, magic link, WorkOS-hosted signup), where org SSO
+  // instead federates an A-CARD organization to its own identity provider.
+  // The callback lives on this API service for the same reason the SSO one
+  // does — see the comment on `workos` below.
+  merchantAuthKit:
+    workosApiKey && workosClientId && dashboardUrl
+      ? { apiKey: workosApiKey, clientId: workosClientId, redirectUri: `${dashboardUrl.replace(/\/$/, "")}/v1/merchant-auth/callback` }
+      : undefined,
   // Real ZAR wallet funding AND subscription billing both route through
   // PayFast (see app.ts's /webhooks/payfast). Omit to keep /v1/wallet/fund's
   // instant sandbox credit and unmetered billing.

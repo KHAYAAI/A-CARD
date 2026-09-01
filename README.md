@@ -14,7 +14,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 | `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and agent discovery, the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
-| `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management |
+| `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management, A-MERCHANT operator console (onboarding, KYB, discovery preview) — plus a separate `/merchant` route: the merchant's own portal (WorkOS AuthKit login, catalog, one-tap restate) |
 | `infra/cdk` | AWS CDK stack: VPC, RDS Postgres, ALB, three Fargate services — `npx cdk deploy` and you have a live URL |
 
 ## Quick start
@@ -161,12 +161,54 @@ so a merchant's allow-list is enforced against who is really asking.
 Pass a card's `allowed_merchant_categories` as `categories` and discovery only
 returns what that card can actually pay for.
 
-Directory writes are operator actions in this first cut — A-CARD's own team
-onboards merchants and records KYB outcomes. A merchant-owned login and
-self-service console arrive with the write side. The directory lives on the
-in-memory `Platform` and is covered by snapshot persistence; the Postgres
-multi-writer path has no directory adapter yet, so the routes stay unmounted
-there rather than giving each API task its own catalog.
+Onboarding and KYB decisions are still operator actions — A-CARD's own team
+registers a merchant and records the KYB outcome (`/v1/merchants/*`, gated on
+the `admin` role) — but each merchant now gets its own portal to run its
+catalog day to day. The directory lives on the in-memory `Platform` and is
+covered by snapshot persistence; the Postgres multi-writer path has no
+directory adapter yet, so the routes stay unmounted there rather than giving
+each API task its own catalog.
+
+### Merchant portal (WorkOS AuthKit)
+
+A merchant is not an account holder — no wallet, no cards, no A-CARD login.
+It gets a second, narrower identity (`packages/core/src/merchantAuth.ts`),
+authenticated by **WorkOS AuthKit**: password, magic link, WorkOS-hosted
+signup, all of it WorkOS's problem, not this codebase's. This is a different
+WorkOS product from the org-SSO integration above — same API key and
+project, but AuthKit logs in an individual person, where SSO federates an
+A-CARD *organization* to its own identity provider.
+
+There is no open signup. An operator who has already run KYB on a merchant
+generates a one-time invite (`POST /v1/merchants/:id/portal-invites`,
+`admin`-gated); the merchant clicks it, authenticates with WorkOS, and lands
+in their own catalog with a session scoped to that one merchant. The whole
+loop — invite → `GET /v1/merchant-auth/authorize` → WorkOS → `GET
+/v1/merchant-auth/callback` → session — mirrors the org-SSO callback
+deliberately: same "one shared public origin, ALB routes `/v1/*` to this
+service" reasoning, same "ends in a session, not a second identity model"
+discipline.
+
+From the portal (`/v1/merchant-portal/*`, cookie- or bearer-session gated,
+scoped to the caller's own `merchantId` — cross-merchant reads and writes
+404 rather than leak whether the other merchant's record exists) a merchant
+can list, add, and restate its own items. **Restating stock is the highest-
+leverage write in A-MERCHANT** — it's the thing that keeps `freshness`
+honest — so the dashboard's merchant view (`apps/dashboard/app/merchant`, a
+route deliberately separate from the A-CARD console at `/`, different token,
+no shared state) puts a one-tap in‑stock / low‑stock / out‑of‑stock control
+front and center, ahead of a full catalog editor.
+
+The operator side lives in the main dashboard as a new **Merchants** nav
+item (`admin`-gated): register a merchant, decide KYB with an attributed
+note, generate a portal invite link, and preview exactly what an agent's
+`find_offers` search would return — same endpoint, same ranking, same
+exclusion reasons, run from a form instead of MCP.
+
+Set `WORKOS_API_KEY` / `WORKOS_CLIENT_ID` (shared with the org-SSO config
+below) and `DASHBOARD_URL` to enable the portal; without them, merchant
+registration and KYB still work, but a portal invite has nowhere to send the
+merchant, and `/v1/merchant-auth/*` / `/v1/merchant-portal/*` stay unmounted.
 
 ## How an authorization is decided
 
@@ -193,7 +235,8 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 
 - **Fraud ML.** The rules engine carries hot-path decisions today, which is the correct sequencing — ML scoring is a post-launch layer.
 - **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
-- **A-MERCHANT's write side.** Orders, payment acceptance, settlement, disputes and refunds. Deliberately deferred: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money, which is a licensing and partner-bank question rather than a schema. The read side ships first because it tests the assumption that can actually kill the thesis — whether merchants keep a catalog current.
+- **A-MERCHANT's write side.** Orders, payment acceptance, settlement, disputes and refunds. Deliberately deferred: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money, which is a licensing and partner-bank question rather than a schema. The read side — now including merchant-run onboarding and catalog upkeep through the portal — ships first because it tests the assumption that can actually kill the thesis: whether merchants keep a catalog current.
+- **Merchant staff management.** The portal has an `owner`/`staff` role on `MerchantUser` and invites can be issued as either, but there's no in-portal "invite a colleague" flow yet — an operator issues every invite today. Small addition once a pilot merchant actually asks for it.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
 
 ## Scripts

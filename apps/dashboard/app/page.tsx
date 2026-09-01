@@ -101,6 +101,7 @@ const NAV: NavItem[] = [
   { view: "policies", label: "Policies", icon: "scale", enterprise: true, min: "admin" },
   { view: "audit", label: "Audit log", icon: "book", crumb: "Audit log", enterprise: true },
   { view: "connect", label: "Connect agents", icon: "cpu" },
+  { view: "merchants", label: "Merchants", icon: "building", crumb: "Merchants", min: "admin" },
   { view: "team", label: "Team", icon: "users", min: "admin" },
 ];
 const MCC_LABEL: Record<string, string> = {
@@ -785,6 +786,9 @@ export default function Dashboard() {
             </>
           )}
 
+          {/* MERCHANTS (A-MERCHANT operator console) */}
+          {view === "merchants" && can(role, "admin") && <MerchantsPanel call={call} flash={flash} />}
+
           {/* TEAM */}
           {view === "team" && can(role, "admin") && (
             <>
@@ -930,5 +934,366 @@ function Feed({ rows, cards }: { rows: Txn[]; cards: Card[] }) {
         );
       })}
     </div>
+  );
+}
+
+/* ============================================================ A-MERCHANT */
+interface MerchantAddress { addressLine: string; city: string; province: string; country: string; lat: number; lng: number }
+interface MerchantRow {
+  id: string; name: string; tradingName?: string; merchantCategoryCode: string; address: MerchantAddress;
+  serviceRadiusKm: number; currency: string; status: "pending_kyb" | "verified" | "suspended"; verified: boolean; createdAt: string;
+}
+interface CatalogItemRow {
+  id: string; sku: string; name: string; unit: string; unitPriceCents: number; currency: string;
+  availability: string; quantityAvailable?: number; leadTimeDays: number; inventoryUpdatedAt: string;
+}
+interface OfferRow {
+  merchant: MerchantRow; item: CatalogItemRow; quantity: number; totalCents: number; currency: string;
+  distanceKm?: number; leadTimeDays: number; freshness: "fresh" | "aging" | "stale"; score: number; matchReasons: string[];
+}
+interface ExclusionRow { merchantId: string; itemId?: string; reason: string }
+
+const MERCHANT_STATUS_PILL: Record<string, string> = { verified: "active", pending_kyb: "pending", suspended: "declined" };
+const FRESHNESS_PILL: Record<string, string> = { fresh: "active", aging: "pending", stale: "declined" };
+
+function MerchantsPanel({ call, flash }: { call: (path: string, init?: RequestInit) => Promise<any>; flash: (m: string) => void }) {
+  const [tab, setTab] = useState<"directory" | "search">("directory");
+  const [enabled, setEnabled] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [merchants, setMerchants] = useState<MerchantRow[]>([]);
+  const [selected, setSelected] = useState<MerchantRow | null>(null);
+  const [items, setItems] = useState<CatalogItemRow[]>([]);
+  const [health, setHealth] = useState<{ items: number; fresh: number; aging: number; stale: number; medianInventoryAgeHours: number } | null>(null);
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [kybNote, setKybNote] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+
+  // onboarding form
+  const [fName, setFName] = useState("");
+  const [fMcc, setFMcc] = useState("5211");
+  const [fAddr, setFAddr] = useState("");
+  const [fCity, setFCity] = useState("");
+  const [fProvince, setFProvince] = useState("Gauteng");
+  const [fLat, setFLat] = useState("-26.2041");
+  const [fLng, setFLng] = useState("28.0473");
+  const [fRadius, setFRadius] = useState("30");
+  const [fRegNo, setFRegNo] = useState("");
+  const [fEmail, setFEmail] = useState("");
+
+  // discovery form
+  const [sQuery, setSQuery] = useState("cement");
+  const [sLat, setSLat] = useState("-26.2041");
+  const [sLng, setSLng] = useState("28.0473");
+  const [sRadius, setSRadius] = useState("15");
+  const [sQty, setSQty] = useState("1");
+  const [sBudget, setSBudget] = useState("");
+  const [sLeadDays, setSLeadDays] = useState("");
+  const [sOffers, setSOffers] = useState<OfferRow[]>([]);
+  const [sExcluded, setSExcluded] = useState<ExclusionRow[]>([]);
+  const [sSearched, setSSearched] = useState(false);
+  const [sBusy, setSBusy] = useState(false);
+
+  const loadMerchants = useCallback(async () => {
+    try {
+      const res = await call("/v1/merchants");
+      setMerchants(res.merchants ?? []);
+      setEnabled(true);
+    } catch {
+      setEnabled(false);
+    } finally {
+      setLoading(false);
+    }
+  }, [call]);
+
+  useEffect(() => { loadMerchants(); }, [loadMerchants]);
+
+  const openMerchant = useCallback(
+    async (m: MerchantRow) => {
+      setSelected(m);
+      setInviteUrl("");
+      setKybNote("");
+      try {
+        const [detail, h] = await Promise.all([call(`/v1/merchants/${m.id}`), call(`/v1/merchants/${m.id}/health`).catch(() => null)]);
+        setItems(detail.items ?? []);
+        setHealth(h);
+      } catch (e) {
+        flash(e instanceof Error ? e.message : "Could not load merchant.");
+      }
+    },
+    [call, flash],
+  );
+
+  const addMerchant = async () => {
+    if (!fName.trim() || !fAddr.trim() || !fCity.trim() || !fRegNo.trim() || !fEmail.trim()) {
+      flash("Fill in name, address, registration number, and contact email.");
+      return;
+    }
+    try {
+      await call("/v1/merchants", {
+        method: "POST",
+        body: JSON.stringify({
+          name: fName,
+          merchant_category_code: fMcc,
+          address: { addressLine: fAddr, city: fCity, province: fProvince, country: "ZA", lat: Number(fLat), lng: Number(fLng) },
+          service_radius_km: Number(fRadius) || 0,
+          kyb: { registration_number: fRegNo, contact_email: fEmail },
+        }),
+      });
+      flash(`${fName} added — pending KYB review.`);
+      setShowAdd(false);
+      setFName(""); setFAddr(""); setFCity(""); setFRegNo(""); setFEmail("");
+      loadMerchants();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not add merchant.");
+    }
+  };
+
+  const decideKyb = async (status: "verified" | "suspended") => {
+    if (!selected) return;
+    try {
+      const res = await call(`/v1/merchants/${selected.id}/kyb`, { method: "POST", body: JSON.stringify({ status, note: kybNote || undefined }) });
+      flash(status === "verified" ? `${selected.name} verified — now discoverable by agents.` : `${selected.name} suspended.`);
+      setSelected(res.merchant);
+      setKybNote("");
+      loadMerchants();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not record the decision.");
+    }
+  };
+
+  const generateInvite = async () => {
+    if (!selected) return;
+    try {
+      const res = await call(`/v1/merchants/${selected.id}/portal-invites`, { method: "POST", body: JSON.stringify({}) });
+      setInviteUrl(res.invite_url);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Portal login isn't configured on this deployment yet.");
+    }
+  };
+
+  const runSearch = async () => {
+    setSBusy(true);
+    try {
+      const params = new URLSearchParams();
+      if (sQuery.trim()) params.set("q", sQuery.trim());
+      if (sLat && sLng) { params.set("lat", sLat); params.set("lng", sLng); if (sRadius) params.set("radius_km", sRadius); }
+      if (sQty) params.set("quantity", sQty);
+      if (sBudget) params.set("max_total_cents", String(Math.round(Number(sBudget) * 100)));
+      if (sLeadDays) params.set("max_lead_time_days", sLeadDays);
+      const res = await call(`/v1/merchants/search?${params.toString()}`);
+      setSOffers(res.offers ?? []);
+      setSExcluded(res.excluded ?? []);
+      setSSearched(true);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Search failed.");
+    } finally {
+      setSBusy(false);
+    }
+  };
+
+  if (loading) return <div className="panel panel-pad"><div className="hint">Loading…</div></div>;
+
+  if (!enabled) {
+    return (
+      <>
+        <div className="page-head"><div className="page-title">Merchants</div><div className="page-sub">A-MERCHANT — the supply side agents buy from.</div></div>
+        <div className="panel"><div className="empty-box" style={{ border: "none", padding: "40px 24px" }}>
+          <div className="empty-ico"><Icon name="building" size={24} /></div>
+          <div className="empty-t">A-MERCHANT isn&apos;t enabled on this deployment</div>
+          <div className="empty-s">The merchant directory has no Postgres adapter yet — it runs on the in-memory / snapshot persistence path (ACARD_PERSISTENCE=snapshot). See the README.</div>
+        </div></div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="page-head">
+        <div className="page-title">Merchants</div>
+        <div className="page-sub">Onboard suppliers, decide KYB, and see exactly what an agent&apos;s search would return.</div>
+      </div>
+      <div className="connect-tabs" style={{ marginBottom: 16 }}>
+        <button className={`ctab ${tab === "directory" ? "sel" : ""}`} onClick={() => setTab("directory")}><Icon name="building" /> Directory</button>
+        <button className={`ctab ${tab === "search" ? "sel" : ""}`} onClick={() => setTab("search")}><Icon name="upRight" /> Search preview</button>
+      </div>
+
+      {tab === "directory" && (
+        <div className="cols">
+          <div className="panel panel-pad">
+            <div className="panel-head"><h2>Directory</h2><button className="btn btn-green" onClick={() => setShowAdd(true)}><Icon name="plus" /> Add merchant</button></div>
+            {merchants.length === 0 ? (
+              <div className="empty-box" style={{ border: "none", padding: "34px 16px" }}>
+                <div className="empty-ico"><Icon name="building" size={24} /></div>
+                <div className="empty-t">No merchants yet</div>
+                <div className="empty-s">Add the first one — it stays invisible to agents until you verify its KYB.</div>
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="grid">
+                  <thead><tr><th>Name</th><th>MCC</th><th>City</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {merchants.map((m) => (
+                      <tr key={m.id} onClick={() => openMerchant(m)} style={{ cursor: "pointer" }} className={selected?.id === m.id ? "row-sel" : ""}>
+                        <td>{m.name}</td>
+                        <td className="mono">{m.merchantCategoryCode}</td>
+                        <td>{m.address.city}</td>
+                        <td><span className={`pill ${MERCHANT_STATUS_PILL[m.status]}`}>{m.status.replace("_", " ")}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="panel panel-pad">
+            {!selected ? (
+              <div className="empty-box" style={{ border: "none", padding: "40px 16px" }}>
+                <div className="empty-t">Select a merchant</div>
+                <div className="empty-s">Review its catalog, decide KYB, or send a portal invite.</div>
+              </div>
+            ) : (
+              <>
+                <div className="panel-head"><h2>{selected.name}</h2><span className={`pill ${MERCHANT_STATUS_PILL[selected.status]}`}>{selected.status.replace("_", " ")}</span></div>
+                <div className="hint">{selected.address.addressLine}, {selected.address.city} · MCC {selected.merchantCategoryCode} · delivers within {selected.serviceRadiusKm}km</div>
+
+                {health && (
+                  <div className="stats" style={{ marginTop: 16 }}>
+                    <div className="stat"><div className="head"><span className="lbl">Catalog</span></div><div className="val">{health.items}</div><div className="foot">items listed</div></div>
+                    <div className="stat"><div className="head"><span className="lbl">Fresh stock</span></div><div className="val">{health.fresh}/{health.items}</div><div className="foot">confirmed in 24h</div></div>
+                    <div className="stat"><div className="head"><span className="lbl">Median age</span></div><div className="val">{health.medianInventoryAgeHours}h</div><div className="foot">since last count</div></div>
+                  </div>
+                )}
+
+                <div style={{ marginTop: 20 }}>
+                  <div className="panel-head"><h2>KYB decision</h2></div>
+                  <div className="field"><label>note (recorded against your name)</label><input value={kybNote} onChange={(e) => setKybNote(e.target.value)} placeholder="e.g. CIPC docs on file" /></div>
+                  <div className="filters" style={{ marginTop: 10 }}>
+                    <button className="btn btn-green" onClick={() => decideKyb("verified")} disabled={selected.status === "verified"}><Icon name="check" /> Verify</button>
+                    <button className="btn btn-outline" onClick={() => decideKyb("suspended")} disabled={selected.status === "suspended"}><Icon name="x" /> Suspend</button>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 20 }}>
+                  <div className="panel-head"><h2>Merchant portal</h2></div>
+                  <div className="hint">Generate a one-time login link so the merchant can restate their own stock — the single highest-value action in A-MERCHANT.</div>
+                  <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={generateInvite}>Generate invite link</button>
+                  {inviteUrl && (
+                    <div className="cmd" style={{ marginTop: 10 }}>
+                      <span>{inviteUrl}</span>
+                      <button className="cmd-copy" onClick={() => { navigator.clipboard?.writeText(inviteUrl).catch(() => {}); flash("Copied."); }}><Icon name="copy" /></button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 20 }}>
+                  <div className="panel-head"><h2>Catalog ({items.length})</h2></div>
+                  {items.length === 0 ? (
+                    <div className="hint">No items listed yet — the merchant adds these from their own portal.</div>
+                  ) : (
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="grid">
+                        <thead><tr><th>Item</th><th>Price</th><th>Stock</th><th>Freshness</th></tr></thead>
+                        <tbody>
+                          {items.map((it) => (
+                            <tr key={it.id}>
+                              <td>{it.name}</td>
+                              <td>{fmt(it.unitPriceCents, it.currency)} / {it.unit}</td>
+                              <td>{it.availability.replace("_", " ")}{it.quantityAvailable !== undefined ? ` (${it.quantityAvailable})` : ""}</td>
+                              <td><span className="hint">{new Date(it.inventoryUpdatedAt).toLocaleString()}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "search" && (
+        <div className="cols">
+          <div className="panel panel-pad">
+            <div className="panel-head"><h2>Run a search</h2></div>
+            <div className="field"><label>what an agent is looking for</label><input value={sQuery} onChange={(e) => setSQuery(e.target.value)} placeholder="cement 50kg" /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>quantity</label><input className="mono" value={sQty} onChange={(e) => setSQty(e.target.value)} /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>near (lat, lng, radius km)</label>
+              <div className="filters">
+                <input className="mono" value={sLat} onChange={(e) => setSLat(e.target.value)} />
+                <input className="mono" value={sLng} onChange={(e) => setSLng(e.target.value)} />
+                <input className="mono" value={sRadius} onChange={(e) => setSRadius(e.target.value)} />
+              </div>
+            </div>
+            <div className="field" style={{ marginTop: 12 }}><label>max budget (optional)</label><input className="mono" value={sBudget} onChange={(e) => setSBudget(e.target.value)} placeholder="e.g. 60000" /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>max lead time, days (optional)</label><input className="mono" value={sLeadDays} onChange={(e) => setSLeadDays(e.target.value)} /></div>
+            <button className="btn btn-green" style={{ marginTop: 16 }} onClick={runSearch} disabled={sBusy}>{sBusy ? "Searching…" : "Search"}</button>
+          </div>
+
+          <div className="panel panel-pad">
+            <div className="panel-head"><h2>What an agent would see</h2></div>
+            {!sSearched ? (
+              <div className="hint">Run a search to see ranked offers, exactly as `find_offers` returns them over MCP.</div>
+            ) : sOffers.length === 0 ? (
+              <div className="empty-box" style={{ border: "none", padding: "30px 16px" }}>
+                <div className="empty-t">No offers matched</div>
+                <div className="empty-s">See the exclusion reasons below — a search that finds nothing always says why.</div>
+              </div>
+            ) : (
+              <div className="feed">
+                {sOffers.map((o, i) => (
+                  <div className="feed-row" key={`${o.merchant.id}-${o.item.id}`}>
+                    <div className={`feed-ico ok`}>{i + 1}</div>
+                    <div>
+                      <div className="feed-main">{o.merchant.name} — {o.item.name}</div>
+                      <div className="feed-meta">
+                        <span className={`pill ${FRESHNESS_PILL[o.freshness]}`}>{o.freshness}</span>
+                        {" · "}{o.leadTimeDays === 0 ? "same day" : `${o.leadTimeDays}d lead`}
+                        {o.distanceKm !== undefined ? ` · ${o.distanceKm}km` : ""}
+                        {o.matchReasons.length > 0 ? ` · ${o.matchReasons.join(", ")}` : ""}
+                      </div>
+                    </div>
+                    <div className="feed-amt">{fmt(o.totalCents, o.currency)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {sSearched && sExcluded.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div className="hint">Excluded ({sExcluded.length}):</div>
+                {sExcluded.map((e, i) => <div key={i} className="hint" style={{ marginTop: 4 }}>– {e.reason}</div>)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="modal-back on" onClick={(e) => { if (e.target === e.currentTarget) setShowAdd(false); }}>
+          <div className="modal">
+            <h3>Add a merchant</h3>
+            <div className="hint" style={{ margin: "6px 0 16px" }}>Stays invisible to agents until you verify its KYB.</div>
+            <div className="field"><label>business name</label><input value={fName} onChange={(e) => setFName(e.target.value)} /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>merchant category code</label><input className="mono" value={fMcc} onChange={(e) => setFMcc(e.target.value)} placeholder="5211 = hardware" /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>address</label><input value={fAddr} onChange={(e) => setFAddr(e.target.value)} placeholder="street" /></div>
+            <div className="filters" style={{ marginTop: 12 }}>
+              <input value={fCity} onChange={(e) => setFCity(e.target.value)} placeholder="city" />
+              <input value={fProvince} onChange={(e) => setFProvince(e.target.value)} placeholder="province" />
+            </div>
+            <div className="filters" style={{ marginTop: 12 }}>
+              <input className="mono" value={fLat} onChange={(e) => setFLat(e.target.value)} placeholder="lat" />
+              <input className="mono" value={fLng} onChange={(e) => setFLng(e.target.value)} placeholder="lng" />
+              <input className="mono" value={fRadius} onChange={(e) => setFRadius(e.target.value)} placeholder="delivery radius km" />
+            </div>
+            <div className="field" style={{ marginTop: 12 }}><label>registration number</label><input value={fRegNo} onChange={(e) => setFRegNo(e.target.value)} placeholder="CIPC / company registration" /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>contact email</label><input value={fEmail} onChange={(e) => setFEmail(e.target.value)} /></div>
+            <div className="hint" style={{ marginTop: 10 }}>Registration documents are collected and filed outside this console for now — record what was submitted in the KYB note when you verify.</div>
+            <div className="modal-actions"><button className="btn btn-outline" style={{ flex: "0 0 auto" }} onClick={() => setShowAdd(false)}>Cancel</button><button className="btn btn-green" onClick={addMerchant}>Add merchant</button></div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
