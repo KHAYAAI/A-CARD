@@ -16,3 +16,4 @@ export * from "./platform.js";
 export * from "./wallets.js";
 export * from "./merchants.js";
 export * from "./merchantAuth.js";
+export * from "./afp.js";

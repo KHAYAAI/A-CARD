@@ -19,6 +19,9 @@ import {
   type MerchantRole,
   type MerchantSessionContext,
   type MerchantStatus,
+  type AfpLedger,
+  createIntent as createAfpIntent,
+  routeIntent,
 } from "@acard/core";
 import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
@@ -28,6 +31,7 @@ import { InMemoryPlatformService, hashRequestPayload, type PlatformService } fro
 import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.js";
 import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantAuthKitConfig } from "./merchantAuthKit.js";
 import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreConfig } from "./kybDocuments.js";
+import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
 
 /**
  * A-CARD REST API.
@@ -113,6 +117,14 @@ export interface AppConfig {
    * S3 client; a `KybDocumentStore` (tests) passes through.
    */
   kybDocuments?: KybDocumentStoreConfig | KybDocumentStore;
+  /**
+   * AFP — the Agent Financial Platform (optional — omit and /v1/afp/* is
+   * unmounted). A routing engine plus a cross-rail ledger over whatever
+   * `RailAdapter`s are configured; see apps/api/src/rails/. The ledger
+   * itself is required whenever any rails are, since a rail with nowhere
+   * to post its outcome isn't safely usable.
+   */
+  afp?: { ledger: AfpLedger; rails: RailAdapter[] };
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -360,6 +372,16 @@ const searchQuerySchema = z.object({
 
 const portalInviteSchema = z.object({ role: z.enum(["owner", "staff"]).optional() });
 
+const railIdSchema = z.enum(["card", "x402", "stablecoin"]);
+const createIntentSchema = z.object({
+  amount: z.number().int().positive(),
+  currency: currencySchema,
+  purpose: z.string().min(1),
+  counterparty: z.string().min(1),
+  allowed_rails: z.array(railIdSchema).optional(),
+});
+const executeIntentSchema = z.object({ rail: railIdSchema.optional() });
+
 const KYB_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
 const requestUploadSchema = z.object({
   filename: z.string().min(1).max(200),
@@ -375,6 +397,7 @@ export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl, merchants, merchantAuth } = config;
   const merchantAuthKit = config.merchantAuthKit ? asMerchantAuthKitClient(config.merchantAuthKit) : undefined;
   const kybDocuments = config.kybDocuments ? asKybDocumentStore(config.kybDocuments) : undefined;
+  const afp = config.afp;
   const platform = asService(config.platform);
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
@@ -1584,6 +1607,95 @@ export function createApp(config: AppConfig) {
         return c.json({ invite, invite_url: `${base}/v1/merchant-auth/authorize?invite=${encodeURIComponent(token)}` }, 201);
       });
     }
+  }
+
+  // ---- AFP: the Agent Financial Platform -------------------------------------------
+  //
+  // A-CARD decides whether an agent may spend; A-MERCHANT decides where it
+  // can buy; AFP decides how the money actually moves once both have said
+  // yes. See packages/core/src/afp.ts for the routing/ledger design and
+  // apps/api/src/rails/ for what each rail actually does.
+  if (afp) {
+    app.post("/v1/afp/intents", requireRole("member"), async (c) => {
+      const holder = c.get("holder");
+      const body = createIntentSchema.parse(await c.req.json());
+      const intent = createAfpIntent({
+        accountHolderId: holder.id,
+        amount: body.amount,
+        currency: body.currency,
+        purpose: body.purpose,
+        counterparty: body.counterparty,
+        allowedRails: body.allowed_rails,
+      });
+      afp.ledger.recordIntent(intent);
+
+      const quotes = await Promise.all(afp.rails.map(async (rail) => ({ profile: rail.profile, quote: await rail.quote(intent) })));
+      const decision = routeIntent(intent, quotes);
+      return c.json({ intent, decision }, 201);
+    });
+
+    app.post("/v1/afp/intents/:id/execute", requireRole("member"), async (c) => {
+      const holder = c.get("holder");
+      let intent;
+      try {
+        intent = afp.ledger.getIntent(c.req.param("id"));
+      } catch {
+        return c.json({ error: { code: "not_found", message: "intent not found" } }, 404);
+      }
+      // Scoped to the caller's own org — an intent id from another
+      // account's session must 404, not reveal that it exists.
+      if (intent.accountHolderId !== holder.id) {
+        return c.json({ error: { code: "not_found", message: "intent not found" } }, 404);
+      }
+
+      const idempotencyKey = c.req.header("idempotency-key");
+      if (!idempotencyKey) {
+        return c.json(
+          { error: { code: "idempotency_key_required", message: "an Idempotency-Key header is required to execute an AFP intent" } },
+          400,
+        );
+      }
+      // A repeat of a key already executed is a lookup, never a second
+      // attempt — this is the actual double-execution guard, ahead of even
+      // routing running again.
+      const existing = afp.ledger.getByIdempotencyKey(idempotencyKey);
+      if (existing) return c.json({ transaction: existing });
+
+      const body = executeIntentSchema.parse(await c.req.json().catch(() => ({})));
+      const quotes = await Promise.all(afp.rails.map(async (rail) => ({ profile: rail.profile, quote: await rail.quote(intent) })));
+      const decision = routeIntent(intent, quotes);
+      const railId = body.rail ?? decision.chosenRail;
+      const chosen = railId ? afp.rails.find((r) => r.profile.id === railId) : undefined;
+      const wasOffered = railId ? decision.scored.some((s) => s.rail === railId) : false;
+      if (!railId || !chosen || !wasOffered) {
+        return c.json(
+          { error: { code: "no_viable_rail", message: "no configured rail can carry this intent right now" }, rejected: decision.rejected },
+          422,
+        );
+      }
+
+      const tx = afp.ledger.beginExecution(intent, railId, chosen.profile.finality, idempotencyKey);
+      try {
+        const result = await chosen.execute(intent);
+        const completed = afp.ledger.completeExecution(tx.id, result);
+        return c.json({ transaction: completed }, 201);
+      } catch (error) {
+        if (error instanceof RailAmbiguousOutcomeError) {
+          const parked = afp.ledger.markReconciling(tx.id, error.message);
+          return c.json(
+            { transaction: parked, warning: "execution outcome is unknown and needs reconciliation before this can be retried" },
+            202,
+          );
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        const failed = afp.ledger.markFailed(tx.id, message);
+        return c.json({ transaction: failed, error: { code: "execution_failed", message } }, 402);
+      }
+    });
+
+    app.get("/v1/afp/transactions", async (c) => {
+      return c.json({ transactions: afp.ledger.list(c.get("holder").id) });
+    });
   }
 
   // ---- error handling ---------------------------------------------------------------

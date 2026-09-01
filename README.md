@@ -10,8 +10,8 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 | Path | What it is |
 |---|---|
-| `packages/core` | Domain logic: A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
-| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
+| `packages/core` | Domain logic: AFP routing engine + cross-rail ledger (`afp.ts`), A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
+| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), AFP's routing/execution routes and rail adapters (`src/rails/` — card, x402, stablecoin), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
 | `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management, A-MERCHANT operator console (onboarding, KYB, discovery preview) — plus a separate `/merchant` route: the merchant's own portal (WorkOS AuthKit login, catalog, one-tap restate) |
@@ -238,6 +238,77 @@ below) and `DASHBOARD_URL` to enable the portal; without them, merchant
 registration and KYB still work, but a portal invite has nowhere to send the
 merchant, and `/v1/merchant-auth/*` / `/v1/merchant-portal/*` stay unmounted.
 
+## AFP — the Agent Financial Platform
+
+A-CARD decides *whether* an agent may spend. A-MERCHANT decides *where* it
+can buy. AFP decides *how the money actually moves*, once both of those have
+already said yes — routing a payment intent to whichever rail suits it and
+keeping one ledger that stays truthful across rails with completely
+different definitions of "done" (`packages/core/src/afp.ts`;
+`apps/api/src/rails/`).
+
+**Routing is retrieval-then-score**, the same discipline as A-MERCHANT's
+`evaluateOffers`: `routeIntent` takes a quote from every candidate rail and
+scores them deterministically on cost, speed, and finality — proportional
+scoring again, for the exact reason it matters in A-MERCHANT: normalising
+against the result set's own spread would hand a one-cent fee gap the whole
+cost weight, letting a rail with a 120-day reversal window beat an instant
+one on a rounding error.
+
+**Finality is a typed property of the rail, not an afterthought.** A card
+authorization can be charged back for up to 120 days
+(`reversal_window`). A stablecoin transfer is irreversible the moment it
+confirms (`instant`). Conflating those two is exactly how money goes
+missing in a multi-rail ledger, so `AfpLedger` enforces the distinction
+directly: an `instant` transaction is `settled` the moment execution
+returns; a `reversal_window` or `settlement_delay` one is only `posted` — a
+claim, not yet an irrevocable fact — until its own clock elapses
+(`settle()`) or it's clawed back (`reverse()`, refused outright on an
+`instant` rail: that isn't a compensation, it's an unrelated second
+transfer this ledger won't pretend to explain).
+
+**Idempotency is structural, not a header check.** `beginExecution` records
+that execution was *requested*, keyed by the caller's idempotency key,
+*before* any rail is ever called — a repeat request is a lookup, never a
+second write. `completeExecution` replays safely when the result matches
+what's on file, and **refuses outright** when it doesn't: two different
+answers about what happened to the same money is not something this ledger
+will guess between.
+
+**Ambiguous outcomes get a real state, not a guess.** A dropped connection
+after an x402 payment header was already sent, or a Postgres timeout mid-authorization,
+means the money may or may not have moved. Rail adapters signal this
+specifically — `RailAmbiguousOutcomeError` — and the API parks the
+transaction as `reconciling` rather than calling it `failed` (which could
+double-pay on retry) or `settled` (which could believe money moved when it
+didn't). Proven, not asserted: `apps/api/test/afp.test.ts` runs a real HTTP
+server as the x402 counterparty and a real connection-refused failure
+through this exact path.
+
+Three rails ship today, each honestly labeled for what it actually is:
+
+| Rail | What's real | What isn't |
+|---|---|---|
+| **card** | The whole thing — wraps `PlatformService.authorize`, A-CARD's own tested rules engine and ledger hold | — |
+| **x402** | The full HTTP round trip: request → parse the 402 → pick a payment option → retry with a signed `X-PAYMENT` header → confirm 200 (wire shapes follow the x402 v2 draft spec, checked September 2026 — verify against the actual facilitator before production, same caveat `sudo.ts` carries) | The cryptographic signature over the transfer authorization — that needs a real funded wallet and signing key. Injected as an `X402Signer`; the bundled `SANDBOX_SIGNER` only proves the protocol flow |
+| **stablecoin** | The interface (`StablecoinRailClient`) and the ledger's `instant`-finality handling | The transfer itself — `createSandboxStablecoinClient` is deterministic and in-memory, moving no real value. A real implementation needs an actual custody decision (a self-hosted signer, or a provider like Circle or Fireblocks) — out of scope here for the same reason a contracted card issuer is |
+
+`POST /v1/afp/intents` returns a routing decision without moving anything;
+`POST /v1/afp/intents/:id/execute` (requires an `Idempotency-Key` header)
+actually executes; `GET /v1/afp/transactions` lists an org's ledger. All
+three stay unmounted unless `afp: { ledger, rails }` is configured —
+deliberately **not** wired into `apps/api/src/index.ts` by default, unlike
+A-MERCHANT. A-MERCHANT's default wiring is safe because it's read-only
+discovery; AFP moves money, so turning it on is a decision a deployment
+makes explicitly, with rails it has actually chosen to trust.
+
+**Known gap, stated plainly:** `AfpLedger` is in-memory only — there is no
+Postgres adapter yet, the same place A-MERCHANT's directory was before it
+got one. The interface boundary (`RailAdapter`, the ledger's own method
+surface) is deliberately built to make that adapter a follow-on task, not a
+redesign, the same way `apps/api/src/merchant/postgres.ts` followed
+`MerchantDirectory` without changing its shape.
+
 ## How an authorization is decided
 
 1. Merchant charge hits the issuer; the issuer calls `POST /webhooks/issuer` with an HMAC-signed `authorization.request` (Stripe-style `t=…,v1=…` header, timing-safe verify, replay-window check).
@@ -265,6 +336,7 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 - **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
 - **A-MERCHANT's write side.** Orders, payment acceptance, settlement, disputes and refunds. Deliberately deferred: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money, which is a licensing and partner-bank question rather than a schema. The read side — now including merchant-run onboarding and catalog upkeep through the portal — ships first because it tests the assumption that can actually kill the thesis: whether merchants keep a catalog current.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
+- **AFP's real rail settlement (x402 signing, stablecoin custody) and its Postgres adapter.** The routing engine and cross-rail ledger are real and tested; the card rail is fully real (it's A-CARD's own authorization path). x402 and stablecoin are real protocol/interface implementations with sandboxed execution — genuinely useful for proving the ledger's finality and reconciliation logic, not yet safe to carry real value. Turning them real needs the same kind of decision a contracted issuer needs: a signing key with real funds behind it for x402, a custody provider (or self-hosted signer) for stablecoin. The ledger itself is in-memory only, same gap A-MERCHANT's directory had before its own Postgres adapter.
 
 ## Scripts
 
