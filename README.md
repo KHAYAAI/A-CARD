@@ -10,9 +10,9 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 | Path | What it is |
 |---|---|
-| `packages/core` | Domain logic: double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
-| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
-| `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet` |
+| `packages/core` | Domain logic: A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
+| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and agent discovery, the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
+| `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
 | `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management |
 | `infra/cdk` | AWS CDK stack: VPC, RDS Postgres, ALB, three Fargate services — `npx cdk deploy` and you have a live URL |
@@ -117,6 +117,57 @@ npx cdk deploy --parameters IssuerWebhookSecret="$(openssl rand -hex 32)"
 
 10–15 minutes later you have a live URL (dashboard, API, and MCP server, all behind one ALB, path-routed) backed by a real Postgres instance. Full details, cost tradeoffs, and the production-hardening checklist are in `infra/cdk/README.md`.
 
+## A-MERCHANT (supply side, read only)
+
+A-CARD answers *what may this agent spend?* A-MERCHANT answers *where can it
+buy?* — a directory of real merchants an agent can search by keyword, distance,
+quantity, budget, and delivery deadline.
+
+**This is the read side only, on purpose.** There are no orders, no payment
+acceptance, and no settlement. An agent discovers an offer here and then pays
+for it with an ordinary A-CARD card through the existing flow, so nothing in
+this layer holds a merchant's money — which is what keeps it clear of funds
+custody, and out of PCI scope. Accepting and remitting on a merchant's behalf
+needs a partner PSP or sponsor arrangement, not another table.
+
+```bash
+# what an agent asks
+GET /v1/merchants/search?q=cement&quantity=500&lat=-26.2041&lng=28.0473 \
+    &radius_km=15&max_lead_time_days=1&max_total_cents=6000000
+```
+
+Two things about the design are worth knowing before extending it:
+
+- **Inventory freshness is a first-class field.** Every catalog item records
+  when its stock was last *confirmed* — not when the row was last written, so
+  editing a price does not make a stock count fresh. Every offer reports that
+  age and its `freshness` (`fresh` ≤24h, `aging` ≤7d, `stale` beyond), stale
+  offers are ranked down, and an agent can refuse them outright with
+  `max_inventory_age_hours`. The real risk to this product was never the API;
+  it is a hardware store whose stock count is somebody's memory. Bad catalog
+  data cannot be fixed in code, but it can be measured and surfaced —
+  `GET /v1/merchants/:id/health` is the number the field team is measured on.
+- **Exclusions are reported, not swallowed.** A search that finds nothing says
+  why: `"3-day lead time, 1 requested"`, `"only 120 bag available, 500
+  requested"`, `"merchant is pending_kyb"` — the same discipline as an A-CARD
+  decline carrying its real reason.
+
+Merchants are invisible to agents until a human records a KYB decision against
+their name (`POST /v1/merchants/:id/kyb`), and the agent-facing view never
+carries the KYB pack — an agent learns that a merchant is verified, never the
+registration number behind it. Discovery is scoped to the authenticated caller,
+so a merchant's allow-list is enforced against who is really asking.
+
+Pass a card's `allowed_merchant_categories` as `categories` and discovery only
+returns what that card can actually pay for.
+
+Directory writes are operator actions in this first cut — A-CARD's own team
+onboards merchants and records KYB outcomes. A merchant-owned login and
+self-service console arrive with the write side. The directory lives on the
+in-memory `Platform` and is covered by snapshot persistence; the Postgres
+multi-writer path has no directory adapter yet, so the routes stay unmounted
+there rather than giving each API task its own catalog.
+
 ## How an authorization is decided
 
 1. Merchant charge hits the issuer; the issuer calls `POST /webhooks/issuer` with an HMAC-signed `authorization.request` (Stripe-style `t=…,v1=…` header, timing-safe verify, replay-window check).
@@ -142,6 +193,7 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 
 - **Fraud ML.** The rules engine carries hot-path decisions today, which is the correct sequencing — ML scoring is a post-launch layer.
 - **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
+- **A-MERCHANT's write side.** Orders, payment acceptance, settlement, disputes and refunds. Deliberately deferred: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money, which is a licensing and partner-bank question rather than a schema. The read side ships first because it tests the assumption that can actually kill the thesis — whether merchants keep a catalog current.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
 
 ## Scripts

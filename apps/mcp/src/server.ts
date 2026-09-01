@@ -189,5 +189,73 @@ export function createMcpServer(client: AcardClient): McpServer {
     },
   );
 
+  server.registerTool(
+    "find_offers",
+    {
+      title: "Find something to buy",
+      description:
+        "Search A-MERCHANT for real, verified merchants that can supply what you need — by keyword, distance, quantity, budget and delivery deadline. Returns ranked offers with a total price and the reason each ranked where it did, plus why other candidates were excluded. Every offer reports how recently the merchant confirmed its stock: prefer fresh inventory, and treat a stale offer as needing confirmation before you commit. Discovery only — pay for the chosen offer with pay_checkout.",
+      inputSchema: {
+        query: z.string().optional().describe("What you're looking for, e.g. 'cement 50kg'"),
+        merchant_categories: z
+          .array(z.string())
+          .optional()
+          .describe("MCC allow-list — pass the card's allowed_merchant_categories to only find what it can actually pay for"),
+        lat: z.number().optional().describe("Latitude to search around"),
+        lng: z.number().optional().describe("Longitude to search around"),
+        radius_km: z.number().positive().optional().describe("Search radius in km (default 25)"),
+        quantity: z.number().int().positive().optional().describe("Units needed; drives total price and the stock check"),
+        max_total_cents: z.number().int().positive().optional().describe("Budget ceiling for the whole line, in cents"),
+        max_lead_time_days: z.number().int().nonnegative().optional().describe("0 = needed today"),
+        max_inventory_age_hours: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Reject merchants who have not confirmed stock this recently"),
+        currency: z.enum(["ZAR", "USD", "NGN", "KES"]).optional(),
+        limit: z.number().int().positive().max(100).optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args) => {
+      try {
+        return ok(
+          await client.searchMerchants({
+            q: args.query,
+            categories: args.merchant_categories?.join(","),
+            lat: args.lat,
+            lng: args.lng,
+            radius_km: args.radius_km,
+            quantity: args.quantity,
+            max_total_cents: args.max_total_cents,
+            max_lead_time_days: args.max_lead_time_days,
+            max_inventory_age_hours: args.max_inventory_age_hours,
+            currency: args.currency,
+            limit: args.limit,
+          }),
+        );
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_merchant",
+    {
+      title: "Get merchant",
+      description: "Fetch one merchant's profile and full catalog, including how recently each item's stock was confirmed.",
+      inputSchema: { merchant_id: z.string() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ merchant_id }) => {
+      try {
+        return ok(await client.getMerchant(merchant_id));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
   return server;
 }

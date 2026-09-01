@@ -9,12 +9,14 @@ import {
   signWebhook,
   SUBSCRIPTION_TIERS,
   verifyWebhook,
+  publicMerchant,
   type AccountHolder,
   type ApiKey,
   type Currency,
   type PublicUser,
   type Role,
   type SubscriptionTier,
+  type MerchantDirectory,
 } from "@acard/core";
 import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
@@ -75,6 +77,15 @@ export interface AppConfig {
    * reference before this goes live with real money.
    */
   sudo?: SudoConfig | IssuerCardClient;
+  /**
+   * A-MERCHANT directory (optional — omit and no `/v1/merchants/*` route is
+   * mounted at all). This is the supply-side read side: merchant profiles,
+   * catalogs, inventory state, and agent discovery. It deliberately has no
+   * order, payment-acceptance, or settlement surface — an agent discovers
+   * here and then pays with an ordinary A-CARD card through the existing
+   * flow, which is what keeps this layer clear of funds custody.
+   */
+  merchants?: MerchantDirectory;
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -223,8 +234,86 @@ const issuerEventSchema = z.object({
   data: z.record(z.unknown()),
 });
 
+
+// ---- A-MERCHANT ------------------------------------------------------------
+
+const addressSchema = z.object({
+  addressLine: z.string().min(1),
+  city: z.string().min(1),
+  province: z.string().min(1),
+  country: z.string().min(1).default("ZA"),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+const agentAccessSchema = z.enum(["open", "allowlist"]);
+const availabilitySchema = z.enum(["in_stock", "low_stock", "out_of_stock", "made_to_order"]);
+
+const registerMerchantSchema = z.object({
+  name: z.string().min(1),
+  trading_name: z.string().optional(),
+  merchant_category_code: z.string().min(3),
+  address: addressSchema,
+  service_radius_km: z.number().min(0).optional(),
+  currency: currencySchema.optional(),
+  agent_access: agentAccessSchema.optional(),
+  allowed_account_holder_ids: z.array(z.string()).optional(),
+  kyb: z.object({
+    registration_number: z.string().min(1),
+    vat_number: z.string().optional(),
+    contact_email: z.string().email(),
+    contact_phone: z.string().optional(),
+  }),
+});
+
+const kybDecisionSchema = z.object({
+  status: z.enum(["pending_kyb", "verified", "suspended"]),
+  note: z.string().optional(),
+});
+
+const updateMerchantSchema = z.object({
+  name: z.string().min(1).optional(),
+  trading_name: z.string().optional(),
+  address: addressSchema.optional(),
+  service_radius_km: z.number().min(0).optional(),
+  agent_access: agentAccessSchema.optional(),
+  allowed_account_holder_ids: z.array(z.string()).optional(),
+  merchant_category_code: z.string().min(3).optional(),
+});
+
+const upsertItemSchema = z.object({
+  sku: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  unit: z.string().optional(),
+  unit_price_cents: z.number().int().nonnegative(),
+  currency: currencySchema.optional(),
+  availability: availabilitySchema.optional(),
+  quantity_available: z.number().int().nonnegative().optional(),
+  lead_time_days: z.number().int().nonnegative().optional(),
+});
+
+const restateSchema = z.object({
+  availability: availabilitySchema,
+  quantity_available: z.number().int().nonnegative().optional(),
+});
+
+const searchQuerySchema = z.object({
+  text: z.string().optional(),
+  merchant_category_codes: z.array(z.string()).optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  radius_km: z.number().positive().optional(),
+  quantity: z.number().int().positive().optional(),
+  max_total_cents: z.number().int().positive().optional(),
+  max_lead_time_days: z.number().int().nonnegative().optional(),
+  max_inventory_age_hours: z.number().positive().optional(),
+  currency: currencySchema.optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+
 export function createApp(config: AppConfig) {
-  const { issuerWebhookSecret, onMutation, dashboardUrl } = config;
+  const { issuerWebhookSecret, onMutation, dashboardUrl, merchants } = config;
   const platform = asService(config.platform);
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
@@ -1034,6 +1123,161 @@ export function createApp(config: AppConfig) {
       wallet: await platform.walletBalance(holder.id, card.currency),
     });
   });
+
+  // ---- A-MERCHANT: supply-side directory (read side) --------------------------------
+
+  // Mounted only when a directory is configured. The whole surface is
+  // deliberately payment-free: discovery answers "what can I buy, from whom,
+  // at what price, by when", and the agent then pays with an ordinary A-CARD
+  // card through the existing flow. No orders, no acceptance, no settlement —
+  // so nothing here holds a merchant's money or touches PAN data.
+  if (merchants) {
+    // Directory writes are operator actions in this first cut: A-CARD's own
+    // team onboards merchants and records KYB outcomes, gated on the tenant
+    // admin role. A merchant-owned identity and self-service console arrive
+    // with the write side; until then there is no merchant login to model.
+    app.post("/v1/merchants", requireRole("admin"), async (c) => {
+      const body = registerMerchantSchema.parse(await c.req.json());
+      const merchant = merchants.register({
+        name: body.name,
+        tradingName: body.trading_name,
+        merchantCategoryCode: body.merchant_category_code,
+        address: body.address,
+        serviceRadiusKm: body.service_radius_km,
+        currency: body.currency,
+        agentAccess: body.agent_access,
+        allowedAccountHolderIds: body.allowed_account_holder_ids,
+        kyb: {
+          registrationNumber: body.kyb.registration_number,
+          vatNumber: body.kyb.vat_number,
+          contactEmail: body.kyb.contact_email,
+          contactPhone: body.kyb.contact_phone,
+        },
+      });
+      // Returns the full record, KYB included: this is the operator's own view.
+      return c.json({ merchant }, 201);
+    });
+
+    app.post("/v1/merchants/:id/kyb", requireRole("admin"), async (c) => {
+      const body = kybDecisionSchema.parse(await c.req.json());
+      const reviewer = c.get("sessionUser")?.email ?? c.get("holder").email;
+      const merchant = merchants.setStatus(c.req.param("id"), body.status, reviewer, body.note);
+      return c.json({ merchant });
+    });
+
+    app.patch("/v1/merchants/:id", requireRole("admin"), async (c) => {
+      const body = updateMerchantSchema.parse(await c.req.json());
+      const merchant = merchants.updateProfile(c.req.param("id"), {
+        name: body.name,
+        tradingName: body.trading_name,
+        address: body.address,
+        serviceRadiusKm: body.service_radius_km,
+        agentAccess: body.agent_access,
+        allowedAccountHolderIds: body.allowed_account_holder_ids,
+        merchantCategoryCode: body.merchant_category_code,
+      });
+      return c.json({ merchant });
+    });
+
+    app.put("/v1/merchants/:id/items", requireRole("member"), async (c) => {
+      const body = upsertItemSchema.parse(await c.req.json());
+      const item = merchants.upsertItem(c.req.param("id"), {
+        sku: body.sku,
+        name: body.name,
+        description: body.description,
+        unit: body.unit,
+        unitPriceCents: body.unit_price_cents,
+        currency: body.currency,
+        availability: body.availability,
+        quantityAvailable: body.quantity_available,
+        leadTimeDays: body.lead_time_days,
+      });
+      return c.json({ item });
+    });
+
+    // The highest-value write in A-MERCHANT and the cheapest to call: a
+    // merchant restating stock. Everything discovery promises depends on this
+    // happening often, so it is a single small request with no other effects.
+    app.post("/v1/merchants/:id/items/:itemId/restate", requireRole("member"), async (c) => {
+      const body = restateSchema.parse(await c.req.json());
+      const item = merchants.getItem(c.req.param("itemId"));
+      if (item.merchantId !== c.req.param("id")) {
+        return c.json({ error: { code: "not_found", message: "item does not belong to this merchant" } }, 404);
+      }
+      return c.json({
+        item: merchants.restate(item.id, {
+          availability: body.availability,
+          quantityAvailable: body.quantity_available,
+        }),
+      });
+    });
+
+    app.delete("/v1/merchants/:id/items/:itemId", requireRole("member"), async (c) => {
+      const item = merchants.getItem(c.req.param("itemId"));
+      if (item.merchantId !== c.req.param("id")) {
+        return c.json({ error: { code: "not_found", message: "item does not belong to this merchant" } }, 404);
+      }
+      merchants.removeItem(item.id);
+      return c.json({ deleted: true });
+    });
+
+    // How current this merchant's catalog is. Shown to the merchant, and the
+    // number the field team is actually measured on.
+    app.get("/v1/merchants/:id/health", async (c) => {
+      const merchant = merchants.get(c.req.param("id"));
+      return c.json({ merchant_id: merchant.id, ...merchants.catalogHealth(merchant.id) });
+    });
+
+    // ---- agent-facing reads --------------------------------------------------------
+
+    app.get("/v1/merchants/search", async (c) => {
+      const q = c.req.query();
+      const query = searchQuerySchema.parse({
+        text: q.q,
+        merchant_category_codes: q.categories?.split(",").filter(Boolean),
+        lat: q.lat === undefined ? undefined : Number(q.lat),
+        lng: q.lng === undefined ? undefined : Number(q.lng),
+        radius_km: q.radius_km === undefined ? undefined : Number(q.radius_km),
+        quantity: q.quantity === undefined ? undefined : Number(q.quantity),
+        max_total_cents: q.max_total_cents === undefined ? undefined : Number(q.max_total_cents),
+        max_lead_time_days: q.max_lead_time_days === undefined ? undefined : Number(q.max_lead_time_days),
+        max_inventory_age_hours: q.max_inventory_age_hours === undefined ? undefined : Number(q.max_inventory_age_hours),
+        currency: q.currency,
+        limit: q.limit === undefined ? undefined : Number(q.limit),
+      });
+      const near =
+        query.lat !== undefined && query.lng !== undefined
+          ? { lat: query.lat, lng: query.lng, radiusKm: query.radius_km ?? 25 }
+          : undefined;
+
+      const result = merchants.search({
+        text: query.text,
+        merchantCategoryCodes: query.merchant_category_codes,
+        near,
+        quantity: query.quantity,
+        maxTotalCents: query.max_total_cents,
+        maxLeadTimeDays: query.max_lead_time_days,
+        maxInventoryAgeHours: query.max_inventory_age_hours,
+        currency: query.currency,
+        // Scoped to the caller's own org, so a merchant's allow-list is
+        // enforced against who is really asking, not a client-supplied id.
+        requestedBy: c.get("holder").id,
+        limit: query.limit,
+      });
+      return c.json(result);
+    });
+
+    app.get("/v1/merchants/:id", async (c) => {
+      const merchant = merchants.get(c.req.param("id"));
+      // Agents get the public view: verified or not, never the KYB pack behind it.
+      return c.json({ merchant: publicMerchant(merchant), items: merchants.listItems(merchant.id) });
+    });
+
+    app.get("/v1/merchants", async (c) => {
+      const status = c.req.query("status") as ReturnType<typeof merchants.list>[number]["status"] | undefined;
+      return c.json({ merchants: merchants.list(status ? { status } : {}).map(publicMerchant) });
+    });
+  }
 
   // ---- error handling ---------------------------------------------------------------
 

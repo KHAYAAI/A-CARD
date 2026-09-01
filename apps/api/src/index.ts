@@ -52,11 +52,26 @@ if (!databaseUrl) {
 
 if (slackWebhookUrl) attachSlackNotifications(platform, slackWebhookUrl, dashboardUrl);
 
+/**
+ * A-MERCHANT's directory lives on the in-memory `Platform`, so it is covered
+ * by the same snapshot persistence as everything else on that path. The
+ * Postgres multi-writer path has no directory adapter yet: mounting a
+ * process-local one there would give every API task its own catalog and
+ * silently return different search results per request, which is worse than
+ * not offering the routes at all. So on that path the routes stay unmounted
+ * and say why.
+ */
+const merchants = platform instanceof InMemoryPlatformService ? platform.platform.merchants : undefined;
+if (!merchants) {
+  console.log("A-CARD API: A-MERCHANT routes disabled — the directory has no Postgres adapter yet (use ACARD_PERSISTENCE=snapshot)");
+}
+
 const app = createApp({
   platform,
   issuerWebhookSecret,
   dashboardUrl,
   onMutation,
+  merchants,
   // Real ZAR wallet funding AND subscription billing both route through
   // PayFast (see app.ts's /webhooks/payfast). Omit to keep /v1/wallet/fund's
   // instant sandbox credit and unmetered billing.

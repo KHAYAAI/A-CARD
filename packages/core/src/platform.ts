@@ -24,6 +24,7 @@ import type { Currency } from "./money.js";
 import { evaluateRules, type AuthorizationContext } from "./rules.js";
 import { applyCardCap, currentBillingPeriod, SUBSCRIPTION_TIERS, type SubscriptionTier } from "./billing.js";
 import { WalletLinkService, type Chain, type ExternalWalletConnector, type LinkedWallet } from "./wallets.js";
+import { MerchantDirectory, type SerializedMerchantDirectory } from "./merchants.js";
 
 /**
  * The platform service: everything the API, MCP server, and CLI need, backed
@@ -104,6 +105,7 @@ export interface PlatformSnapshot {
   auth?: { users: User[]; memberships: Membership[]; sessions: Session[] };
   enterprise?: { departments: Department[]; policies: Array<[string, OrgPolicy]> };
   linkedWallets?: LinkedWallet[];
+  merchants?: SerializedMerchantDirectory;
   accountHolders: AccountHolder[];
   cards: Card[];
   transactions: CardTransaction[];
@@ -122,6 +124,8 @@ export class Platform {
   readonly enterprise = new EnterpriseService();
   readonly idempotency = new IdempotencyStore();
   readonly linkedWallets = new WalletLinkService();
+  /** A-MERCHANT: the supply-side directory. Read side only — no orders, no settlement. */
+  readonly merchants = new MerchantDirectory();
 
   private readonly accountHolders = new Map<string, AccountHolder>();
   private readonly cards = new Map<string, Card>();
@@ -150,6 +154,7 @@ export class Platform {
       auth: this.auth.serialize(),
       enterprise: this.enterprise.serialize(),
       linkedWallets: this.linkedWallets.serialize(),
+      merchants: this.merchants.serialize(),
       accountHolders: [...this.accountHolders.values()],
       cards: [...this.cards.values()],
       transactions: [...this.transactions.values()],
@@ -169,6 +174,10 @@ export class Platform {
     if (snapshot.enterprise) (platform as { enterprise: EnterpriseService }).enterprise = EnterpriseService.hydrate(snapshot.enterprise);
     if (snapshot.linkedWallets) {
       (platform as { linkedWallets: WalletLinkService }).linkedWallets = WalletLinkService.hydrate(snapshot.linkedWallets);
+    }
+    // Back-compat: snapshots taken before A-MERCHANT have no directory.
+    if (snapshot.merchants) {
+      (platform as { merchants: MerchantDirectory }).merchants = MerchantDirectory.hydrate(snapshot.merchants);
     }
     for (const holder of snapshot.accountHolders) {
       // Back-compat: snapshots from before enterprise default to personal.

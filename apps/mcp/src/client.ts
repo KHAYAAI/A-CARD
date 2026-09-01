@@ -88,6 +88,20 @@ export class AcardClient {
     return this.request<{ approval: any }>(`/v1/approvals/${id}/${decision}`, { method: "POST" });
   }
 
+  searchMerchants(params: Record<string, string | number | undefined>) {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") qs.set(key, String(value));
+    }
+    return this.request<{ offers: any[]; considered: number; excluded: any[] }>(
+      `/v1/merchants/search?${qs.toString()}`,
+    );
+  }
+
+  getMerchant(id: string) {
+    return this.request<{ merchant: any; items: any[] }>(`/v1/merchants/${id}`);
+  }
+
   simulatePurchase(input: Record<string, unknown>) {
     return this.request<{
       authorization_id: string;
