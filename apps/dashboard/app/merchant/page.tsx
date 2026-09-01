@@ -26,6 +26,7 @@ interface Item {
   leadTimeDays: number; inventoryUpdatedAt: string;
 }
 interface Health { items: number; fresh: number; aging: number; stale: number; medianInventoryAgeHours: number }
+interface TeamInvite { id: string; role: "owner" | "staff"; issuedBy: string; expiresAt: string; createdAt: string }
 
 const SYM: Record<string, string> = { ZAR: "R", USD: "$", NGN: "₦", KES: "KSh" };
 const fmt = (cents: number, ccy: string) => `${SYM[ccy] ?? ccy} ${(cents / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2 })}`;
@@ -49,6 +50,9 @@ export default function MerchantPortal() {
   const [toast, setToast] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [busyItem, setBusyItem] = useState("");
+  const [showTeam, setShowTeam] = useState(false);
+  const [team, setTeam] = useState<{ users: MerchantUser[]; invites: TeamInvite[] } | null>(null);
+  const [teamInviteUrl, setTeamInviteUrl] = useState("");
 
   // add-item form
   const [nSku, setNSku] = useState("");
@@ -158,6 +162,26 @@ export default function MerchantPortal() {
     }
   };
 
+  const loadTeam = async () => {
+    try {
+      const res = await call("/v1/merchant-portal/team");
+      setTeam({ users: res.users ?? [], invites: res.invites ?? [] });
+      setShowTeam(true);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not load your team.");
+    }
+  };
+
+  const inviteStaff = async () => {
+    try {
+      const res = await call("/v1/merchant-portal/team/invites", { method: "POST", body: JSON.stringify({ role: "staff" }) });
+      setTeamInviteUrl(res.invite_url);
+      loadTeam();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not create an invite.");
+    }
+  };
+
   const logout = async () => {
     try { await call("/v1/merchant-portal/logout", { method: "POST" }); } catch { /* best effort */ }
     localStorage.removeItem(TOKEN_KEY);
@@ -255,6 +279,13 @@ export default function MerchantPortal() {
           </div>
         )}
 
+        {user?.role === "owner" && (
+          <div className="panel panel-pad" style={{ marginTop: 20 }}>
+            <div className="panel-head"><h2>Team</h2><button className="btn btn-outline" onClick={loadTeam}>Manage</button></div>
+            <div className="hint">Invite whoever else needs to update stock — a shop assistant doesn&apos;t need you to do it for them.</div>
+          </div>
+        )}
+
         <button className="btn btn-outline" style={{ marginTop: 24 }} onClick={logout}>Sign out</button>
       </div>
 
@@ -277,7 +308,54 @@ export default function MerchantPortal() {
         </div>
       )}
 
+      {showTeam && (
+        <div className="modal-back on" onClick={(e) => { if (e.target === e.currentTarget) { setShowTeam(false); setTeamInviteUrl(""); } }}>
+          <div className="modal">
+            <h3>Team</h3>
+            <div className="hint" style={{ margin: "6px 0 16px" }}>Everyone who can sign in and update your catalog.</div>
+            {team && team.users.length > 0 && (
+              <div className="stack" style={{ marginBottom: team.invites.length > 0 ? 16 : 0 }}>
+                {team.users.map((u) => (
+                  <div key={u.id} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>{u.name} <span className="hint">{u.email}</span></span>
+                    <span className="pill active">{u.role}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {team && team.invites.length > 0 && (
+              <div className="stack">
+                {team.invites.map((i) => (
+                  <div key={i.id} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span className="hint">invited by {i.issuedBy}</span>
+                    <span className="pill pending">pending</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn btn-green" style={{ marginTop: 16 }} onClick={inviteStaff}>Invite a colleague</button>
+            {teamInviteUrl && (
+              <div className="cmd" style={{ marginTop: 10 }}>
+                <span>{teamInviteUrl}</span>
+                <button className="cmd-copy" onClick={() => { navigator.clipboard?.writeText(teamInviteUrl).catch(() => {}); flash("Copied."); }}><Icon2 /></button>
+              </div>
+            )}
+            <div className="modal-actions"><button className="btn btn-outline" style={{ flex: "0 0 auto" }} onClick={() => { setShowTeam(false); setTeamInviteUrl(""); }}>Close</button></div>
+          </div>
+        </div>
+      )}
+
       {toast && <div id="toast" className="on">{toast}</div>}
     </div>
+  );
+}
+
+/** Tiny inline copy icon — this page deliberately carries no icon system of its own. */
+function Icon2() {
+  return (
+    <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="11.5" height="11.5" rx="2.2" />
+      <path d="M5 15a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2" />
+    </svg>
   );
 }

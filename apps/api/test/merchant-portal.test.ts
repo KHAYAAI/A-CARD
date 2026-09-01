@@ -261,6 +261,65 @@ describe("merchant portal session and isolation", () => {
   });
 });
 
+describe("merchant portal staff invites", () => {
+  it("lets an owner invite staff, and the invite carries the owner's own email as issuer", async () => {
+    const merchantId = await registerVerifiedMerchant();
+    const ownerToken = await onboardMerchantOwner(merchantId, { workosUserId: "wu_owner", email: "owner@kasi.co.za", name: "Thabo" });
+
+    const inviteRes = await portal("/v1/merchant-portal/team/invites", ownerToken, {
+      method: "POST",
+      body: JSON.stringify({ role: "staff" }),
+    });
+    expect(inviteRes.status).toBe(201);
+    const invite = await json(inviteRes);
+    expect(invite.invite.role).toBe("staff");
+    expect(invite.invite.issuedBy).toBe("owner@kasi.co.za");
+
+    const staffCode = authKit.signIn({ workosUserId: "wu_staff", email: "assistant@kasi.co.za", name: "Naledi" });
+    const inviteToken = new URL(invite.invite_url).searchParams.get("invite")!;
+    const callbackRes = await app.request(`/v1/merchant-auth/callback?code=${staffCode}&state=${encodeURIComponent(inviteToken)}`, {
+      redirect: "manual",
+    });
+    const staffToken = new URL(callbackRes.headers.get("location")!).searchParams.get("portal_token")!;
+
+    const staffMe = await json(await portal("/v1/merchant-portal/me", staffToken));
+    expect(staffMe.user.role).toBe("staff");
+    expect(staffMe.merchant.id).toBe(merchantId);
+
+    // Staff can do the one job that matters...
+    const items = await json(await portal("/v1/merchant-portal/items", staffToken));
+    expect(items.items).toEqual([]);
+  });
+
+  it("staff cannot invite other staff, or see the team roster", async () => {
+    const merchantId = await registerVerifiedMerchant();
+    const ownerToken = await onboardMerchantOwner(merchantId, { workosUserId: "wu_owner2", email: "owner2@kasi.co.za", name: "Thabo" });
+    const staffInvite = await json(
+      await portal("/v1/merchant-portal/team/invites", ownerToken, { method: "POST", body: JSON.stringify({ role: "staff" }) }),
+    );
+    const staffCode = authKit.signIn({ workosUserId: "wu_staff2", email: "assistant2@kasi.co.za", name: "Naledi" });
+    const staffInviteToken = new URL(staffInvite.invite_url).searchParams.get("invite")!;
+    const cb = await app.request(`/v1/merchant-auth/callback?code=${staffCode}&state=${encodeURIComponent(staffInviteToken)}`, {
+      redirect: "manual",
+    });
+    const staffToken = new URL(cb.headers.get("location")!).searchParams.get("portal_token")!;
+
+    expect((await portal("/v1/merchant-portal/team", staffToken)).status).toBe(403);
+    expect((await portal("/v1/merchant-portal/team/invites", staffToken, { method: "POST", body: JSON.stringify({}) })).status).toBe(403);
+  });
+
+  it("an owner sees the roster and any still-pending invites", async () => {
+    const merchantId = await registerVerifiedMerchant();
+    const ownerToken = await onboardMerchantOwner(merchantId, { workosUserId: "wu_owner3", email: "owner3@kasi.co.za", name: "Thabo" });
+    await portal("/v1/merchant-portal/team/invites", ownerToken, { method: "POST", body: JSON.stringify({ role: "staff" }) });
+
+    const team = await json(await portal("/v1/merchant-portal/team", ownerToken));
+    expect(team.users).toHaveLength(1);
+    expect(team.invites).toHaveLength(1);
+    expect(team.invites[0].role).toBe("staff");
+  });
+});
+
 describe("without merchantAuthKit configured", () => {
   it("portal login has nowhere to go, but invite creation still works so the operator flow isn't blocked", async () => {
     const bareForm = new Platform();

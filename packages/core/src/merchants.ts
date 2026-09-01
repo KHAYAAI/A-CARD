@@ -68,6 +68,16 @@ export interface MerchantAddress extends GeoPoint {
   country: string;
 }
 
+/** A single uploaded registration document — the file itself lives in object storage; this is only the reference. */
+export interface KybDocument {
+  /** Storage key (S3 object key in production). Opaque to this module — it never fetches or serves the bytes. */
+  key: string;
+  filename: string;
+  contentType: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
 /** What the merchant submitted for verification. Never exposed to agents. */
 export interface KybRecord {
   registrationNumber: string;
@@ -78,6 +88,7 @@ export interface KybRecord {
   reviewedAt?: string;
   reviewedBy?: string;
   note?: string;
+  documents: KybDocument[];
 }
 
 export interface Merchant {
@@ -238,7 +249,7 @@ export interface RegisterMerchantInput {
   currency?: Currency;
   agentAccess?: AgentAccess;
   allowedAccountHolderIds?: string[];
-  kyb: Omit<KybRecord, "submittedAt" | "reviewedAt" | "reviewedBy">;
+  kyb: Omit<KybRecord, "submittedAt" | "reviewedAt" | "reviewedBy" | "documents">;
 }
 
 export interface UpsertItemInput {
@@ -278,7 +289,7 @@ export class MerchantDirectory {
       currency: input.currency ?? "ZAR",
       // Nothing is discoverable until a human has reviewed the KYB pack.
       status: "pending_kyb",
-      kyb: { ...input.kyb, submittedAt: now },
+      kyb: { ...input.kyb, submittedAt: now, documents: [] },
       agentAccess: input.agentAccess ?? "open",
       allowedAccountHolderIds: input.allowedAccountHolderIds ?? [],
       createdAt: now,
@@ -310,6 +321,25 @@ export class MerchantDirectory {
       ...merchant,
       status,
       kyb: { ...merchant.kyb, reviewedAt: new Date().toISOString(), reviewedBy, note },
+      updatedAt: new Date().toISOString(),
+    };
+    this.merchants.set(id, next);
+    return next;
+  }
+
+  /**
+   * Records that a registration document was uploaded — never the bytes,
+   * only the storage reference and who put it there. A KYB decision can be
+   * made without one (some merchants hand documents over in person), but a
+   * document can never attach itself: `uploadedBy` is required the same way
+   * `setStatus`'s `reviewedBy` is.
+   */
+  attachKybDocument(id: string, doc: Omit<KybDocument, "uploadedAt">): Merchant {
+    const merchant = this.get(id);
+    if (!doc.uploadedBy) throw new DomainError("uploader_required", "a KYB document must record who uploaded it");
+    const next: Merchant = {
+      ...merchant,
+      kyb: { ...merchant.kyb, documents: [...merchant.kyb.documents, { ...doc, uploadedAt: new Date().toISOString() }] },
       updatedAt: new Date().toISOString(),
     };
     this.merchants.set(id, next);
@@ -586,7 +616,11 @@ export class MerchantDirectory {
 
   static hydrate(snapshot: SerializedMerchantDirectory): MerchantDirectory {
     const directory = new MerchantDirectory();
-    for (const merchant of snapshot.merchants) directory.merchants.set(merchant.id, merchant);
+    for (const merchant of snapshot.merchants) {
+      // Back-compat: snapshots taken before document upload have no `documents` array.
+      if (!merchant.kyb.documents) merchant.kyb.documents = [];
+      directory.merchants.set(merchant.id, merchant);
+    }
     for (const item of snapshot.items) directory.items.set(item.id, item);
     return directory;
   }

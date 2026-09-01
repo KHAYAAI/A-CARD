@@ -199,6 +199,11 @@ route deliberately separate from the A-CARD console at `/`, different token,
 no shared state) puts a one-tap in‑stock / low‑stock / out‑of‑stock control
 front and center, ahead of a full catalog editor.
 
+An `owner` can also invite the rest of their team straight from the portal
+(`POST /v1/merchant-portal/team/invites`, `owner`-only — `staff` gets a 403)
+— a shop assistant who just needs to mark something out of stock no longer
+routes through an A-CARD operator every time.
+
 The operator side lives in the main dashboard as a new **Merchants** nav
 item (`admin`-gated): register a merchant, decide KYB with an attributed
 note, generate a portal invite link, and preview exactly what an agent's
@@ -236,7 +241,6 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 - **Fraud ML.** The rules engine carries hot-path decisions today, which is the correct sequencing — ML scoring is a post-launch layer.
 - **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
 - **A-MERCHANT's write side.** Orders, payment acceptance, settlement, disputes and refunds. Deliberately deferred: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money, which is a licensing and partner-bank question rather than a schema. The read side — now including merchant-run onboarding and catalog upkeep through the portal — ships first because it tests the assumption that can actually kill the thesis: whether merchants keep a catalog current.
-- **Merchant staff management.** The portal has an `owner`/`staff` role on `MerchantUser` and invites can be issued as either, but there's no in-portal "invite a colleague" flow yet — an operator issues every invite today. Small addition once a pilot merchant actually asks for it.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
 
 ## Scripts

@@ -16,6 +16,8 @@ const payfastSandbox = process.env.PAYFAST_SANDBOX === "true";
 const slackWebhookUrl = process.env.SLACK_APPROVALS_WEBHOOK_URL;
 const workosApiKey = process.env.WORKOS_API_KEY;
 const workosClientId = process.env.WORKOS_CLIENT_ID;
+const kybDocumentsBucket = process.env.KYB_DOCUMENTS_BUCKET;
+const awsRegion = process.env.AWS_REGION ?? "af-south-1";
 
 /**
  * Persistence modes:
@@ -94,6 +96,11 @@ const app = createApp({
     payfastMerchantId && payfastMerchantKey && payfastPassphrase
       ? { merchantId: payfastMerchantId, merchantKey: payfastMerchantKey, passphrase: payfastPassphrase, sandbox: payfastSandbox }
       : undefined,
+  // KYB registration document upload for the operator console (optional —
+  // omit and merchant onboarding/verification still works, the upload
+  // button just has nowhere to send a file). Bucket permissions come from
+  // the task role in infra/cdk, not credentials in this process.
+  kybDocuments: kybDocumentsBucket ? { bucket: kybDocumentsBucket, region: awsRegion } : undefined,
   // SSO is purely additive to password + MFA login — omit these three and the
   // deployment runs exactly as before, no code path changes. The callback
   // lives on this API service (see infra/cdk: the ALB only routes /v1/* here),

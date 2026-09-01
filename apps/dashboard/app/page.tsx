@@ -952,6 +952,7 @@ interface OfferRow {
   distanceKm?: number; leadTimeDays: number; freshness: "fresh" | "aging" | "stale"; score: number; matchReasons: string[];
 }
 interface ExclusionRow { merchantId: string; itemId?: string; reason: string }
+interface KybDocumentRow { key: string; filename: string; uploadedBy: string; uploadedAt: string; download_url: string }
 
 const MERCHANT_STATUS_PILL: Record<string, string> = { verified: "active", pending_kyb: "pending", suspended: "declined" };
 const FRESHNESS_PILL: Record<string, string> = { fresh: "active", aging: "pending", stale: "declined" };
@@ -967,6 +968,9 @@ function MerchantsPanel({ call, flash }: { call: (path: string, init?: RequestIn
   const [inviteUrl, setInviteUrl] = useState("");
   const [kybNote, setKybNote] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [docs, setDocs] = useState<KybDocumentRow[] | null>(null);
+  const [docsEnabled, setDocsEnabled] = useState(true);
+  const [docUploading, setDocUploading] = useState(false);
 
   // onboarding form
   const [fName, setFName] = useState("");
@@ -1007,6 +1011,23 @@ function MerchantsPanel({ call, flash }: { call: (path: string, init?: RequestIn
 
   useEffect(() => { loadMerchants(); }, [loadMerchants]);
 
+  const loadDocs = useCallback(
+    async (merchantId: string) => {
+      try {
+        const res = await call(`/v1/merchants/${merchantId}/kyb-documents`);
+        setDocs(res.documents ?? []);
+        setDocsEnabled(true);
+      } catch {
+        // Document upload needs a real S3 bucket (see infra/cdk) — not
+        // configured, most likely, in local/dev. Hide the section rather
+        // than treating it as an error the operator needs to act on.
+        setDocs(null);
+        setDocsEnabled(false);
+      }
+    },
+    [call],
+  );
+
   const openMerchant = useCallback(
     async (m: MerchantRow) => {
       setSelected(m);
@@ -1016,12 +1037,38 @@ function MerchantsPanel({ call, flash }: { call: (path: string, init?: RequestIn
         const [detail, h] = await Promise.all([call(`/v1/merchants/${m.id}`), call(`/v1/merchants/${m.id}/health`).catch(() => null)]);
         setItems(detail.items ?? []);
         setHealth(h);
+        loadDocs(m.id);
       } catch (e) {
         flash(e instanceof Error ? e.message : "Could not load merchant.");
       }
     },
-    [call, flash],
+    [call, flash, loadDocs],
   );
+
+  const uploadDoc = async (file: File) => {
+    if (!selected) return;
+    setDocUploading(true);
+    try {
+      const { key, upload_url } = await call(`/v1/merchants/${selected.id}/kyb-documents`, {
+        method: "POST",
+        body: JSON.stringify({ filename: file.name, content_type: file.type }),
+      });
+      // Straight to the bucket — this browser talks to S3 directly with the
+      // presigned URL; the file's bytes never pass through the A-CARD API.
+      const put = await fetch(upload_url, { method: "PUT", headers: { "content-type": file.type }, body: file });
+      if (!put.ok) throw new Error(`upload failed (${put.status})`);
+      await call(`/v1/merchants/${selected.id}/kyb-documents/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ key, filename: file.name, content_type: file.type }),
+      });
+      flash("Document uploaded.");
+      loadDocs(selected.id);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setDocUploading(false);
+    }
+  };
 
   const addMerchant = async () => {
     if (!fName.trim() || !fAddr.trim() || !fCity.trim() || !fRegNo.trim() || !fEmail.trim()) {
@@ -1165,6 +1212,34 @@ function MerchantsPanel({ call, flash }: { call: (path: string, init?: RequestIn
                   </div>
                 )}
 
+                {docsEnabled && (
+                  <div style={{ marginTop: 20 }}>
+                    <div className="panel-head"><h2>Registration documents</h2></div>
+                    {docs && docs.length > 0 ? (
+                      <div className="stack" style={{ marginBottom: 10 }}>
+                        {docs.map((d) => (
+                          <div key={d.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <a href={d.download_url} target="_blank" rel="noreferrer">{d.filename}</a>
+                            <span className="hint">{d.uploadedBy} · {new Date(d.uploadedAt).toLocaleDateString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="hint" style={{ marginBottom: 10 }}>No documents uploaded yet.</div>
+                    )}
+                    <label className="btn btn-outline" style={{ display: "inline-flex", cursor: docUploading ? "wait" : "pointer" }}>
+                      {docUploading ? "Uploading…" : "Upload document"}
+                      <input
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png"
+                        style={{ display: "none" }}
+                        disabled={docUploading}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadDoc(f); e.target.value = ""; }}
+                      />
+                    </label>
+                  </div>
+                )}
+
                 <div style={{ marginTop: 20 }}>
                   <div className="panel-head"><h2>KYB decision</h2></div>
                   <div className="field"><label>note (recorded against your name)</label><input value={kybNote} onChange={(e) => setKybNote(e.target.value)} placeholder="e.g. CIPC docs on file" /></div>
@@ -1289,7 +1364,7 @@ function MerchantsPanel({ call, flash }: { call: (path: string, init?: RequestIn
             </div>
             <div className="field" style={{ marginTop: 12 }}><label>registration number</label><input value={fRegNo} onChange={(e) => setFRegNo(e.target.value)} placeholder="CIPC / company registration" /></div>
             <div className="field" style={{ marginTop: 12 }}><label>contact email</label><input value={fEmail} onChange={(e) => setFEmail(e.target.value)} /></div>
-            <div className="hint" style={{ marginTop: 10 }}>Registration documents are collected and filed outside this console for now — record what was submitted in the KYB note when you verify.</div>
+            <div className="hint" style={{ marginTop: 10 }}>You can attach registration documents once the merchant is added — open it from the directory.</div>
             <div className="modal-actions"><button className="btn btn-outline" style={{ flex: "0 0 auto" }} onClick={() => setShowAdd(false)}>Cancel</button><button className="btn btn-green" onClick={addMerchant}>Add merchant</button></div>
           </div>
         </div>

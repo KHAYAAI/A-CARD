@@ -255,6 +255,27 @@ export class AcardStack extends cdk.Stack {
 
     const serviceVpcSubnets: ec2.SubnetSelection = { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS };
 
+    // ---- KYB registration documents (A-MERCHANT operator console uploads) -----
+    //
+    // The API only ever hands out presigned PUT/GET URLs (see
+    // apps/api/src/kybDocuments.ts) — it never proxies the file bytes, so the
+    // task role needs object-level read/write but the bucket itself is never
+    // public. Compliance evidence: retained on stack teardown, same reasoning
+    // as the access-logs bucket and RDS's snapshot-on-delete policy below.
+    const kybDocumentsBucket = new s3.Bucket(this, "KybDocumentsBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET],
+          allowedOrigins: [publicOrigin],
+          allowedHeaders: ["content-type"],
+        },
+      ],
+    });
+
     // ---- API service (Postgres multi-writer store; desiredCount can be > 1) ----
 
     const apiTaskDef = new ecs.FargateTaskDefinition(this, "ApiTaskDef", { cpu: 256, memoryLimitMiB: 512 });
@@ -266,6 +287,8 @@ export class AcardStack extends cdk.Stack {
         NODE_ENV: "production",
         DASHBOARD_URL: publicOrigin,
         PAYFAST_SANDBOX: payfastSandboxParam.valueAsString,
+        KYB_DOCUMENTS_BUCKET: kybDocumentsBucket.bucketName,
+        AWS_REGION: this.region,
         // Only refuse plain-HTTP /v1/* requests when this deployment actually
         // has TLS configured (domainConfig/certificate) — NODE_ENV=production
         // is set unconditionally above (it also governs the Secure cookie
@@ -288,6 +311,12 @@ export class AcardStack extends cdk.Stack {
       },
     });
     apiContainer.addPortMappings({ containerPort: 8787 });
+    // The task role needs its own PutObject/GetObject permissions even
+    // though it never uploads or downloads a byte itself — SigV4 presigning
+    // authorizes the *browser's later request* against this identity's
+    // policy, so the signature is only valid if this role could have made
+    // the call directly.
+    kybDocumentsBucket.grantReadWrite(apiTaskDef.taskRole);
 
     const apiService = new ecs.FargateService(this, "ApiService", {
       cluster,

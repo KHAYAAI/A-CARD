@@ -27,6 +27,7 @@ import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConf
 import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
 import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
 import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantAuthKitConfig } from "./merchantAuthKit.js";
+import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreConfig } from "./kybDocuments.js";
 
 /**
  * A-CARD REST API.
@@ -105,6 +106,13 @@ export interface AppConfig {
    * `MerchantAuthKitClient` (tests) passes through.
    */
   merchantAuthKit?: MerchantAuthKitConfig | MerchantAuthKitClient;
+  /**
+   * Object storage for merchant KYB registration documents (optional — omit
+   * and the operator console still works, but the upload button has nowhere
+   * to send a file). Requires `merchants`. A config object builds the real
+   * S3 client; a `KybDocumentStore` (tests) passes through.
+   */
+  kybDocuments?: KybDocumentStoreConfig | KybDocumentStore;
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -132,6 +140,11 @@ function asPayFastClient(config: PayFastConfig | PayFastClient): PayFastClient {
 function asMerchantAuthKitClient(config: MerchantAuthKitConfig | MerchantAuthKitClient): MerchantAuthKitClient {
   // A config object (has `apiKey`) builds the real client; a `MerchantAuthKitClient` (tests) passes through.
   return "apiKey" in config ? createMerchantAuthKitClient(config) : config;
+}
+
+function asKybDocumentStore(config: KybDocumentStoreConfig | KybDocumentStore): KybDocumentStore {
+  // A config object (has `bucket`) builds the real client; a `KybDocumentStore` (tests) passes through.
+  return "bucket" in config ? createKybDocumentStore(config) : config;
 }
 
 type Env = {
@@ -347,9 +360,21 @@ const searchQuerySchema = z.object({
 
 const portalInviteSchema = z.object({ role: z.enum(["owner", "staff"]).optional() });
 
+const KYB_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
+const requestUploadSchema = z.object({
+  filename: z.string().min(1).max(200),
+  content_type: z.enum(KYB_DOCUMENT_TYPES),
+});
+const confirmUploadSchema = z.object({
+  key: z.string().min(1),
+  filename: z.string().min(1).max(200),
+  content_type: z.enum(KYB_DOCUMENT_TYPES),
+});
+
 export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl, merchants, merchantAuth } = config;
   const merchantAuthKit = config.merchantAuthKit ? asMerchantAuthKitClient(config.merchantAuthKit) : undefined;
+  const kybDocuments = config.kybDocuments ? asKybDocumentStore(config.kybDocuments) : undefined;
   const platform = asService(config.platform);
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
@@ -1236,6 +1261,47 @@ export function createApp(config: AppConfig) {
       });
     }
 
+    // KYB registration document upload — the API never sees the file bytes,
+    // only hands out a short-lived presigned URL and records the resulting
+    // key. See kybDocuments.ts.
+    if (kybDocuments) {
+      app.post("/v1/merchants/:id/kyb-documents", requireRole("admin"), async (c) => {
+        const merchantId = c.req.param("id");
+        merchants.get(merchantId); // 404s if unknown
+        const body = requestUploadSchema.parse(await c.req.json());
+        const { key, uploadUrl } = await kybDocuments.createUploadUrl(merchantId, body.filename, body.content_type);
+        return c.json({ key, upload_url: uploadUrl }, 201);
+      });
+
+      app.post("/v1/merchants/:id/kyb-documents/confirm", requireRole("admin"), async (c) => {
+        const merchantId = c.req.param("id");
+        const body = confirmUploadSchema.parse(await c.req.json());
+        // The key this endpoint is asked to attach must be one this merchant
+        // was actually issued — otherwise an admin on one merchant could
+        // attach (or overwrite the record of) an object key belonging to
+        // another merchant's evidence trail.
+        if (!body.key.startsWith(`kyb/${merchantId}/`)) {
+          return c.json({ error: { code: "invalid_key", message: "this document key was not issued for this merchant" } }, 400);
+        }
+        const uploadedBy = c.get("sessionUser")?.email ?? c.get("holder").email;
+        const merchant = merchants.attachKybDocument(merchantId, {
+          key: body.key,
+          filename: body.filename,
+          contentType: body.content_type,
+          uploadedBy,
+        });
+        return c.json({ merchant }, 201);
+      });
+
+      app.get("/v1/merchants/:id/kyb-documents", requireRole("admin"), async (c) => {
+        const merchant = merchants.get(c.req.param("id"));
+        const documents = await Promise.all(
+          merchant.kyb.documents.map(async (doc) => ({ ...doc, download_url: await kybDocuments.createDownloadUrl(doc.key) })),
+        );
+        return c.json({ documents });
+      });
+    }
+
     app.patch("/v1/merchants/:id", requireRole("admin"), async (c) => {
       const body = updateMerchantSchema.parse(await c.req.json());
       const merchant = merchants.updateProfile(c.req.param("id"), {
@@ -1484,6 +1550,38 @@ export function createApp(config: AppConfig) {
       app.get("/v1/merchant-portal/health", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
         return c.json(merchants.catalogHealth(ctx.merchantId));
+      });
+
+      // Staff management: only an owner can see who has access or grant more
+      // of it. A shop typically has one owner and a couple of staff who need
+      // to update stock — this is the loop that used to require going back
+      // to an A-CARD operator every time.
+      const requireOwner = async (c: Context<Env>, next: () => Promise<void>) => {
+        if (c.get("merchantSession")!.role !== "owner") {
+          return c.json({ error: { code: "forbidden", message: "only the shop owner can manage staff access" } }, 403);
+        }
+        await next();
+      };
+
+      app.get("/v1/merchant-portal/team", requireMerchantSession, requireOwner, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        return c.json({
+          users: merchantAuth.listUsers(ctx.merchantId),
+          // Only pending, unconsumed, unexpired invites — nothing an owner
+          // can act on twice.
+          invites: merchantAuth
+            .listInvites(ctx.merchantId)
+            .filter((i) => !i.consumedAt && Date.parse(i.expiresAt) > Date.now()),
+        });
+      });
+
+      app.post("/v1/merchant-portal/team/invites", requireMerchantSession, requireOwner, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const body = portalInviteSchema.parse(await c.req.json().catch(() => ({})));
+        const issuer = merchantAuth.getUser(ctx.merchantUserId);
+        const { invite, token } = merchantAuth.createInvite(ctx.merchantId, body.role ?? "staff", issuer.email);
+        const base = (dashboardUrl ?? "").replace(/\/$/, "");
+        return c.json({ invite, invite_url: `${base}/v1/merchant-auth/authorize?invite=${encodeURIComponent(token)}` }, 201);
       });
     }
   }
