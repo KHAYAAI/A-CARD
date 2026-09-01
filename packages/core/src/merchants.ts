@@ -451,161 +451,7 @@ export class MerchantDirectory {
    * by when?" Returns ranked offers plus the reasons candidates were dropped.
    */
   search(query: OfferQuery, now = Date.now()): OfferSearchResult {
-    const quantity = query.quantity ?? 1;
-    if (!Number.isSafeInteger(quantity) || quantity < 1) {
-      throw new InvalidStateError("quantity must be a positive integer");
-    }
-    const text = query.text?.trim().toLowerCase();
-    const offers: Offer[] = [];
-    const excluded: OfferExclusion[] = [];
-    let considered = 0;
-
-    const drop = (merchantId: string, reason: string, itemId?: string) => {
-      if (excluded.length < MAX_EXCLUSIONS_REPORTED) excluded.push({ merchantId, itemId, reason });
-    };
-
-    for (const merchant of this.merchants.values()) {
-      if (merchant.status !== "verified") {
-        drop(merchant.id, `merchant is ${merchant.status}`);
-        continue;
-      }
-      if (query.merchantCategoryCodes?.length && !query.merchantCategoryCodes.includes(merchant.merchantCategoryCode)) {
-        drop(merchant.id, `category ${merchant.merchantCategoryCode} not in the requested allow-list`);
-        continue;
-      }
-      if (merchant.agentAccess === "allowlist") {
-        if (!query.requestedBy || !merchant.allowedAccountHolderIds.includes(query.requestedBy)) {
-          drop(merchant.id, "merchant restricts agent access to named organisations");
-          continue;
-        }
-      }
-
-      let distance: number | undefined;
-      if (query.near) {
-        distance = distanceKm(query.near, merchant.address);
-        // Reachable if the buyer is inside the search radius *and* inside the
-        // merchant's own delivery radius (or close enough to collect).
-        if (distance > query.near.radiusKm) {
-          drop(merchant.id, `${distance.toFixed(1)}km away, outside the ${query.near.radiusKm}km search radius`);
-          continue;
-        }
-        if (merchant.serviceRadiusKm > 0 && distance > merchant.serviceRadiusKm) {
-          drop(merchant.id, `${distance.toFixed(1)}km away, beyond the merchant's ${merchant.serviceRadiusKm}km delivery radius`);
-          continue;
-        }
-      }
-
-      for (const item of this.listItems(merchant.id)) {
-        considered += 1;
-        if (query.currency && item.currency !== query.currency) {
-          drop(merchant.id, `priced in ${item.currency}, not ${query.currency}`, item.id);
-          continue;
-        }
-        if (text) {
-          const haystack = `${item.name} ${item.description ?? ""} ${item.sku}`.toLowerCase();
-          if (!haystack.includes(text)) continue;
-        }
-        if (item.availability === "out_of_stock") {
-          drop(merchant.id, "out of stock", item.id);
-          continue;
-        }
-        if (item.quantityAvailable !== undefined && item.quantityAvailable < quantity) {
-          drop(merchant.id, `only ${item.quantityAvailable} ${item.unit} available, ${quantity} requested`, item.id);
-          continue;
-        }
-        const totalCents = item.unitPriceCents * quantity;
-        if (query.maxTotalCents !== undefined && totalCents > query.maxTotalCents) {
-          drop(merchant.id, `${totalCents} exceeds the ${query.maxTotalCents} budget`, item.id);
-          continue;
-        }
-        if (query.maxLeadTimeDays !== undefined && item.leadTimeDays > query.maxLeadTimeDays) {
-          drop(
-            merchant.id,
-            `${item.leadTimeDays}-day lead time, needed within ${query.maxLeadTimeDays} day${query.maxLeadTimeDays === 1 ? "" : "s"}`,
-            item.id,
-          );
-          continue;
-        }
-        const ageHours = hoursSince(item.inventoryUpdatedAt, now);
-        if (query.maxInventoryAgeHours !== undefined && ageHours > query.maxInventoryAgeHours) {
-          drop(merchant.id, `stock last confirmed ${Math.round(ageHours)}h ago`, item.id);
-          continue;
-        }
-
-        offers.push({
-          merchant: publicMerchant(merchant),
-          item,
-          quantity,
-          unitPriceCents: item.unitPriceCents,
-          totalCents,
-          currency: item.currency,
-          distanceKm: distance === undefined ? undefined : Math.round(distance * 10) / 10,
-          leadTimeDays: item.leadTimeDays,
-          availability: item.availability,
-          inventoryAgeHours: Math.round(ageHours * 10) / 10,
-          freshness: classifyFreshness(ageHours),
-          score: 0,
-          matchReasons: [],
-        });
-      }
-    }
-
-    this.rank(offers);
-    return { offers: offers.slice(0, query.limit ?? 20), considered, excluded };
-  }
-
-  /**
-   * Scores each offer against the best available on each dimension,
-   * *proportionally* — an offer 10% pricier than the cheapest scores 0.91 on
-   * price, not 0.
-   *
-   * The obvious alternative, normalising across the spread of the result set,
-   * is wrong here and wrong in a way that costs money: with two offers a
-   * cent apart it hands the cheaper one the entire price weight, so a
-   * three-week-old stock count beats a confirmed one on a rounding
-   * difference. Proportional scoring keeps a small price gap a small
-   * advantage, which is the only way freshness can win when it should.
-   */
-  private rank(offers: Offer[]): void {
-    if (offers.length === 0) return;
-    const best = {
-      total: Math.min(...offers.map((o) => o.totalCents)),
-      lead: Math.min(...offers.map((o) => o.leadTimeDays)),
-      dist: Math.min(...offers.map((o) => o.distanceKm ?? 0)),
-    };
-
-    // Ratio of best to this one, offset by 1 so a zero best value (same-day
-    // delivery, on-site merchant) stays meaningful instead of dividing by zero.
-    const ratio = (value: number, bestValue: number, offset = 0) =>
-      (bestValue + offset) / (value + offset || 1);
-
-    for (const offer of offers) {
-      const priceScore = ratio(offer.totalCents, best.total);
-      const leadScore = ratio(offer.leadTimeDays, best.lead, 1);
-      const distScore = offer.distanceKm === undefined ? 1 : ratio(offer.distanceKm, best.dist, 1);
-      const freshScore = FRESHNESS_SCORE[offer.freshness];
-
-      offer.score =
-        Math.round(
-          (priceScore * OFFER_WEIGHTS.price +
-            leadScore * OFFER_WEIGHTS.leadTime +
-            distScore * OFFER_WEIGHTS.distance +
-            freshScore * OFFER_WEIGHTS.freshness) *
-            1000,
-        ) / 1000;
-
-      const reasons: string[] = [];
-      if (offer.totalCents === best.total) reasons.push("lowest total price");
-      if (offer.leadTimeDays === best.lead) reasons.push(offer.leadTimeDays === 0 ? "available same day" : "fastest delivery");
-      if (offer.distanceKm !== undefined && offer.distanceKm === best.dist) reasons.push("closest merchant");
-      if (offer.freshness === "fresh") reasons.push("stock confirmed in the last 24h");
-      if (offer.freshness === "stale") reasons.push("stock not confirmed in over a week — verify before ordering");
-      if (offer.availability === "low_stock") reasons.push("merchant reports low stock");
-      if (offer.availability === "made_to_order") reasons.push("made to order, not held in stock");
-      offer.matchReasons = reasons;
-    }
-
-    offers.sort((a, b) => b.score - a.score || a.totalCents - b.totalCents);
+    return evaluateOffers(this.merchants.values(), (merchantId) => this.listItems(merchantId), query, now);
   }
 
   // -- persistence -----------------------------------------------------------
@@ -624,4 +470,183 @@ export class MerchantDirectory {
     for (const item of snapshot.items) directory.items.set(item.id, item);
     return directory;
   }
+}
+
+// ---- search: shared between the in-memory directory and any other backend -
+
+/**
+ * The actual discovery decision — which candidates clear every filter, why
+ * the rest didn't, and how the survivors rank — as a pure function over
+ * plain data rather than a `MerchantDirectory` method.
+ *
+ * This exists so a SQL-backed directory (see the Postgres adapter in
+ * `apps/api`) can push the *retrieval* half of search to the database —
+ * narrowing millions of catalog rows down to one merchant's — while still
+ * running the exact same, already-tested *ranking* decision this file ships
+ * with. The alternative, a second ranking implementation written in SQL,
+ * is a correctness risk with no offsetting benefit: proportional scoring,
+ * freshness classification, and match-reason text would have to be kept in
+ * sync by hand across two languages forever. One implementation, two
+ * retrieval paths.
+ */
+export function evaluateOffers(
+  merchants: Iterable<Merchant>,
+  itemsFor: (merchantId: string) => CatalogItem[],
+  query: OfferQuery,
+  now: number,
+): OfferSearchResult {
+  const quantity = query.quantity ?? 1;
+  if (!Number.isSafeInteger(quantity) || quantity < 1) {
+    throw new InvalidStateError("quantity must be a positive integer");
+  }
+  const text = query.text?.trim().toLowerCase();
+  const offers: Offer[] = [];
+  const excluded: OfferExclusion[] = [];
+  let considered = 0;
+
+  const drop = (merchantId: string, reason: string, itemId?: string) => {
+    if (excluded.length < MAX_EXCLUSIONS_REPORTED) excluded.push({ merchantId, itemId, reason });
+  };
+
+  for (const merchant of merchants) {
+    if (merchant.status !== "verified") {
+      drop(merchant.id, `merchant is ${merchant.status}`);
+      continue;
+    }
+    if (query.merchantCategoryCodes?.length && !query.merchantCategoryCodes.includes(merchant.merchantCategoryCode)) {
+      drop(merchant.id, `category ${merchant.merchantCategoryCode} not in the requested allow-list`);
+      continue;
+    }
+    if (merchant.agentAccess === "allowlist") {
+      if (!query.requestedBy || !merchant.allowedAccountHolderIds.includes(query.requestedBy)) {
+        drop(merchant.id, "merchant restricts agent access to named organisations");
+        continue;
+      }
+    }
+
+    let distance: number | undefined;
+    if (query.near) {
+      distance = distanceKm(query.near, merchant.address);
+      // Reachable if the buyer is inside the search radius *and* inside the
+      // merchant's own delivery radius (or close enough to collect).
+      if (distance > query.near.radiusKm) {
+        drop(merchant.id, `${distance.toFixed(1)}km away, outside the ${query.near.radiusKm}km search radius`);
+        continue;
+      }
+      if (merchant.serviceRadiusKm > 0 && distance > merchant.serviceRadiusKm) {
+        drop(merchant.id, `${distance.toFixed(1)}km away, beyond the merchant's ${merchant.serviceRadiusKm}km delivery radius`);
+        continue;
+      }
+    }
+
+    for (const item of itemsFor(merchant.id)) {
+      considered += 1;
+      if (query.currency && item.currency !== query.currency) {
+        drop(merchant.id, `priced in ${item.currency}, not ${query.currency}`, item.id);
+        continue;
+      }
+      if (text) {
+        const haystack = `${item.name} ${item.description ?? ""} ${item.sku}`.toLowerCase();
+        if (!haystack.includes(text)) continue;
+      }
+      if (item.availability === "out_of_stock") {
+        drop(merchant.id, "out of stock", item.id);
+        continue;
+      }
+      if (item.quantityAvailable !== undefined && item.quantityAvailable < quantity) {
+        drop(merchant.id, `only ${item.quantityAvailable} ${item.unit} available, ${quantity} requested`, item.id);
+        continue;
+      }
+      const totalCents = item.unitPriceCents * quantity;
+      if (query.maxTotalCents !== undefined && totalCents > query.maxTotalCents) {
+        drop(merchant.id, `${totalCents} exceeds the ${query.maxTotalCents} budget`, item.id);
+        continue;
+      }
+      if (query.maxLeadTimeDays !== undefined && item.leadTimeDays > query.maxLeadTimeDays) {
+        drop(
+          merchant.id,
+          `${item.leadTimeDays}-day lead time, needed within ${query.maxLeadTimeDays} day${query.maxLeadTimeDays === 1 ? "" : "s"}`,
+          item.id,
+        );
+        continue;
+      }
+      const ageHours = hoursSince(item.inventoryUpdatedAt, now);
+      if (query.maxInventoryAgeHours !== undefined && ageHours > query.maxInventoryAgeHours) {
+        drop(merchant.id, `stock last confirmed ${Math.round(ageHours)}h ago`, item.id);
+        continue;
+      }
+
+      offers.push({
+        merchant: publicMerchant(merchant),
+        item,
+        quantity,
+        unitPriceCents: item.unitPriceCents,
+        totalCents,
+        currency: item.currency,
+        distanceKm: distance === undefined ? undefined : Math.round(distance * 10) / 10,
+        leadTimeDays: item.leadTimeDays,
+        availability: item.availability,
+        inventoryAgeHours: Math.round(ageHours * 10) / 10,
+        freshness: classifyFreshness(ageHours),
+        score: 0,
+        matchReasons: [],
+      });
+    }
+  }
+
+  rankOffers(offers);
+  return { offers: offers.slice(0, query.limit ?? 20), considered, excluded };
+}
+
+/**
+ * Scores each offer against the best available on each dimension,
+ * *proportionally* — an offer 10% pricier than the cheapest scores 0.91 on
+ * price, not 0.
+ *
+ * The obvious alternative, normalising across the spread of the result set,
+ * is wrong here and wrong in a way that costs money: with two offers a
+ * cent apart it hands the cheaper one the entire price weight, so a
+ * three-week-old stock count beats a confirmed one on a rounding
+ * difference. Proportional scoring keeps a small price gap a small
+ * advantage, which is the only way freshness can win when it should.
+ */
+export function rankOffers(offers: Offer[]): void {
+  if (offers.length === 0) return;
+  const best = {
+    total: Math.min(...offers.map((o) => o.totalCents)),
+    lead: Math.min(...offers.map((o) => o.leadTimeDays)),
+    dist: Math.min(...offers.map((o) => o.distanceKm ?? 0)),
+  };
+
+  // Ratio of best to this one, offset by 1 so a zero best value (same-day
+  // delivery, on-site merchant) stays meaningful instead of dividing by zero.
+  const ratio = (value: number, bestValue: number, offset = 0) => (bestValue + offset) / (value + offset || 1);
+
+  for (const offer of offers) {
+    const priceScore = ratio(offer.totalCents, best.total);
+    const leadScore = ratio(offer.leadTimeDays, best.lead, 1);
+    const distScore = offer.distanceKm === undefined ? 1 : ratio(offer.distanceKm, best.dist, 1);
+    const freshScore = FRESHNESS_SCORE[offer.freshness];
+
+    offer.score =
+      Math.round(
+        (priceScore * OFFER_WEIGHTS.price +
+          leadScore * OFFER_WEIGHTS.leadTime +
+          distScore * OFFER_WEIGHTS.distance +
+          freshScore * OFFER_WEIGHTS.freshness) *
+          1000,
+      ) / 1000;
+
+    const reasons: string[] = [];
+    if (offer.totalCents === best.total) reasons.push("lowest total price");
+    if (offer.leadTimeDays === best.lead) reasons.push(offer.leadTimeDays === 0 ? "available same day" : "fastest delivery");
+    if (offer.distanceKm !== undefined && offer.distanceKm === best.dist) reasons.push("closest merchant");
+    if (offer.freshness === "fresh") reasons.push("stock confirmed in the last 24h");
+    if (offer.freshness === "stale") reasons.push("stock not confirmed in over a week — verify before ordering");
+    if (offer.availability === "low_stock") reasons.push("merchant reports low stock");
+    if (offer.availability === "made_to_order") reasons.push("made to order, not held in stock");
+    offer.matchReasons = reasons;
+  }
+
+  offers.sort((a, b) => b.score - a.score || a.totalCents - b.totalCents);
 }

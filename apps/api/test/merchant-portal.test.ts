@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Platform, type MerchantAuthService } from "@acard/core";
+import { InMemoryMerchantAuth, InMemoryMerchantDirectory } from "../src/merchant/index.js";
 import { createApp } from "../src/app.js";
 import type { AuthKitProfile, MerchantAuthKitClient } from "../src/merchantAuthKit.js";
 
@@ -103,8 +104,8 @@ beforeEach(async () => {
     platform,
     issuerWebhookSecret: SECRET,
     dashboardUrl: DASHBOARD_URL,
-    merchants: platform.merchants,
-    merchantAuth,
+    merchants: new InMemoryMerchantDirectory(platform.merchants),
+    merchantAuth: new InMemoryMerchantAuth(merchantAuth),
     merchantAuthKit: authKit,
   });
   const res = await app.request("/v1/signup", {
@@ -323,7 +324,7 @@ describe("merchant portal staff invites", () => {
 describe("without merchantAuthKit configured", () => {
   it("portal login has nowhere to go, but invite creation still works so the operator flow isn't blocked", async () => {
     const bareForm = new Platform();
-    const bare = createApp({ platform: bareForm, issuerWebhookSecret: SECRET, merchants: bareForm.merchants, merchantAuth: bareForm.merchantAuth });
+    const bare = createApp({ platform: bareForm, issuerWebhookSecret: SECRET, merchants: new InMemoryMerchantDirectory(bareForm.merchants), merchantAuth: new InMemoryMerchantAuth(bareForm.merchantAuth) });
 
     const signup = await bare.request("/v1/signup", {
       method: "POST",

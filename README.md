@@ -11,7 +11,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 | Path | What it is |
 |---|---|
 | `packages/core` | Domain logic: A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
-| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and agent discovery, the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
+| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
 | `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management, A-MERCHANT operator console (onboarding, KYB, discovery preview) — plus a separate `/merchant` route: the merchant's own portal (WorkOS AuthKit login, catalog, one-tap restate) |
@@ -164,10 +164,33 @@ returns what that card can actually pay for.
 Onboarding and KYB decisions are still operator actions — A-CARD's own team
 registers a merchant and records the KYB outcome (`/v1/merchants/*`, gated on
 the `admin` role) — but each merchant now gets its own portal to run its
-catalog day to day. The directory lives on the in-memory `Platform` and is
-covered by snapshot persistence; the Postgres multi-writer path has no
-directory adapter yet, so the routes stay unmounted there rather than giving
-each API task its own catalog.
+catalog day to day.
+
+### Persistence: A-MERCHANT picks its own backend, independent of A-CARD's
+
+A-MERCHANT has a real Postgres adapter (`apps/api/src/merchant/postgres.ts`) —
+its own tables (`acard_merchants`, `acard_catalog_items`,
+`acard_merchant_users`, `acard_merchant_sessions`, `acard_merchant_invites`),
+its own connection pool, migrated independently of `PostgresPlatformService`.
+`apps/api/src/index.ts` selects it automatically whenever A-CARD itself is
+running the Postgres multi-writer store — so A-MERCHANT no longer forces a
+choice about A-CARD's own persistence: enabling one never means giving up the
+other's multi-instance safety. On the in-memory or single-writer snapshot
+path, the same async port (`apps/api/src/merchant/types.ts`) is instead
+backed by the original in-memory `MerchantDirectory`/`MerchantAuthService`.
+
+`search()` deliberately does not reimplement ranking in SQL — a second,
+SQL-native ranking implementation next to the tested one in
+`packages/core/src/merchants.ts` is a correctness risk with no offsetting
+benefit. SQL's job is *retrieval*: fetch every merchant (cheap — the small
+side of this problem even at thousands of merchants), then fetch catalog
+items only for merchants with `status = 'verified'` (the large table, and a
+lossless narrowing — `evaluateOffers` never reads a non-verified merchant's
+items regardless of what's fetched). The exported `evaluateOffers` function
+then runs, unmodified, against whichever backend supplied the rows. A
+dedicated test (`apps/api/test/pg-merchant-service.test.ts`) seeds identical
+data into both backends and asserts the Postgres-backed search returns the
+exact same ranked offers, in the same order, as the in-memory one.
 
 ### Merchant portal (WorkOS AuthKit)
 

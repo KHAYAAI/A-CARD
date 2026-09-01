@@ -16,16 +16,16 @@ import {
   type PublicUser,
   type Role,
   type SubscriptionTier,
-  type MerchantDirectory,
-  type MerchantAuthService,
   type MerchantRole,
   type MerchantSessionContext,
+  type MerchantStatus,
 } from "@acard/core";
 import { createPayFastClient, type PayFastClient, type PayFastConfig } from "./payfast.js";
 import { EmbeddedWalletClient, type EmbeddedWalletConfig } from "./embeddedWallet.js";
 import { createWorkOSClient, domainFromEmail, type WorkOSClient, type WorkOSConfig } from "./workos.js";
 import { createSudoClient, type IssuerCardClient, type SudoConfig } from "./sudo.js";
 import { InMemoryPlatformService, hashRequestPayload, type PlatformService } from "./service/index.js";
+import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.js";
 import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantAuthKitConfig } from "./merchantAuthKit.js";
 import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreConfig } from "./kybDocuments.js";
 
@@ -90,14 +90,14 @@ export interface AppConfig {
    * here and then pays with an ordinary A-CARD card through the existing
    * flow, which is what keeps this layer clear of funds custody.
    */
-  merchants?: MerchantDirectory;
+  merchants?: MerchantDirectoryPort;
   /**
    * The merchant-portal identity service (optional — omit and the whole
    * portal surface, `/merchant-auth/*` and `/merchant-portal/*`, is
    * unmounted). Requires `merchants` too: there is nothing to log a
    * merchant user into without a directory record for them.
    */
-  merchantAuth?: MerchantAuthService;
+  merchantAuth?: MerchantAuthPort;
   /**
    * WorkOS AuthKit for the merchant portal (optional — omit and portal
    * invites can still be generated via the operator console, but the login
@@ -1207,7 +1207,7 @@ export function createApp(config: AppConfig) {
     // with the write side; until then there is no merchant login to model.
     app.post("/v1/merchants", requireRole("admin"), async (c) => {
       const body = registerMerchantSchema.parse(await c.req.json());
-      const merchant = merchants.register({
+      const merchant = await merchants.register({
         name: body.name,
         tradingName: body.trading_name,
         merchantCategoryCode: body.merchant_category_code,
@@ -1230,7 +1230,7 @@ export function createApp(config: AppConfig) {
     app.post("/v1/merchants/:id/kyb", requireRole("admin"), async (c) => {
       const body = kybDecisionSchema.parse(await c.req.json());
       const reviewer = c.get("sessionUser")?.email ?? c.get("holder").email;
-      const merchant = merchants.setStatus(c.req.param("id"), body.status, reviewer, body.note);
+      const merchant = await merchants.setStatus(c.req.param("id"), body.status, reviewer, body.note);
       return c.json({ merchant });
     });
 
@@ -1240,10 +1240,10 @@ export function createApp(config: AppConfig) {
     if (merchantAuth) {
       app.post("/v1/merchants/:id/portal-invites", requireRole("admin"), async (c) => {
         const merchantId = c.req.param("id");
-        merchants.get(merchantId); // 404s if the merchant doesn't exist
+        await merchants.get(merchantId); // 404s if the merchant doesn't exist
         const body = portalInviteSchema.parse(await c.req.json().catch(() => ({})));
         const issuedBy = c.get("sessionUser")?.email ?? c.get("holder").email;
-        const { invite, token } = merchantAuth.createInvite(merchantId, body.role ?? "owner", issuedBy);
+        const { invite, token } = await merchantAuth.createInvite(merchantId, body.role ?? "owner", issuedBy);
         const base = (dashboardUrl ?? "").replace(/\/$/, "");
         return c.json(
           {
@@ -1257,7 +1257,7 @@ export function createApp(config: AppConfig) {
       });
 
       app.get("/v1/merchants/:id/portal-invites", requireRole("admin"), async (c) => {
-        return c.json({ invites: merchantAuth.listInvites(c.req.param("id")) });
+        return c.json({ invites: await merchantAuth.listInvites(c.req.param("id")) });
       });
     }
 
@@ -1267,7 +1267,7 @@ export function createApp(config: AppConfig) {
     if (kybDocuments) {
       app.post("/v1/merchants/:id/kyb-documents", requireRole("admin"), async (c) => {
         const merchantId = c.req.param("id");
-        merchants.get(merchantId); // 404s if unknown
+        await merchants.get(merchantId); // 404s if unknown
         const body = requestUploadSchema.parse(await c.req.json());
         const { key, uploadUrl } = await kybDocuments.createUploadUrl(merchantId, body.filename, body.content_type);
         return c.json({ key, upload_url: uploadUrl }, 201);
@@ -1284,7 +1284,7 @@ export function createApp(config: AppConfig) {
           return c.json({ error: { code: "invalid_key", message: "this document key was not issued for this merchant" } }, 400);
         }
         const uploadedBy = c.get("sessionUser")?.email ?? c.get("holder").email;
-        const merchant = merchants.attachKybDocument(merchantId, {
+        const merchant = await merchants.attachKybDocument(merchantId, {
           key: body.key,
           filename: body.filename,
           contentType: body.content_type,
@@ -1294,7 +1294,7 @@ export function createApp(config: AppConfig) {
       });
 
       app.get("/v1/merchants/:id/kyb-documents", requireRole("admin"), async (c) => {
-        const merchant = merchants.get(c.req.param("id"));
+        const merchant = await merchants.get(c.req.param("id"));
         const documents = await Promise.all(
           merchant.kyb.documents.map(async (doc) => ({ ...doc, download_url: await kybDocuments.createDownloadUrl(doc.key) })),
         );
@@ -1304,7 +1304,7 @@ export function createApp(config: AppConfig) {
 
     app.patch("/v1/merchants/:id", requireRole("admin"), async (c) => {
       const body = updateMerchantSchema.parse(await c.req.json());
-      const merchant = merchants.updateProfile(c.req.param("id"), {
+      const merchant = await merchants.updateProfile(c.req.param("id"), {
         name: body.name,
         tradingName: body.trading_name,
         address: body.address,
@@ -1318,7 +1318,7 @@ export function createApp(config: AppConfig) {
 
     app.put("/v1/merchants/:id/items", requireRole("member"), async (c) => {
       const body = upsertItemSchema.parse(await c.req.json());
-      const item = merchants.upsertItem(c.req.param("id"), {
+      const item = await merchants.upsertItem(c.req.param("id"), {
         sku: body.sku,
         name: body.name,
         description: body.description,
@@ -1337,12 +1337,12 @@ export function createApp(config: AppConfig) {
     // happening often, so it is a single small request with no other effects.
     app.post("/v1/merchants/:id/items/:itemId/restate", requireRole("member"), async (c) => {
       const body = restateSchema.parse(await c.req.json());
-      const item = merchants.getItem(c.req.param("itemId"));
+      const item = await merchants.getItem(c.req.param("itemId"));
       if (item.merchantId !== c.req.param("id")) {
         return c.json({ error: { code: "not_found", message: "item does not belong to this merchant" } }, 404);
       }
       return c.json({
-        item: merchants.restate(item.id, {
+        item: await merchants.restate(item.id, {
           availability: body.availability,
           quantityAvailable: body.quantity_available,
         }),
@@ -1350,19 +1350,19 @@ export function createApp(config: AppConfig) {
     });
 
     app.delete("/v1/merchants/:id/items/:itemId", requireRole("member"), async (c) => {
-      const item = merchants.getItem(c.req.param("itemId"));
+      const item = await merchants.getItem(c.req.param("itemId"));
       if (item.merchantId !== c.req.param("id")) {
         return c.json({ error: { code: "not_found", message: "item does not belong to this merchant" } }, 404);
       }
-      merchants.removeItem(item.id);
+      await merchants.removeItem(item.id);
       return c.json({ deleted: true });
     });
 
     // How current this merchant's catalog is. Shown to the merchant, and the
     // number the field team is actually measured on.
     app.get("/v1/merchants/:id/health", async (c) => {
-      const merchant = merchants.get(c.req.param("id"));
-      return c.json({ merchant_id: merchant.id, ...merchants.catalogHealth(merchant.id) });
+      const merchant = await merchants.get(c.req.param("id"));
+      return c.json({ merchant_id: merchant.id, ...await merchants.catalogHealth(merchant.id) });
     });
 
     // ---- agent-facing reads --------------------------------------------------------
@@ -1387,7 +1387,7 @@ export function createApp(config: AppConfig) {
           ? { lat: query.lat, lng: query.lng, radiusKm: query.radius_km ?? 25 }
           : undefined;
 
-      const result = merchants.search({
+      const result = await merchants.search({
         text: query.text,
         merchantCategoryCodes: query.merchant_category_codes,
         near,
@@ -1405,14 +1405,14 @@ export function createApp(config: AppConfig) {
     });
 
     app.get("/v1/merchants/:id", async (c) => {
-      const merchant = merchants.get(c.req.param("id"));
+      const merchant = await merchants.get(c.req.param("id"));
       // Agents get the public view: verified or not, never the KYB pack behind it.
-      return c.json({ merchant: publicMerchant(merchant), items: merchants.listItems(merchant.id) });
+      return c.json({ merchant: publicMerchant(merchant), items: await merchants.listItems(merchant.id) });
     });
 
     app.get("/v1/merchants", async (c) => {
-      const status = c.req.query("status") as ReturnType<typeof merchants.list>[number]["status"] | undefined;
-      return c.json({ merchants: merchants.list(status ? { status } : {}).map(publicMerchant) });
+      const status = c.req.query("status") as MerchantStatus | undefined;
+      return c.json({ merchants: (await merchants.list(status ? { status } : {})).map(publicMerchant) });
     });
 
     // ---- merchant portal: WorkOS AuthKit login + the merchant's own view -------
@@ -1437,7 +1437,7 @@ export function createApp(config: AppConfig) {
       // recover which merchant this login is for.
       app.get("/v1/merchant-auth/authorize", async (c) => {
         const invite = c.req.query("invite") ?? "";
-        const pending = merchantAuth.peekInvite(invite);
+        const pending = await merchantAuth.peekInvite(invite);
         if (!pending) {
           return c.json({ error: { code: "invalid_invite", message: "this invite link is invalid or has expired" } }, 400);
         }
@@ -1459,8 +1459,8 @@ export function createApp(config: AppConfig) {
         }
         try {
           const profile = await merchantAuthKit.authenticateWithCode(code);
-          const user = merchantAuth.redeemInvite(inviteToken, profile);
-          const { token } = merchantAuth.createSession(user);
+          const user = await merchantAuth.redeemInvite(inviteToken, profile);
+          const { token } = await merchantAuth.createSession(user);
           setMerchantSessionCookie(c, token);
           if (!base) return c.json({ portal_token: token });
           // Cross-origin dev (dashboard on :3000, API on :8787) can't rely on
@@ -1477,7 +1477,7 @@ export function createApp(config: AppConfig) {
       const requireMerchantSession = async (c: Context<Env>, next: () => Promise<void>) => {
         const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/, "");
         const token = bearer || getCookie(c, MERCHANT_SESSION_COOKIE);
-        const ctx = token ? merchantAuth.resolveSession(token) : undefined;
+        const ctx = token ? await merchantAuth.resolveSession(token) : undefined;
         if (!ctx) return c.json({ error: { code: "unauthorized", message: "sign in to the merchant portal" } }, 401);
         c.set("merchantSession", ctx);
         await next();
@@ -1486,16 +1486,16 @@ export function createApp(config: AppConfig) {
       app.post("/v1/merchant-portal/logout", requireMerchantSession, async (c) => {
         const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/, "");
         const token = bearer || getCookie(c, MERCHANT_SESSION_COOKIE);
-        if (token) merchantAuth.revokeSession(token);
+        if (token) await merchantAuth.revokeSession(token);
         deleteCookie(c, MERCHANT_SESSION_COOKIE, { path: "/" });
         return c.json({ ok: true });
       });
 
       app.get("/v1/merchant-portal/me", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
-        const merchant = merchants.get(ctx.merchantId);
+        const merchant = await merchants.get(ctx.merchantId);
         return c.json({
-          user: merchantAuth.getUser(ctx.merchantUserId),
+          user: await merchantAuth.getUser(ctx.merchantUserId),
           // The portal gets exactly the agent-facing view of its own
           // profile — never the KYB pack, same redaction as `publicMerchant`
           // applies to every other reader of this record.
@@ -1505,13 +1505,13 @@ export function createApp(config: AppConfig) {
 
       app.get("/v1/merchant-portal/items", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
-        return c.json({ items: merchants.listItems(ctx.merchantId) });
+        return c.json({ items: await merchants.listItems(ctx.merchantId) });
       });
 
       app.put("/v1/merchant-portal/items", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
         const body = upsertItemSchema.parse(await c.req.json());
-        const item = merchants.upsertItem(ctx.merchantId, {
+        const item = await merchants.upsertItem(ctx.merchantId, {
           sku: body.sku,
           name: body.name,
           description: body.description,
@@ -1529,27 +1529,27 @@ export function createApp(config: AppConfig) {
       // important write in the whole portal, see merchants.ts.
       app.post("/v1/merchant-portal/items/:itemId/restate", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
-        const item = merchants.getItem(c.req.param("itemId") as string);
+        const item = await merchants.getItem(c.req.param("itemId") as string);
         if (item.merchantId !== ctx.merchantId) {
           return c.json({ error: { code: "not_found", message: "item does not belong to your shop" } }, 404);
         }
         const body = restateSchema.parse(await c.req.json());
-        return c.json({ item: merchants.restate(item.id, { availability: body.availability, quantityAvailable: body.quantity_available }) });
+        return c.json({ item: await merchants.restate(item.id, { availability: body.availability, quantityAvailable: body.quantity_available }) });
       });
 
       app.delete("/v1/merchant-portal/items/:itemId", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
-        const item = merchants.getItem(c.req.param("itemId") as string);
+        const item = await merchants.getItem(c.req.param("itemId") as string);
         if (item.merchantId !== ctx.merchantId) {
           return c.json({ error: { code: "not_found", message: "item does not belong to your shop" } }, 404);
         }
-        merchants.removeItem(item.id);
+        await merchants.removeItem(item.id);
         return c.json({ deleted: true });
       });
 
       app.get("/v1/merchant-portal/health", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
-        return c.json(merchants.catalogHealth(ctx.merchantId));
+        return c.json(await merchants.catalogHealth(ctx.merchantId));
       });
 
       // Staff management: only an owner can see who has access or grant more
@@ -1566,20 +1566,20 @@ export function createApp(config: AppConfig) {
       app.get("/v1/merchant-portal/team", requireMerchantSession, requireOwner, async (c) => {
         const ctx = c.get("merchantSession")!;
         return c.json({
-          users: merchantAuth.listUsers(ctx.merchantId),
+          users: await merchantAuth.listUsers(ctx.merchantId),
           // Only pending, unconsumed, unexpired invites — nothing an owner
           // can act on twice.
-          invites: merchantAuth
-            .listInvites(ctx.merchantId)
-            .filter((i) => !i.consumedAt && Date.parse(i.expiresAt) > Date.now()),
+          invites: (await merchantAuth.listInvites(ctx.merchantId)).filter(
+            (i) => !i.consumedAt && Date.parse(i.expiresAt) > Date.now(),
+          ),
         });
       });
 
       app.post("/v1/merchant-portal/team/invites", requireMerchantSession, requireOwner, async (c) => {
         const ctx = c.get("merchantSession")!;
         const body = portalInviteSchema.parse(await c.req.json().catch(() => ({})));
-        const issuer = merchantAuth.getUser(ctx.merchantUserId);
-        const { invite, token } = merchantAuth.createInvite(ctx.merchantId, body.role ?? "staff", issuer.email);
+        const issuer = await merchantAuth.getUser(ctx.merchantUserId);
+        const { invite, token } = await merchantAuth.createInvite(ctx.merchantId, body.role ?? "staff", issuer.email);
         const base = (dashboardUrl ?? "").replace(/\/$/, "");
         return c.json({ invite, invite_url: `${base}/v1/merchant-auth/authorize?invite=${encodeURIComponent(token)}` }, 201);
       });

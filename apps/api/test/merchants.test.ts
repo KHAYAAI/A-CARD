@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Platform } from "@acard/core";
+import { InMemoryMerchantDirectory } from "../src/merchant/index.js";
 import { createApp } from "../src/app.js";
 
 const SECRET = "whsec_test";
@@ -40,7 +41,7 @@ async function registerVerified(name: string, overrides: Record<string, unknown>
 
 beforeEach(async () => {
   platform = new Platform();
-  app = createApp({ platform, issuerWebhookSecret: SECRET, merchants: platform.merchants });
+  app = createApp({ platform, issuerWebhookSecret: SECRET, merchants: new InMemoryMerchantDirectory(platform.merchants) });
   const res = await app.request("/v1/signup", {
     method: "POST",
     body: JSON.stringify({ email: "dev@example.co.za", name: "Dev", currency: "ZAR" }),

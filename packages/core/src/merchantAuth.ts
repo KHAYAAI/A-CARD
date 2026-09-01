@@ -45,8 +45,10 @@ interface MerchantSessionRecord extends MerchantSessionContext {
   createdAt: string;
 }
 
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days — matches AuthService
-const INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 3 days: long enough for a merchant to get to it, short enough not to accumulate stale links
+// Exported so any other backend (e.g. a SQL-backed adapter) uses the exact
+// same lifetimes rather than a second, driftable copy of these numbers.
+export const MERCHANT_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days — matches AuthService
+export const MERCHANT_INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 3 days: long enough for a merchant to get to it, short enough not to accumulate stale links
 
 export interface MerchantInvite {
   id: string;
@@ -94,7 +96,7 @@ export class MerchantAuthService {
       merchantId,
       role,
       issuedBy,
-      expiresAt: new Date(now.getTime() + INVITE_TTL_MS).toISOString(),
+      expiresAt: new Date(now.getTime() + MERCHANT_INVITE_TTL_MS).toISOString(),
       createdAt: now.toISOString(),
       tokenHash: hashSessionToken(token),
     };
@@ -195,7 +197,7 @@ export class MerchantAuthService {
       merchantId: user.merchantId,
       role: user.role,
       tokenHash: hashSessionToken(token),
-      expiresAt: new Date(now.getTime() + SESSION_TTL_MS).toISOString(),
+      expiresAt: new Date(now.getTime() + MERCHANT_SESSION_TTL_MS).toISOString(),
       createdAt: now.toISOString(),
     };
     this.sessions.set(record.tokenHash, record);

@@ -4,6 +4,8 @@ import { createApp } from "./app.js";
 import { PostgresPersistence } from "./persistence.js";
 import { InMemoryPlatformService, PostgresPlatformService, type PlatformService } from "./service/index.js";
 import { attachSlackNotifications } from "./notifications.js";
+import { InMemoryMerchantAuth, InMemoryMerchantDirectory, PostgresMerchantAuth, PostgresMerchantDirectory } from "./merchant/index.js";
+import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const issuerWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET ?? "whsec_sandbox_secret";
@@ -55,20 +57,38 @@ if (!databaseUrl) {
 if (slackWebhookUrl) attachSlackNotifications(platform, slackWebhookUrl, dashboardUrl);
 
 /**
- * A-MERCHANT's directory lives on the in-memory `Platform`, so it is covered
- * by the same snapshot persistence as everything else on that path. The
- * Postgres multi-writer path has no directory adapter yet: mounting a
- * process-local one there would give every API task its own catalog and
- * silently return different search results per request, which is worse than
- * not offering the routes at all. So on that path the routes stay unmounted
- * and say why.
+ * A-MERCHANT gets its own backend choice, independent of which one A-CARD
+ * itself is running — deliberately, so enabling A-MERCHANT never forces a
+ * choice about A-CARD's own persistence:
+ *
+ *   - Postgres multi-writer (the default, `platform` above is a
+ *     `PostgresPlatformService`) → the real, multi-writer merchant Postgres
+ *     adapter, same database, its own tables and its own connection pool.
+ *   - In-memory or single-writer snapshot → the in-memory directory, wrapped
+ *     behind the same async port so app.ts never has to know the difference.
  */
-const merchants = platform instanceof InMemoryPlatformService ? platform.platform.merchants : undefined;
-const merchantAuth = platform instanceof InMemoryPlatformService ? platform.platform.merchantAuth : undefined;
-if (!merchants) {
-  console.log("A-CARD API: A-MERCHANT routes disabled — the directory has no Postgres adapter yet (use ACARD_PERSISTENCE=snapshot)");
+let merchants: MerchantDirectoryPort;
+let merchantAuth: MerchantAuthPort;
+
+if (platform instanceof PostgresPlatformService) {
+  const pgMerchants = new PostgresMerchantDirectory(databaseUrl as string);
+  const pgMerchantAuth = new PostgresMerchantAuth(databaseUrl as string);
+  await pgMerchants.migrate();
+  merchants = pgMerchants;
+  merchantAuth = pgMerchantAuth;
+  const previousClose = onClose;
+  onClose = async () => {
+    await previousClose?.();
+    await pgMerchants.close();
+  };
+  console.log("A-CARD API: A-MERCHANT on the Postgres multi-writer store — runs alongside A-CARD's own multi-instance ledger");
+} else {
+  const memoryPlatform = (platform as InMemoryPlatformService).platform;
+  merchants = new InMemoryMerchantDirectory(memoryPlatform.merchants);
+  merchantAuth = new InMemoryMerchantAuth(memoryPlatform.merchantAuth);
 }
-if (merchants && !workosApiKey) {
+
+if (!workosApiKey) {
   console.log("A-CARD API: merchant portal disabled — set WORKOS_API_KEY/WORKOS_CLIENT_ID to let merchants log in and restate stock themselves");
 }
 

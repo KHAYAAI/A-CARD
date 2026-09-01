@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Platform } from "@acard/core";
+import { InMemoryMerchantDirectory } from "../src/merchant/index.js";
 import { createApp } from "../src/app.js";
 import type { KybDocumentStore } from "../src/kybDocuments.js";
 
@@ -55,7 +56,7 @@ async function registerMerchant() {
 beforeEach(async () => {
   platform = new Platform();
   store = fakeStore();
-  app = createApp({ platform, issuerWebhookSecret: SECRET, merchants: platform.merchants, kybDocuments: store });
+  app = createApp({ platform, issuerWebhookSecret: SECRET, merchants: new InMemoryMerchantDirectory(platform.merchants), kybDocuments: store });
   const res = await app.request("/v1/signup", {
     method: "POST",
     body: JSON.stringify({ email: "dev@example.co.za", name: "Dev", currency: "ZAR" }),
@@ -169,7 +170,7 @@ describe("KYB document upload", () => {
 describe("without kybDocuments configured", () => {
   it("stays unmounted, and onboarding/KYB still work", async () => {
     const bare = new Platform();
-    const bareApp = createApp({ platform: bare, issuerWebhookSecret: SECRET, merchants: bare.merchants });
+    const bareApp = createApp({ platform: bare, issuerWebhookSecret: SECRET, merchants: new InMemoryMerchantDirectory(bare.merchants) });
     const signup = await bareApp.request("/v1/signup", {
       method: "POST",
       body: JSON.stringify({ email: "dev2@example.co.za", name: "Dev" }),
