@@ -122,6 +122,11 @@ export default function Dashboard() {
   const [role, setRole] = useState<Role | null>(null);
   const [holder, setHolder] = useState<Holder | null>(null);
   const [connected, setConnected] = useState(false);
+  // Which console the visitor picked on the pre-login chooser — null until
+  // chosen (or remembered from a prior visit). A-MERCHANT isn't a state
+  // here at all: picking it navigates straight to /merchant, a wholly
+  // separate route with its own login and its own identity, same as ever.
+  const [product, setProduct] = useState<"acard" | null>(null);
   const [view, setView] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [error, setError] = useState("");
@@ -239,6 +244,15 @@ export default function Dashboard() {
     }
     const s = localStorage.getItem("acard_token");
     if (s) setToken(s);
+    // A returning visitor who last picked A-MERCHANT skips the chooser
+    // entirely and lands where they actually work — the chooser is for the
+    // first visit (or an explicit "switch console"), not every reload.
+    const lastProduct = localStorage.getItem("acard_last_product");
+    if (lastProduct === "merchant" && !s) {
+      window.location.href = "/merchant";
+      return;
+    }
+    if (lastProduct === "acard" || s) setProduct("acard");
   }, []);
   useEffect(() => {
     if (!token) return;
@@ -392,6 +406,46 @@ export default function Dashboard() {
   const crumb = NAV.find((n) => n.view === view)?.crumb ?? NAV.find((n) => n.view === view)?.label ?? "Home";
   const orgInitial = (holder?.name ?? "A").slice(0, 1).toUpperCase();
 
+  /* -------------------------------------------------- pre-login chooser */
+  if (!connected && !product) {
+    const pick = (p: "acard" | "merchant") => {
+      localStorage.setItem("acard_last_product", p);
+      if (p === "merchant") { window.location.href = "/merchant"; return; }
+      setProduct("acard");
+    };
+    return (
+      <section id="login">
+        <span className="login-chip lc1">budget <span className="g">R500</span></span>
+        <span className="login-chip lc2">one-time use</span>
+        <span className="login-chip lc3">groceries only</span>
+        <span className="login-chip lc4">ask me over <span className="a">R250</span></span>
+        <div className="login-card" style={{ maxWidth: 440 }}>
+          <div className="wordmark">a<span className="dot">·</span>card</div>
+          <div className="login-title" style={{ fontSize: 28 }}>Which console<br />do you need?</div>
+          <div className="login-sub">Two products, two logins — pick where you actually work.</div>
+          <div className="product-picker">
+            <button className="product-option" onClick={() => pick("acard")}>
+              <span className="product-option-ico"><Icon name="card" size={20} /></span>
+              <span>
+                <span className="product-option-name">A-CARD</span>
+                <span className="product-option-desc">Fund wallets, issue agent cards, approve spend.</span>
+              </span>
+              <Icon name="right" size={18} />
+            </button>
+            <button className="product-option" onClick={() => pick("merchant")}>
+              <span className="product-option-ico"><Icon name="building" size={20} /></span>
+              <span>
+                <span className="product-option-name">A-MERCHANT</span>
+                <span className="product-option-desc">Run your shop's catalog and stock — you were invited here.</span>
+              </span>
+              <Icon name="right" size={18} />
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   /* -------------------------------------------------- login screen */
   if (!connected) {
     return (
@@ -401,6 +455,12 @@ export default function Dashboard() {
         <span className="login-chip lc3">groceries only</span>
         <span className="login-chip lc4">ask me over <span className="a">R250</span></span>
         <div className="login-card">
+          <button
+            className="product-switch-link"
+            onClick={() => { localStorage.removeItem("acard_last_product"); setProduct(null); }}
+          >
+            <Icon name="updown" size={13} /> Switch console
+          </button>
           <div className="wordmark">a<span className="dot">·</span>card</div>
           <div className="login-title">Give your agent<br />a <span className="em">card</span>.</div>
           <div className="login-sub">Sign in to your console.</div>

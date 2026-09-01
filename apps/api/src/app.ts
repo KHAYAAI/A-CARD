@@ -19,7 +19,6 @@ import {
   type MerchantRole,
   type MerchantSessionContext,
   type MerchantStatus,
-  type AfpLedger,
   createIntent as createAfpIntent,
   routeIntent,
 } from "@acard/core";
@@ -32,6 +31,7 @@ import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.j
 import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantAuthKitConfig } from "./merchantAuthKit.js";
 import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreConfig } from "./kybDocuments.js";
 import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
+import type { AfpLedgerPort } from "./afp/index.js";
 
 /**
  * A-CARD REST API.
@@ -124,7 +124,7 @@ export interface AppConfig {
    * itself is required whenever any rails are, since a rail with nowhere
    * to post its outcome isn't safely usable.
    */
-  afp?: { ledger: AfpLedger; rails: RailAdapter[] };
+  afp?: { ledger: AfpLedgerPort; rails: RailAdapter[] };
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -1627,7 +1627,7 @@ export function createApp(config: AppConfig) {
         counterparty: body.counterparty,
         allowedRails: body.allowed_rails,
       });
-      afp.ledger.recordIntent(intent);
+      await afp.ledger.recordIntent(intent);
 
       const quotes = await Promise.all(afp.rails.map(async (rail) => ({ profile: rail.profile, quote: await rail.quote(intent) })));
       const decision = routeIntent(intent, quotes);
@@ -1638,7 +1638,7 @@ export function createApp(config: AppConfig) {
       const holder = c.get("holder");
       let intent;
       try {
-        intent = afp.ledger.getIntent(c.req.param("id"));
+        intent = await afp.ledger.getIntent(c.req.param("id"));
       } catch {
         return c.json({ error: { code: "not_found", message: "intent not found" } }, 404);
       }
@@ -1658,7 +1658,7 @@ export function createApp(config: AppConfig) {
       // A repeat of a key already executed is a lookup, never a second
       // attempt — this is the actual double-execution guard, ahead of even
       // routing running again.
-      const existing = afp.ledger.getByIdempotencyKey(idempotencyKey);
+      const existing = await afp.ledger.getByIdempotencyKey(idempotencyKey);
       if (existing) return c.json({ transaction: existing });
 
       const body = executeIntentSchema.parse(await c.req.json().catch(() => ({})));
@@ -1674,27 +1674,27 @@ export function createApp(config: AppConfig) {
         );
       }
 
-      const tx = afp.ledger.beginExecution(intent, railId, chosen.profile.finality, idempotencyKey);
+      const tx = await afp.ledger.beginExecution(intent, railId, chosen.profile.finality, idempotencyKey);
       try {
         const result = await chosen.execute(intent);
-        const completed = afp.ledger.completeExecution(tx.id, result);
+        const completed = await afp.ledger.completeExecution(tx.id, result);
         return c.json({ transaction: completed }, 201);
       } catch (error) {
         if (error instanceof RailAmbiguousOutcomeError) {
-          const parked = afp.ledger.markReconciling(tx.id, error.message);
+          const parked = await afp.ledger.markReconciling(tx.id, error.message);
           return c.json(
             { transaction: parked, warning: "execution outcome is unknown and needs reconciliation before this can be retried" },
             202,
           );
         }
         const message = error instanceof Error ? error.message : String(error);
-        const failed = afp.ledger.markFailed(tx.id, message);
+        const failed = await afp.ledger.markFailed(tx.id, message);
         return c.json({ transaction: failed, error: { code: "execution_failed", message } }, 402);
       }
     });
 
     app.get("/v1/afp/transactions", async (c) => {
-      return c.json({ transactions: afp.ledger.list(c.get("holder").id) });
+      return c.json({ transactions: await afp.ledger.list(c.get("holder").id) });
     });
   }
 

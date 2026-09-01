@@ -197,12 +197,19 @@ export default function MerchantPortal() {
       <div>
         <div style={{ maxWidth: 420, margin: "80px auto", padding: "0 20px" }}>
           <div className="panel panel-pad">
-            <h2 style={{ marginTop: 0 }}>Merchant portal</h2>
+            <h2 style={{ marginTop: 0 }}>A-MERCHANT portal</h2>
             <div className="hint">
               {error
                 ? `Couldn't sign you in: ${error}`
                 : "There's no self-serve signup — ask A-CARD for an invite link to your shop's portal."}
             </div>
+            <button
+              className="hint"
+              style={{ display: "inline-block", marginTop: 14, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => { localStorage.removeItem("acard_last_product"); window.location.href = "/"; }}
+            >
+              ← Not a merchant? Go to A-CARD
+            </button>
           </div>
         </div>
         {toast && <div id="toast" className="on">{toast}</div>}

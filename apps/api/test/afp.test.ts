@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AfpLedger, Platform } from "@acard/core";
+import { InMemoryAfpLedger } from "../src/afp/index.js";
 import { createApp } from "../src/app.js";
 import { InMemoryPlatformService } from "../src/service/index.js";
 import {
@@ -86,7 +87,7 @@ beforeEach(async () => {
     }),
   ];
 
-  app = createApp({ platform: service, issuerWebhookSecret: SECRET, afp: { ledger, rails } });
+  app = createApp({ platform: service, issuerWebhookSecret: SECRET, afp: { ledger: new InMemoryAfpLedger(ledger), rails } });
   const res = await app.request("/v1/signup", {
     method: "POST",
     body: JSON.stringify({ email: "dev@example.co.za", name: "Dev", currency: "ZAR" }),

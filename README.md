@@ -302,12 +302,25 @@ A-MERCHANT. A-MERCHANT's default wiring is safe because it's read-only
 discovery; AFP moves money, so turning it on is a decision a deployment
 makes explicitly, with rails it has actually chosen to trust.
 
-**Known gap, stated plainly:** `AfpLedger` is in-memory only — there is no
-Postgres adapter yet, the same place A-MERCHANT's directory was before it
-got one. The interface boundary (`RailAdapter`, the ledger's own method
-surface) is deliberately built to make that adapter a follow-on task, not a
-redesign, the same way `apps/api/src/merchant/postgres.ts` followed
-`MerchantDirectory` without changing its shape.
+**Ledger persistence:** `AfpLedgerPort` (`apps/api/src/afp/`) has the same
+async-port shape as the merchant directory — `InMemoryAfpLedger` wraps the
+in-memory `AfpLedger` for local/single-instance use, `PostgresAfpLedger` is
+a real multi-writer adapter (`acard_afp_intents`/`acard_afp_transactions`,
+idempotency enforced by a Postgres `UNIQUE INDEX` plus
+`INSERT … ON CONFLICT DO NOTHING`, proven under ten genuinely concurrent
+`beginExecution` calls in `apps/api/test/pg-afp-ledger.test.ts`). `apps/api/src/index.ts`
+picks between them exactly as it does for A-MERCHANT — Postgres when
+`platform` is a `PostgresPlatformService`, in-memory otherwise — but only
+once AFP itself is turned on.
+
+**Turning it on:** set `ACARD_ENABLE_AFP=true`. The card rail is always
+included when AFP is enabled — it's the same tested authorization path
+A-CARD already runs, not a new trust surface. x402 and stablecoin stay
+off unless an operator explicitly supplies `ACARD_AFP_X402_PAYER_ADDRESS`
+or `ACARD_AFP_STABLECOIN_FROM_ADDRESS`, and even then they run against
+`SANDBOX_SIGNER` / `createSandboxStablecoinClient` — no real signing key or
+custodied wallet exists yet, so turning either on only proves the protocol
+round trip, not real settlement (the server logs this loudly on boot).
 
 ## How an authorization is decided
 

@@ -6,6 +6,9 @@ import { InMemoryPlatformService, PostgresPlatformService, type PlatformService 
 import { attachSlackNotifications } from "./notifications.js";
 import { InMemoryMerchantAuth, InMemoryMerchantDirectory, PostgresMerchantAuth, PostgresMerchantDirectory } from "./merchant/index.js";
 import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.js";
+import { AfpLedger } from "@acard/core";
+import { InMemoryAfpLedger, PostgresAfpLedger, type AfpLedgerPort } from "./afp/index.js";
+import { createCardRail, createX402Rail, createStablecoinRail, createSandboxStablecoinClient, SANDBOX_SIGNER, type RailAdapter } from "./rails/index.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const issuerWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET ?? "whsec_sandbox_secret";
@@ -20,6 +23,9 @@ const workosApiKey = process.env.WORKOS_API_KEY;
 const workosClientId = process.env.WORKOS_CLIENT_ID;
 const kybDocumentsBucket = process.env.KYB_DOCUMENTS_BUCKET;
 const awsRegion = process.env.AWS_REGION ?? "af-south-1";
+const afpEnabled = process.env.ACARD_ENABLE_AFP === "true";
+const afpX402PayerAddress = process.env.ACARD_AFP_X402_PAYER_ADDRESS;
+const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
 
 /**
  * Persistence modes:
@@ -92,6 +98,62 @@ if (!workosApiKey) {
   console.log("A-CARD API: merchant portal disabled — set WORKOS_API_KEY/WORKOS_CLIENT_ID to let merchants log in and restate stock themselves");
 }
 
+/**
+ * AFP (Agent Financial Platform) moves money across rails, so — unlike
+ * A-MERCHANT's read-only catalog — it is never auto-wired just because a
+ * database happens to be configured. It mounts only when an operator
+ * explicitly sets ACARD_ENABLE_AFP=true; everything else here (which
+ * ledger backend, which rails) follows from the same persistence choice
+ * A-CARD and A-MERCHANT already made, once that flag is on.
+ *
+ * The card rail is the only rail included unconditionally when AFP is on —
+ * it's a thin wrapper around A-CARD's own already-real authorization path,
+ * no different in trust from /v1/simulate/purchase. x402 and stablecoin
+ * are genuinely sandboxed (see apps/api/src/rails/x402.ts and
+ * stablecoin.ts): no real signing key or custodied wallet exists yet, so
+ * they only join the rail set when an operator supplies the address that
+ * turns them on, and are logged loudly as sandbox-only when they do.
+ */
+let afp: { ledger: AfpLedgerPort; rails: RailAdapter[] } | undefined;
+
+if (afpEnabled) {
+  let afpLedger: AfpLedgerPort;
+  if (platform instanceof PostgresPlatformService) {
+    const pgLedger = new PostgresAfpLedger(databaseUrl as string);
+    await pgLedger.migrate();
+    afpLedger = pgLedger;
+    const previousClose = onClose;
+    onClose = async () => {
+      await previousClose?.();
+      await pgLedger.close();
+    };
+    console.log("A-CARD API: AFP enabled — ledger on the Postgres multi-writer store");
+  } else {
+    afpLedger = new InMemoryAfpLedger(new AfpLedger());
+    console.log("A-CARD API: AFP enabled — ledger is in-memory only and will not survive a restart");
+  }
+
+  const rails: RailAdapter[] = [createCardRail(platform, issuerWebhookSecret)];
+
+  if (afpX402PayerAddress) {
+    rails.push(createX402Rail({ payerAddress: afpX402PayerAddress, signer: SANDBOX_SIGNER }));
+    console.log("A-CARD API: AFP x402 rail enabled — SANDBOX_SIGNER only, produces syntactically valid but cryptographically meaningless signatures");
+  }
+
+  if (afpStablecoinFromAddress) {
+    rails.push(
+      createStablecoinRail({
+        client: createSandboxStablecoinClient(),
+        fromAddress: afpStablecoinFromAddress,
+        resolveRecipient: (intent) => intent.counterparty,
+      }),
+    );
+    console.log("A-CARD API: AFP stablecoin rail enabled — sandbox client only, no real chain settlement");
+  }
+
+  afp = { ledger: afpLedger, rails };
+}
+
 const app = createApp({
   platform,
   issuerWebhookSecret,
@@ -99,6 +161,7 @@ const app = createApp({
   onMutation,
   merchants,
   merchantAuth,
+  afp,
   // AuthKit is a separate WorkOS product from the org-SSO `workos` config
   // below — same API key and project, but this logs an individual merchant
   // user in (password, magic link, WorkOS-hosted signup), where org SSO
