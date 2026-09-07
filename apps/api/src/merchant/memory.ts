@@ -46,6 +46,24 @@ export class InMemoryMerchantDirectory implements MerchantDirectoryPort {
   async catalogHealth(...args: Parameters<MerchantDirectory["catalogHealth"]>) {
     return this.directory.catalogHealth(...args);
   }
+  async reportPurchase(...args: Parameters<MerchantDirectory["reportPurchase"]>) {
+    return this.directory.reportPurchase(...args);
+  }
+  async getPurchase(...args: Parameters<MerchantDirectory["getPurchase"]>) {
+    return this.directory.getPurchase(...args);
+  }
+  async listPurchases(...args: Parameters<MerchantDirectory["listPurchases"]>) {
+    return this.directory.listPurchases(...args);
+  }
+  async listPurchasesByBuyer(...args: Parameters<MerchantDirectory["listPurchasesByBuyer"]>) {
+    return this.directory.listPurchasesByBuyer(...args);
+  }
+  async resolvePurchase(...args: Parameters<MerchantDirectory["resolvePurchase"]>) {
+    return this.directory.resolvePurchase(...args);
+  }
+  async pendingPurchaseCount(...args: Parameters<MerchantDirectory["pendingPurchaseCount"]>) {
+    return this.directory.pendingPurchaseCount(...args);
+  }
   async search(...args: Parameters<MerchantDirectory["search"]>) {
     return this.directory.search(...args);
   }

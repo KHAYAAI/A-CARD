@@ -317,3 +317,108 @@ describe("platform integration", () => {
     expect(legacy.merchants.list()).toHaveLength(0);
   });
 });
+
+describe("purchase notices — closing the feedback loop", () => {
+  const setup = () => {
+    const directory = new MerchantDirectory();
+    const merchant = verifiedMerchant(directory);
+    const item = directory.upsertItem(merchant.id, {
+      sku: "CEM-50",
+      name: "Cement 50kg",
+      unit: "bag",
+      unitPriceCents: 8_800,
+      quantityAvailable: 600,
+    });
+    return { directory, merchant, item };
+  };
+
+  it("prices the line from the catalog, not from the buyer", () => {
+    const { directory, merchant, item } = setup();
+    const notice = directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 500 });
+
+    expect(notice.merchantId).toBe(merchant.id);
+    expect(notice.unitPriceCents).toBe(8_800);
+    expect(notice.totalCents).toBe(4_400_000);
+    expect(notice.status).toBe("reported");
+  });
+
+  it("copies the item's identity in, so the notice survives the item changing underneath it", () => {
+    const { directory, merchant, item } = setup();
+    const notice = directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 10 });
+
+    // The merchant renames and reprices the SKU, then deletes it outright.
+    directory.upsertItem(merchant.id, { sku: "CEM-50", name: "Cement 50kg (PPC)", unitPriceCents: 9_500 });
+    directory.removeItem(item.id);
+
+    const stored = directory.getPurchase(notice.id);
+    expect(stored.itemName).toBe("Cement 50kg");
+    expect(stored.unitPriceCents).toBe(8_800);
+    expect(stored.unit).toBe("bag");
+  });
+
+  it("does NOT decrement stock — a buyer's claim is a claim, not a stock count", () => {
+    const { directory, item } = setup();
+    const before = directory.getItem(item.id);
+    directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 500 });
+    const after = directory.getItem(item.id);
+
+    expect(after.quantityAvailable).toBe(before.quantityAvailable);
+    expect(after.inventoryUpdatedAt).toBe(before.inventoryUpdatedAt);
+  });
+
+  it("refuses a non-positive quantity", () => {
+    const { directory, item } = setup();
+    expect(() => directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 0 })).toThrow(
+      /positive integer/,
+    );
+  });
+
+  it("resolves once, in one direction only", () => {
+    const { directory, item } = setup();
+    const notice = directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 5 });
+
+    const acknowledged = directory.resolvePurchase(notice.id, "acknowledged", "delivered Tuesday");
+    expect(acknowledged.status).toBe("acknowledged");
+    expect(acknowledged.note).toBe("delivered Tuesday");
+    expect(acknowledged.resolvedAt).toBeTruthy();
+
+    expect(() => directory.resolvePurchase(notice.id, "disputed", "actually no")).toThrow(/already acknowledged/);
+  });
+
+  it("scopes notices to the merchant and to the buyer independently", () => {
+    const { directory, merchant, item } = setup();
+    const other = verifiedMerchant(directory, { name: "Other Hardware" });
+    const otherItem = directory.upsertItem(other.id, { sku: "SAND", name: "River sand", unitPriceCents: 4_000 });
+
+    directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_buyer", quantity: 1 });
+    directory.reportPurchase({ itemId: otherItem.id, accountHolderId: "ah_buyer", quantity: 2 });
+    directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_someone_else", quantity: 3 });
+
+    expect(directory.listPurchases(merchant.id)).toHaveLength(2);
+    expect(directory.listPurchases(other.id)).toHaveLength(1);
+    expect(directory.listPurchasesByBuyer("ah_buyer")).toHaveLength(2);
+    expect(directory.pendingPurchaseCount(merchant.id)).toBe(2);
+  });
+
+  it("pending count drops as the merchant works through them", () => {
+    const { directory, merchant, item } = setup();
+    const a = directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 1 });
+    directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 2 });
+
+    expect(directory.pendingPurchaseCount(merchant.id)).toBe(2);
+    directory.resolvePurchase(a.id, "disputed", "never received this order");
+    expect(directory.pendingPurchaseCount(merchant.id)).toBe(1);
+    expect(directory.listPurchases(merchant.id, { status: "disputed" })).toHaveLength(1);
+  });
+
+  it("survives a snapshot round trip, and hydrates a snapshot taken before notices existed", () => {
+    const { directory, merchant, item } = setup();
+    directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 500 });
+
+    const snapshot = JSON.parse(JSON.stringify(directory.serialize()));
+    expect(MerchantDirectory.hydrate(snapshot).listPurchases(merchant.id)).toHaveLength(1);
+
+    const { purchases: _dropped, ...older } = snapshot;
+    expect(MerchantDirectory.hydrate(older).listPurchases(merchant.id)).toHaveLength(0);
+  });
+});

@@ -19,6 +19,7 @@ import {
   type MerchantRole,
   type MerchantSessionContext,
   type MerchantStatus,
+  type PurchaseNoticeStatus,
   createIntent as createAfpIntent,
   routeIntent,
 } from "@acard/core";
@@ -354,6 +355,23 @@ const upsertItemSchema = z.object({
 const restateSchema = z.object({
   availability: availabilitySchema,
   quantity_available: z.number().int().nonnegative().optional(),
+});
+
+const reportPurchaseSchema = z.object({
+  item_id: z.string(),
+  quantity: z.number().int().positive(),
+  /** Evidence the merchant can reconcile against their own statement — not a payment this platform settles. */
+  card_transaction_id: z.string().optional(),
+});
+
+const acknowledgePurchaseSchema = z.object({
+  note: z.string().max(500).optional(),
+  /** Optional, and the whole point — see the route comment. */
+  restate: restateSchema.optional(),
+});
+
+const disputePurchaseSchema = z.object({
+  note: z.string().min(1).max(500),
 });
 
 const searchQuerySchema = z.object({
@@ -1385,7 +1403,17 @@ export function createApp(config: AppConfig) {
     // number the field team is actually measured on.
     app.get("/v1/merchants/:id/health", async (c) => {
       const merchant = await merchants.get(c.req.param("id"));
-      return c.json({ merchant_id: merchant.id, ...await merchants.catalogHealth(merchant.id) });
+      return c.json({
+        merchant_id: merchant.id,
+        ...(await merchants.catalogHealth(merchant.id)),
+        pendingPurchases: await merchants.pendingPurchaseCount(merchant.id),
+      });
+    });
+
+    /** The operator's view of one merchant's notices — support, not adjudication. */
+    app.get("/v1/merchants/:id/purchases", requireRole("admin"), async (c) => {
+      const status = c.req.query("status") as PurchaseNoticeStatus | undefined;
+      return c.json({ purchases: await merchants.listPurchases(c.req.param("id"), status ? { status } : {}) });
     });
 
     // ---- agent-facing reads --------------------------------------------------------
@@ -1425,6 +1453,37 @@ export function createApp(config: AppConfig) {
         limit: query.limit,
       });
       return c.json(result);
+    });
+
+    // ---- the feedback loop: buyer reports, merchant confirms ----------------
+    //
+    // The narrowest thing that closes A-MERCHANT's one-way mirror. No money
+    // moves through here — payment already happened on a card, between the
+    // buyer and the merchant's own acquirer. This is a *notification*, so a
+    // merchant learns a sale happened and has a reason to restate stock,
+    // which is the mechanic the entire directory depends on. See the
+    // PurchaseNotice comment in packages/core/src/merchants.ts for why this
+    // stays clear of orders, settlement, and funds custody.
+    app.post("/v1/merchants/:id/purchases", requireRole("member"), async (c) => {
+      const body = reportPurchaseSchema.parse(await c.req.json());
+      const item = await merchants.getItem(body.item_id);
+      if (item.merchantId !== c.req.param("id")) {
+        return c.json({ error: { code: "not_found", message: "item does not belong to this merchant" } }, 404);
+      }
+      const notice = await merchants.reportPurchase({
+        itemId: item.id,
+        // The buyer is whoever is authenticated, never a client-supplied id —
+        // same rule discovery already applies to merchant allow-lists.
+        accountHolderId: c.get("holder").id,
+        quantity: body.quantity,
+        cardTransactionId: body.card_transaction_id,
+      });
+      return c.json({ purchase: notice }, 201);
+    });
+
+    /** A buyer's own reported purchases, across every merchant. */
+    app.get("/v1/purchases", async (c) => {
+      return c.json({ purchases: await merchants.listPurchasesByBuyer(c.get("holder").id) });
     });
 
     app.get("/v1/merchants/:id", async (c) => {
@@ -1572,7 +1631,60 @@ export function createApp(config: AppConfig) {
 
       app.get("/v1/merchant-portal/health", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
-        return c.json(await merchants.catalogHealth(ctx.merchantId));
+        return c.json({
+          ...(await merchants.catalogHealth(ctx.merchantId)),
+          pendingPurchases: await merchants.pendingPurchaseCount(ctx.merchantId),
+        });
+      });
+
+      // ---- purchase notices: the merchant's side of the loop ---------------
+
+      app.get("/v1/merchant-portal/purchases", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const status = c.req.query("status") as PurchaseNoticeStatus | undefined;
+        return c.json({ purchases: await merchants.listPurchases(ctx.merchantId, status ? { status } : {}) });
+      });
+
+      /**
+       * Acknowledging and restating stock in one call, deliberately.
+       *
+       * Two separate taps is the difference between this loop working and
+       * not: the moment a merchant confirms a sale is the moment they know
+       * their true stock level, and it is the only moment they are reliably
+       * paying attention. Splitting it into "confirm" now and "update stock"
+       * later means the second half never happens, and stale stock is exactly
+       * what this product exists to prevent.
+       *
+       * The restatement is optional and independent — a merchant who does not
+       * know their new count can still acknowledge. Both writes are recorded
+       * separately (neither moves money), so a failure in one leaves the other
+       * intact and re-runnable rather than silently half-applied.
+       */
+      app.post("/v1/merchant-portal/purchases/:id/acknowledge", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const notice = await merchants.getPurchase(c.req.param("id") as string);
+        if (notice.merchantId !== ctx.merchantId) {
+          return c.json({ error: { code: "not_found", message: "purchase notice does not belong to your shop" } }, 404);
+        }
+        const body = acknowledgePurchaseSchema.parse(await c.req.json().catch(() => ({})));
+        const resolved = await merchants.resolvePurchase(notice.id, "acknowledged", body.note);
+        const item = body.restate
+          ? await merchants.restate(notice.itemId, {
+              availability: body.restate.availability,
+              quantityAvailable: body.restate.quantity_available,
+            })
+          : undefined;
+        return c.json({ purchase: resolved, item });
+      });
+
+      app.post("/v1/merchant-portal/purchases/:id/dispute", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const notice = await merchants.getPurchase(c.req.param("id") as string);
+        if (notice.merchantId !== ctx.merchantId) {
+          return c.json({ error: { code: "not_found", message: "purchase notice does not belong to your shop" } }, 404);
+        }
+        const body = disputePurchaseSchema.parse(await c.req.json());
+        return c.json({ purchase: await merchants.resolvePurchase(notice.id, "disputed", body.note) });
       });
 
       // Staff management: only an owner can see who has access or grant more

@@ -20,7 +20,10 @@ import {
   type MerchantUser,
   type OfferQuery,
   type OfferSearchResult,
+  type PurchaseNotice,
+  type PurchaseNoticeStatus,
   type RegisterMerchantInput,
+  type ReportPurchaseInput,
   type UpsertItemInput,
 } from "@acard/core";
 import type { MerchantAuthPort, MerchantDirectoryPort } from "./types.js";
@@ -111,6 +114,30 @@ const SCHEMA = `
     expires_at TIMESTAMPTZ NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS acard_purchase_notices (
+    id TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    account_holder_id TEXT NOT NULL,
+    quantity BIGINT NOT NULL,
+    unit_price_cents BIGINT NOT NULL,
+    total_cents BIGINT NOT NULL,
+    currency TEXT NOT NULL,
+    card_transaction_id TEXT,
+    status TEXT NOT NULL,
+    note TEXT,
+    reported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ
+  );
+  -- Deliberately no FK to acard_catalog_items: a notice outlives the item it
+  -- refers to (sku/item_name/unit are copied in for exactly that reason), so
+  -- deleting a discontinued SKU must not cascade away the sales history.
+  CREATE INDEX IF NOT EXISTS acard_purchase_notices_merchant_idx ON acard_purchase_notices(merchant_id, status);
+  CREATE INDEX IF NOT EXISTS acard_purchase_notices_buyer_idx ON acard_purchase_notices(account_holder_id);
+
   CREATE TABLE IF NOT EXISTS acard_merchant_invites (
     id TEXT PRIMARY KEY,
     hashed_token TEXT UNIQUE NOT NULL,
@@ -158,6 +185,27 @@ function rowToItem(row: any): CatalogItem {
     inventoryUpdatedAt: row.inventory_updated_at.toISOString(),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function rowToNotice(row: any): PurchaseNotice {
+  return {
+    id: row.id,
+    merchantId: row.merchant_id,
+    itemId: row.item_id,
+    sku: row.sku,
+    itemName: row.item_name,
+    unit: row.unit,
+    accountHolderId: row.account_holder_id,
+    quantity: Number(row.quantity),
+    unitPriceCents: Number(row.unit_price_cents),
+    totalCents: Number(row.total_cents),
+    currency: row.currency,
+    cardTransactionId: row.card_transaction_id ?? undefined,
+    status: row.status,
+    note: row.note ?? undefined,
+    reportedAt: row.reported_at.toISOString(),
+    resolvedAt: row.resolved_at?.toISOString(),
   };
 }
 
@@ -408,6 +456,91 @@ export class PostgresMerchantDirectory implements MerchantDirectoryPort {
     for (const age of ages) counts[classifyFreshness(age)] += 1;
     const median = ages.length === 0 ? 0 : (ages[Math.floor((ages.length - 1) / 2)] as number);
     return { items: items.length, ...counts, medianInventoryAgeHours: Math.round(median * 10) / 10 };
+  }
+
+  // -- purchase notices ------------------------------------------------------
+
+  async reportPurchase(input: ReportPurchaseInput): Promise<PurchaseNotice> {
+    if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) {
+      throw new DomainError("invalid_quantity", "quantity must be a positive integer");
+    }
+    // Priced from the catalog, never from the caller — same rule the
+    // in-memory directory enforces.
+    const item = await this.getItem(input.itemId);
+    const { rows } = await this.pool.query(
+      `INSERT INTO acard_purchase_notices
+         (id, merchant_id, item_id, sku, item_name, unit, account_holder_id, quantity,
+          unit_price_cents, total_cents, currency, card_transaction_id, status, reported_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'reported',now())
+       RETURNING *`,
+      [
+        newId("pn"),
+        item.merchantId,
+        item.id,
+        item.sku,
+        item.name,
+        item.unit,
+        input.accountHolderId,
+        input.quantity,
+        item.unitPriceCents,
+        item.unitPriceCents * input.quantity,
+        item.currency,
+        input.cardTransactionId ?? null,
+      ],
+    );
+    return rowToNotice(rows[0]);
+  }
+
+  async getPurchase(id: string): Promise<PurchaseNotice> {
+    const { rows } = await this.pool.query("SELECT * FROM acard_purchase_notices WHERE id = $1", [id]);
+    if (!rows[0]) throw new NotFoundError("purchase notice", id);
+    return rowToNotice(rows[0]);
+  }
+
+  async listPurchases(merchantId: string, filter: { status?: PurchaseNoticeStatus } = {}): Promise<PurchaseNotice[]> {
+    const { rows } = filter.status
+      ? await this.pool.query(
+          "SELECT * FROM acard_purchase_notices WHERE merchant_id = $1 AND status = $2 ORDER BY reported_at DESC",
+          [merchantId, filter.status],
+        )
+      : await this.pool.query("SELECT * FROM acard_purchase_notices WHERE merchant_id = $1 ORDER BY reported_at DESC", [
+          merchantId,
+        ]);
+    return rows.map(rowToNotice);
+  }
+
+  async listPurchasesByBuyer(accountHolderId: string): Promise<PurchaseNotice[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM acard_purchase_notices WHERE account_holder_id = $1 ORDER BY reported_at DESC",
+      [accountHolderId],
+    );
+    return rows.map(rowToNotice);
+  }
+
+  async resolvePurchase(id: string, status: "acknowledged" | "disputed", note?: string): Promise<PurchaseNotice> {
+    return withTransaction(this.pool, async (client) => {
+      // Locked, then status-checked inside the transaction: two staff members
+      // tapping "acknowledge" on the same notice at the same moment must not
+      // both succeed and race the resolvedAt timestamp.
+      const current = await client.query("SELECT status FROM acard_purchase_notices WHERE id = $1 FOR UPDATE", [id]);
+      if (!current.rows[0]) throw new NotFoundError("purchase notice", id);
+      if (current.rows[0].status !== "reported") {
+        throw new InvalidStateError(`purchase notice ${id} is already ${current.rows[0].status}`);
+      }
+      const { rows } = await client.query(
+        "UPDATE acard_purchase_notices SET status = $2, note = $3, resolved_at = now() WHERE id = $1 RETURNING *",
+        [id, status, note ?? null],
+      );
+      return rowToNotice(rows[0]);
+    });
+  }
+
+  async pendingPurchaseCount(merchantId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      "SELECT COUNT(*)::int AS n FROM acard_purchase_notices WHERE merchant_id = $1 AND status = 'reported'",
+      [merchantId],
+    );
+    return rows[0].n;
   }
 
   async search(query: OfferQuery): Promise<OfferSearchResult> {

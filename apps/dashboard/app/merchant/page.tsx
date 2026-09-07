@@ -25,7 +25,13 @@ interface Item {
   availability: "in_stock" | "low_stock" | "out_of_stock" | "made_to_order"; quantityAvailable?: number;
   leadTimeDays: number; inventoryUpdatedAt: string;
 }
-interface Health { items: number; fresh: number; aging: number; stale: number; medianInventoryAgeHours: number }
+interface Health { items: number; fresh: number; aging: number; stale: number; medianInventoryAgeHours: number; pendingPurchases: number }
+interface Purchase {
+  id: string; itemId: string; sku: string; itemName: string; unit: string;
+  quantity: number; unitPriceCents: number; totalCents: number; currency: string;
+  cardTransactionId?: string; status: "reported" | "acknowledged" | "disputed";
+  note?: string; reportedAt: string;
+}
 interface TeamInvite { id: string; role: "owner" | "staff"; issuedBy: string; expiresAt: string; createdAt: string }
 
 const SYM: Record<string, string> = { ZAR: "R", USD: "$", NGN: "₦", KES: "KSh" };
@@ -47,6 +53,8 @@ export default function MerchantPortal() {
   const [user, setUser] = useState<MerchantUser | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [busyPurchase, setBusyPurchase] = useState("");
   const [toast, setToast] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [busyItem, setBusyItem] = useState("");
@@ -80,15 +88,17 @@ export default function MerchantPortal() {
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
-      const [me, i, h] = await Promise.all([
+      const [me, i, h, p] = await Promise.all([
         call("/v1/merchant-portal/me"),
         call("/v1/merchant-portal/items"),
         call("/v1/merchant-portal/health"),
+        call("/v1/merchant-portal/purchases?status=reported"),
       ]);
       setMerchant(me.merchant);
       setUser(me.user);
       setItems(i.items ?? []);
       setHealth(h);
+      setPurchases(p.purchases ?? []);
       setConnected(true);
       setError("");
     } catch (e) {
@@ -138,6 +148,46 @@ export default function MerchantPortal() {
       flash(e instanceof Error ? e.message : "Could not update.");
     } finally {
       setBusyItem("");
+    }
+  };
+
+  /**
+   * Acknowledging is where the loop actually closes: the merchant confirms
+   * the sale AND states what is left on the shelf, in one tap. Splitting
+   * these into two actions is how stock counts go stale.
+   */
+  const acknowledge = async (p: Purchase, remaining?: number) => {
+    setBusyPurchase(p.id);
+    try {
+      await call(`/v1/merchant-portal/purchases/${p.id}/acknowledge`, {
+        method: "POST",
+        body: JSON.stringify(
+          remaining === undefined
+            ? {}
+            : { restate: { availability: remaining > 0 ? "in_stock" : "out_of_stock", quantity_available: remaining } },
+        ),
+      });
+      flash(remaining === undefined ? "Sale confirmed." : `Sale confirmed, ${p.itemName} set to ${remaining} ${p.unit}.`);
+      refresh();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not confirm.");
+    } finally {
+      setBusyPurchase("");
+    }
+  };
+
+  const dispute = async (p: Purchase) => {
+    const note = window.prompt(`What is wrong with this record of ${p.quantity} ${p.unit} of ${p.itemName}?`);
+    if (!note) return;
+    setBusyPurchase(p.id);
+    try {
+      await call(`/v1/merchant-portal/purchases/${p.id}/dispute`, { method: "POST", body: JSON.stringify({ note }) });
+      flash("Flagged for review.");
+      refresh();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Could not flag this.");
+    } finally {
+      setBusyPurchase("");
     }
   };
 
@@ -231,6 +281,58 @@ export default function MerchantPortal() {
             <div className="stat"><div className="head"><span className="lbl">Fresh</span></div><div className="val">{health.fresh}/{health.items}</div><div className="foot">confirmed in 24h</div></div>
             <div className="stat"><div className="head"><span className="lbl">Stale</span></div><div className="val">{health.stale}</div><div className="foot">need confirming</div></div>
           </div>
+        )}
+
+        {purchases.length > 0 && (
+          <>
+            <div className="panel-head">
+              <h2>Sales to confirm</h2>
+              <span className="pill pending">{purchases.length}</span>
+            </div>
+            <div className="stack" style={{ marginBottom: 24 }}>
+              {purchases.map((p) => {
+                const item = items.find((i) => i.id === p.itemId);
+                const busy = busyPurchase === p.id;
+                // The one-tap path: if we know what was on the shelf, the
+                // obvious remaining count is what was there minus what sold.
+                const remaining =
+                  item?.quantityAvailable === undefined ? undefined : Math.max(0, item.quantityAvailable - p.quantity);
+                return (
+                  <div className="panel panel-pad" key={p.id}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>
+                          {p.quantity} {p.unit} · {p.itemName}
+                        </div>
+                        <div className="hint">
+                          {fmt(p.totalCents, p.currency)} · reported {freshLabel(p.reportedAt).text.replace("confirmed", "")}
+                          {p.cardTransactionId ? ` · ref ${p.cardTransactionId}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: remaining === undefined ? "1fr 1fr" : "1.4fr 1fr 1fr", gap: 8, marginTop: 14 }}>
+                      {remaining !== undefined && (
+                        <button className="btn btn-green" style={{ padding: "14px 8px" }} disabled={busy} onClick={() => acknowledge(p, remaining)}>
+                          Confirm · {remaining} left
+                        </button>
+                      )}
+                      <button
+                        className={remaining === undefined ? "btn btn-green" : "btn btn-outline"}
+                        style={{ padding: "14px 8px" }}
+                        disabled={busy}
+                        onClick={() => acknowledge(p)}
+                      >
+                        Confirm only
+                      </button>
+                      <button className="btn btn-outline" style={{ padding: "14px 8px" }} disabled={busy} onClick={() => dispute(p)}>
+                        Not mine
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
 
         <div className="panel-head"><h2>Your catalog</h2><button className="btn btn-green" onClick={() => setShowAdd(true)}>+ Add item</button></div>

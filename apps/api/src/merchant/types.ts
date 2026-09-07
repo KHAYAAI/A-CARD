@@ -10,7 +10,10 @@ import type {
   MerchantUser,
   OfferQuery,
   OfferSearchResult,
+  PurchaseNotice,
+  PurchaseNoticeStatus,
   RegisterMerchantInput,
+  ReportPurchaseInput,
   UpsertItemInput,
 } from "@acard/core";
 
@@ -50,6 +53,12 @@ export interface MerchantDirectoryPort {
     merchantId: string,
   ): Promise<{ items: number; fresh: number; aging: number; stale: number; medianInventoryAgeHours: number }>;
   search(query: OfferQuery): Promise<OfferSearchResult>;
+  reportPurchase(input: ReportPurchaseInput): Promise<PurchaseNotice>;
+  getPurchase(id: string): Promise<PurchaseNotice>;
+  listPurchases(merchantId: string, filter?: { status?: PurchaseNoticeStatus }): Promise<PurchaseNotice[]>;
+  listPurchasesByBuyer(accountHolderId: string): Promise<PurchaseNotice[]>;
+  resolvePurchase(id: string, status: "acknowledged" | "disputed", note?: string): Promise<PurchaseNotice>;
+  pendingPurchaseCount(merchantId: string): Promise<number>;
 }
 
 export interface MerchantAuthPort {

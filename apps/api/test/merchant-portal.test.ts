@@ -361,3 +361,169 @@ describe("without merchantAuthKit configured", () => {
     expect((await bare.request("/v1/merchant-portal/me")).status).toBe(404);
   });
 });
+
+describe("purchase notices — the feedback loop, end to end", () => {
+  async function setupShop() {
+    const merchantId = await registerVerifiedMerchant();
+    const token = await onboardMerchantOwner(merchantId, {
+      workosUserId: "wu_owner",
+      email: "owner@kasihardware.co.za",
+      name: "Thandi",
+    });
+    const itemRes = await portal("/v1/merchant-portal/items", token, {
+      method: "PUT",
+      body: JSON.stringify({
+        sku: "CEM-50",
+        name: "Cement 50kg",
+        unit: "bag",
+        unit_price_cents: 8_800,
+        quantity_available: 600,
+      }),
+    });
+    return { merchantId, token, item: (await json(itemRes)).item };
+  }
+
+  it("runs buyer report → merchant sees it → acknowledge + restate in one call", async () => {
+    const { merchantId, token, item } = await setupShop();
+
+    // 1. The buyer reports what they bought, priced from the catalog.
+    const reported = await authed(`/v1/merchants/${merchantId}/purchases`, {
+      method: "POST",
+      body: JSON.stringify({ item_id: item.id, quantity: 500, card_transaction_id: "ctx_abc" }),
+    });
+    expect(reported.status).toBe(201);
+    const notice = (await json(reported)).purchase;
+    expect(notice.totalCents).toBe(4_400_000);
+    expect(notice.status).toBe("reported");
+    expect(notice.cardTransactionId).toBe("ctx_abc");
+
+    // 2. It shows up as pending work in the merchant's own portal.
+    const health = await json(await portal("/v1/merchant-portal/health", token));
+    expect(health.pendingPurchases).toBe(1);
+    const listed = await json(await portal("/v1/merchant-portal/purchases", token));
+    expect(listed.purchases).toHaveLength(1);
+
+    // 3. Acknowledging and restating stock is one action — the whole point.
+    const before = (await json(await portal("/v1/merchant-portal/items", token))).items[0];
+    const ack = await portal(`/v1/merchant-portal/purchases/${notice.id}/acknowledge`, token, {
+      method: "POST",
+      body: JSON.stringify({ note: "collected Tuesday", restate: { availability: "in_stock", quantity_available: 100 } }),
+    });
+    expect(ack.status).toBe(200);
+    const acked = await json(ack);
+    expect(acked.purchase.status).toBe("acknowledged");
+    expect(acked.item.quantityAvailable).toBe(100);
+
+    // The freshness clock moved — which is the outcome the whole loop exists for.
+    expect(Date.parse(acked.item.inventoryUpdatedAt)).toBeGreaterThanOrEqual(Date.parse(before.inventoryUpdatedAt));
+    expect((await json(await portal("/v1/merchant-portal/health", token))).pendingPurchases).toBe(0);
+  });
+
+  it("acknowledging without restating is allowed — a merchant who doesn't know their count still confirms", async () => {
+    const { merchantId, token, item } = await setupShop();
+    const notice = (
+      await json(
+        await authed(`/v1/merchants/${merchantId}/purchases`, {
+          method: "POST",
+          body: JSON.stringify({ item_id: item.id, quantity: 5 }),
+        }),
+      )
+    ).purchase;
+
+    const res = await portal(`/v1/merchant-portal/purchases/${notice.id}/acknowledge`, token, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    const body = await json(res);
+    expect(body.purchase.status).toBe("acknowledged");
+    expect(body.item).toBeUndefined();
+  });
+
+  it("a merchant can dispute, and cannot then re-resolve it", async () => {
+    const { merchantId, token, item } = await setupShop();
+    const notice = (
+      await json(
+        await authed(`/v1/merchants/${merchantId}/purchases`, {
+          method: "POST",
+          body: JSON.stringify({ item_id: item.id, quantity: 5 }),
+        }),
+      )
+    ).purchase;
+
+    const disputed = await json(
+      await portal(`/v1/merchant-portal/purchases/${notice.id}/dispute`, token, {
+        method: "POST",
+        body: JSON.stringify({ note: "never received this order" }),
+      }),
+    );
+    expect(disputed.purchase.status).toBe("disputed");
+
+    const again = await portal(`/v1/merchant-portal/purchases/${notice.id}/acknowledge`, token, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    expect(again.status).toBe(409);
+  });
+
+  it("reporting a purchase does not move money or touch stock", async () => {
+    const { merchantId, token, item } = await setupShop();
+    const walletBefore = await json(await authed("/v1/wallet"));
+
+    await authed(`/v1/merchants/${merchantId}/purchases`, {
+      method: "POST",
+      body: JSON.stringify({ item_id: item.id, quantity: 500 }),
+    });
+
+    expect(await json(await authed("/v1/wallet"))).toEqual(walletBefore);
+    const stock = (await json(await portal("/v1/merchant-portal/items", token))).items[0];
+    expect(stock.quantityAvailable).toBe(600);
+  });
+
+  it("one shop cannot see or resolve another shop's notices", async () => {
+    const { merchantId, item } = await setupShop();
+    const notice = (
+      await json(
+        await authed(`/v1/merchants/${merchantId}/purchases`, {
+          method: "POST",
+          body: JSON.stringify({ item_id: item.id, quantity: 1 }),
+        }),
+      )
+    ).purchase;
+
+    const otherId = await registerVerifiedMerchant("Rival Hardware");
+    const otherToken = await onboardMerchantOwner(otherId, {
+      workosUserId: "wu_rival",
+      email: "owner@rival.co.za",
+      name: "Sipho",
+    });
+
+    expect((await json(await portal("/v1/merchant-portal/purchases", otherToken))).purchases).toHaveLength(0);
+    const res = await portal(`/v1/merchant-portal/purchases/${notice.id}/acknowledge`, otherToken, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    // 404, not 403 — same discipline as every other cross-merchant read.
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects an item that does not belong to the merchant in the path", async () => {
+    const { item } = await setupShop();
+    const otherId = await registerVerifiedMerchant("Rival Hardware");
+    const res = await authed(`/v1/merchants/${otherId}/purchases`, {
+      method: "POST",
+      body: JSON.stringify({ item_id: item.id, quantity: 1 }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("a buyer sees their own purchases across every merchant", async () => {
+    const { merchantId, item } = await setupShop();
+    await authed(`/v1/merchants/${merchantId}/purchases`, {
+      method: "POST",
+      body: JSON.stringify({ item_id: item.id, quantity: 1 }),
+    });
+    const mine = await json(await authed("/v1/purchases"));
+    expect(mine.purchases).toHaveLength(1);
+    expect(mine.purchases[0].itemName).toBe("Cement 50kg");
+  });
+});

@@ -21,7 +21,10 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 43 tests: ledger invariants, auth flow, approvals, billing, webhooks, API e2e
+npm test                 # 344 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+                         # A-MERCHANT discovery + purchase notices, AFP routing/ledger, API e2e.
+                         # 51 of them are Postgres integration tests, skipped unless
+                         # ACARD_TEST_DATABASE_URL points at a reachable database.
 npm run dev:api          # sandbox API on :8787 (in-memory unless DATABASE_URL is set)
 ```
 
@@ -129,6 +132,39 @@ for it with an ordinary A-CARD card through the existing flow, so nothing in
 this layer holds a merchant's money — which is what keeps it clear of funds
 custody, and out of PCI scope. Accepting and remitting on a merchant's behalf
 needs a partner PSP or sponsor arrangement, not another table.
+
+### Purchase notices — the feedback loop
+
+Discovery alone is a one-way mirror: an agent finds an offer, pays by card, and
+the merchant never learns the sale happened. That is not merely a missing
+feature — it undermines the mechanic the product rests on, because a merchant
+with no evidence anyone is buying has no reason to keep restating stock.
+
+A **purchase notice** is the narrowest thing that closes it. The buyer reports
+what they bought (`POST /v1/merchants/:id/purchases`); the merchant sees it in
+their portal and confirms — restating stock in the same call
+(`POST /v1/merchant-portal/purchases/:id/acknowledge`), because the moment they
+confirm a sale is the only moment they reliably know their true shelf count.
+A merchant who disagrees can dispute it instead; who is right is a conversation
+between two businesses, not a state machine this platform adjudicates.
+
+Three properties keep this clear of everything it must stay clear of:
+
+- **No money moves.** Payment already happened, on a card, between the buyer
+  and the merchant's own acquirer. `cardTransactionId` is evidence for the
+  merchant to reconcile against their statement — not a payment this platform
+  settles, holds, or remits. Funds custody stays exactly as out of scope as
+  before.
+- **No stock is decremented automatically.** A buyer's claim is a claim; only
+  the merchant knows what they actually fulfilled. Silently mutating a stock
+  count from an unverified assertion would corrupt the data honesty this
+  directory exists to protect.
+- **Lines are priced from the catalog, not the caller.** The buyer says what
+  and how many; the catalog says what that costs.
+
+Notices resolve exactly once, and the Postgres adapter takes a `FOR UPDATE`
+lock to prove it — `apps/api/test/pg-merchant-service.test.ts` fires five
+simultaneous acknowledgements at one notice and asserts exactly one wins.
 
 ```bash
 # what an agent asks
@@ -347,9 +383,10 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 
 - **Fraud ML.** The rules engine carries hot-path decisions today, which is the correct sequencing — ML scoring is a post-launch layer.
 - **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
-- **A-MERCHANT's write side.** Orders, payment acceptance, settlement, disputes and refunds. Deliberately deferred: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money, which is a licensing and partner-bank question rather than a schema. The read side — now including merchant-run onboarding and catalog upkeep through the portal — ships first because it tests the assumption that can actually kill the thesis: whether merchants keep a catalog current.
+- **A-MERCHANT's money-handling write side.** Payment acceptance, settlement, refunds, and adjudicated disputes. Deliberately deferred, and the boundary is precise: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money — a licensing and partner-bank question rather than a schema. Purchase notices (above) deliberately stop short of that line: they record *that* a sale happened so a merchant has a reason to keep stock fresh, without any money passing through this platform.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
-- **AFP's real rail settlement (x402 signing, stablecoin custody) and its Postgres adapter.** The routing engine and cross-rail ledger are real and tested; the card rail is fully real (it's A-CARD's own authorization path). x402 and stablecoin are real protocol/interface implementations with sandboxed execution — genuinely useful for proving the ledger's finality and reconciliation logic, not yet safe to carry real value. Turning them real needs the same kind of decision a contracted issuer needs: a signing key with real funds behind it for x402, a custody provider (or self-hosted signer) for stablecoin. The ledger itself is in-memory only, same gap A-MERCHANT's directory had before its own Postgres adapter.
+- **AFP's real rail settlement (x402 signing, stablecoin custody).** The routing engine and cross-rail ledger are real and tested, on both the in-memory and Postgres backends; the card rail is fully real (it's A-CARD's own authorization path). x402 and stablecoin are real protocol/interface implementations with sandboxed execution — genuinely useful for proving the ledger's finality and reconciliation logic, not yet safe to carry real value. Turning them real needs the same kind of decision a contracted issuer needs: a signing key with real funds behind it for x402, a custody provider (or self-hosted signer) for stablecoin.
+- **AFP's lifecycle workers.** `dueForSettlement()` is implemented and tested on both backends, but nothing in production calls it — a `posted` transaction never auto-settles. Likewise `reconciling` has no resolution path: the state exists, is entered correctly, and has no exit but direct database access. The ledger's *state model* is complete; the machinery that moves transactions through it over time is not. Both are small (a scheduled job and one operator endpoint) and both should land before AFP carries real value, since a rail that can start a payment it cannot finish is worse than one that is switched off.
 
 ## Scripts
 

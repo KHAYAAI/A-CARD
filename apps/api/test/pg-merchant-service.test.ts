@@ -21,7 +21,7 @@ const suite = DB_URL ? describe : describe.skip;
 const directory = DB_URL ? new PostgresMerchantDirectory(DB_URL) : (undefined as unknown as PostgresMerchantDirectory);
 const auth = DB_URL ? new PostgresMerchantAuth(DB_URL) : (undefined as unknown as PostgresMerchantAuth);
 
-const TABLES = ["acard_merchant_sessions", "acard_merchant_invites", "acard_merchant_users", "acard_catalog_items", "acard_merchants"];
+const TABLES = ["acard_purchase_notices", "acard_merchant_sessions", "acard_merchant_invites", "acard_merchant_users", "acard_catalog_items", "acard_merchants"];
 
 async function truncateAll() {
   await (directory as unknown as { pool: { query: (sql: string) => Promise<unknown> } }).pool.query(
@@ -289,5 +289,111 @@ suite("PostgresMerchantAuth (multi-writer)", () => {
     const stored = JSON.stringify(dump.rows);
     expect(stored).not.toContain(inviteToken);
     expect(stored).not.toContain(sessionToken);
+  });
+});
+
+suite("PostgresMerchantDirectory — purchase notices", () => {
+  beforeEach(async () => {
+    await directory.migrate();
+    await truncateAll();
+  });
+
+  async function shopWithItem() {
+    const merchant = await registerVerified(directory, "Kasi Hardware");
+    const item = await directory.upsertItem(merchant.id, {
+      sku: "CEM-50",
+      name: "Cement 50kg",
+      unit: "bag",
+      unitPriceCents: 8_800,
+      quantityAvailable: 600,
+    });
+    return { merchant, item };
+  }
+
+  it("prices from the catalog and round-trips every field", async () => {
+    const { merchant, item } = await shopWithItem();
+    const notice = await directory.reportPurchase({
+      itemId: item.id,
+      accountHolderId: "ah_1",
+      quantity: 500,
+      cardTransactionId: "ctx_abc",
+    });
+
+    expect(notice.merchantId).toBe(merchant.id);
+    expect(notice.totalCents).toBe(4_400_000);
+    expect(notice.cardTransactionId).toBe("ctx_abc");
+    expect(await directory.getPurchase(notice.id)).toEqual(notice);
+  });
+
+  it("a notice outlives the item it refers to", async () => {
+    const { merchant, item } = await shopWithItem();
+    const notice = await directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 2 });
+
+    await directory.removeItem(item.id);
+
+    const stored = await directory.getPurchase(notice.id);
+    expect(stored.itemName).toBe("Cement 50kg");
+    expect(stored.sku).toBe("CEM-50");
+    expect(await directory.listPurchases(merchant.id)).toHaveLength(1);
+  });
+
+  it("scopes by merchant, by buyer, and by status", async () => {
+    const { merchant, item } = await shopWithItem();
+    const other = await registerVerified(directory, "Rival Hardware");
+    const otherItem = await directory.upsertItem(other.id, { sku: "SAND", name: "River sand", unitPriceCents: 4_000 });
+
+    await directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_buyer", quantity: 1 });
+    const second = await directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_other", quantity: 2 });
+    await directory.reportPurchase({ itemId: otherItem.id, accountHolderId: "ah_buyer", quantity: 3 });
+
+    expect(await directory.listPurchases(merchant.id)).toHaveLength(2);
+    expect(await directory.listPurchasesByBuyer("ah_buyer")).toHaveLength(2);
+    expect(await directory.pendingPurchaseCount(merchant.id)).toBe(2);
+
+    await directory.resolvePurchase(second.id, "acknowledged", "delivered");
+    expect(await directory.pendingPurchaseCount(merchant.id)).toBe(1);
+    expect(await directory.listPurchases(merchant.id, { status: "acknowledged" })).toHaveLength(1);
+  });
+
+  it("concurrency: five simultaneous resolves produce exactly one winner", async () => {
+    const { item } = await shopWithItem();
+    const notice = await directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 1 });
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, () => directory.resolvePurchase(notice.id, "acknowledged", "got it")),
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect((await directory.getPurchase(notice.id)).status).toBe("acknowledged");
+  });
+
+  it("matches the in-memory directory for the same lifecycle", async () => {
+    const memory = new MerchantDirectory();
+    const memMerchant = memory.register({
+      name: "Kasi Hardware",
+      merchantCategoryCode: "5211",
+      address: { lat: -26.2041, lng: 28.0473, addressLine: "1 Main Road", city: "Johannesburg", province: "Gauteng", country: "ZA" },
+      kyb: { registrationNumber: "2019/123456/07", contactEmail: "orders@example.co.za" },
+    });
+    const memItem = memory.upsertItem(memMerchant.id, {
+      sku: "CEM-50",
+      name: "Cement 50kg",
+      unit: "bag",
+      unitPriceCents: 8_800,
+      quantityAvailable: 600,
+    });
+    const { item } = await shopWithItem();
+
+    const pgNotice = await directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 500 });
+    const memNotice = memory.reportPurchase({ itemId: memItem.id, accountHolderId: "ah_1", quantity: 500 });
+    expect(pgNotice.totalCents).toBe(memNotice.totalCents);
+    expect(pgNotice.status).toBe(memNotice.status);
+
+    const pgDone = await directory.resolvePurchase(pgNotice.id, "acknowledged", "same note");
+    const memDone = memory.resolvePurchase(memNotice.id, "acknowledged", "same note");
+    expect(pgDone.status).toBe(memDone.status);
+    expect(pgDone.note).toBe(memDone.note);
+
+    await expect(directory.resolvePurchase(pgNotice.id, "disputed")).rejects.toThrow(/already acknowledged/);
+    expect(() => memory.resolvePurchase(memNotice.id, "disputed")).toThrow(/already acknowledged/);
   });
 });

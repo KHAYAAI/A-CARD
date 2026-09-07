@@ -1,6 +1,6 @@
 # A-CARD — Launch Plan
 
-_Last updated: 2026-07-20_
+_Last updated: 2026-09-07_
 
 This document explains what A-CARD is, the current state of the engineering,
 whether it can go public, the external dependencies required, and a phased
@@ -77,8 +77,8 @@ is contracted.** These are two different bars.
   API, and MCP server on a public AWS URL, let developers sign up, create
   cards, and simulate purchases. This is a legitimate public beta.
 - The authorization engine, ledger, rules, approvals, webhooks, auth/RBAC, and
-  billing are production-quality and tested (57 automated tests + a live
-  multi-writer integration suite).
+  billing are production-quality and tested (344 automated tests, 51 of them
+  Postgres integration tests run against a real database).
 - The AWS stack is hardened (private networking, WAF, TLS, encrypted DB) and
   deploys with one command.
 

@@ -1,7 +1,7 @@
 # A-CARD Platform: Executive Briefing
 
 **Status:** ✓ Ready for Public Beta  
-**Last Updated:** August 2026
+**Last Updated:** September 2026
 
 ---
 
@@ -10,7 +10,7 @@
 A-CARD is a fintech platform that enables AI agents to transact independently using virtual cards. Every charge runs through real-time authorization with rule-based controls and human approval for unusual activity. The platform is built on a double-entry ledger that prevents overspending, operates in multiple currencies (ZAR + USD), and is deployable to production infrastructure today.
 
 ### Key Metrics
-- **77 tests passing** — 100% code coverage
+- **344 tests passing** — coverage has not been measured; this is a count, not a percentage
 - **~2 seconds** — authorization decision window (within card network SLA)
 - **~90 days** — to general availability (issuer-dependent)
 - **R0–R499/month** — pricing tier (free to pro)
@@ -72,7 +72,7 @@ Each agent gets a virtual card with defined constraints:
 
 ## Technical Architecture
 
-A-CARD is built in layers with clear responsibilities and full test coverage:
+A-CARD is built in layers with clear responsibilities, each independently tested:
 
 ### packages/core — Domain Logic (Unit-Tested)
 - **Double-entry ledger:** Holds, captures, releases, reversals. Every balance is a SQL aggregate.
@@ -100,6 +100,64 @@ A-CARD is built in layers with clear responsibilities and full test coverage:
 - **Personal:** Wallet, cards, transactions, approvals
 - **Enterprise:** Fleet, departments, policies, audit log, team/roles, finance dashboard
 
+### A-MERCHANT — the supply side (read only, by design)
+
+A-CARD answers *may this agent spend?* A-MERCHANT answers *where can it buy?* —
+a directory agents search by keyword, distance, quantity, budget and delivery
+deadline.
+
+- **Inventory freshness is a first-class field.** Every catalog item records
+  when its stock was last *confirmed* — not when the row was last written, so
+  editing a price does not make a stock count fresh. Offers report that age and
+  a band (fresh ≤24h, aging ≤7d, stale beyond); stale offers rank down and an
+  agent can refuse them outright.
+- **Ranking is deterministic and unbuyable.** Proportional scoring on price
+  (0.4), lead time (0.25), distance (0.2) and freshness (0.15). There is no
+  bidding, no sponsored placement, and no paid boost anywhere in the code — an
+  agent trusts the ranking precisely because it cannot be bought.
+- **Exclusions are reported, not swallowed.** A search that finds nothing says
+  why: *"3-day lead time, 1 requested"*, *"only 120 bag available, 500
+  requested"*, *"merchant is pending_kyb"*.
+- **KYB gates discovery.** Merchants are invisible to agents until a human
+  records a decision, and the agent-facing view never carries the KYB pack.
+- **Merchants run their own catalog.** A second, narrower identity system
+  (WorkOS AuthKit), invite-only, scoped to one merchant, with a one-tap
+  restate control as the primary action.
+- **Purchase notices close the loop.** A buyer reports what they bought; the
+  merchant sees it and confirms — restating stock in the same tap. No money
+  moves through this path: payment already happened on a card, and the card
+  reference is evidence the merchant can reconcile against their own statement,
+  not a settlement this platform performs.
+
+**Deliberately absent:** orders, payment acceptance, settlement, disputes. The
+moment the platform accepts payment on a merchant's behalf it is holding other
+people's money — a licensing and partner-bank question, not a schema change.
+
+### AFP — the Agent Financial Platform
+
+Once A-CARD has said the agent may spend and A-MERCHANT has said where, AFP
+decides *how the money moves* and keeps one ledger honest across rails with
+completely different definitions of "done".
+
+- **Routing scores, it doesn't guess.** Every candidate rail returns a quote;
+  routing scores them on cost (45%), speed (35%) and finality (20%), rejecting
+  unavailable rails by name and reason.
+- **Finality is a typed property.** An instant transfer is settled the moment
+  it returns and cannot be reversed; a card authorization is only *posted* — a
+  claim, not yet a fact — until its 120-day chargeback window elapses.
+- **Idempotency is structural.** Execution is recorded as *requested* before
+  any rail is called, enforced under real concurrency by a Postgres unique
+  index rather than application logic.
+- **Ambiguous outcomes get a real state.** A dropped connection mid-payment
+  parks the transaction as `reconciling` — never guessed as failed (which could
+  double-pay) or settled (which could believe money moved when it didn't).
+
+**Rails, honestly labelled:** the card rail is fully real (it wraps A-CARD's own
+authorization path). x402 and stablecoin are real protocol implementations with
+*sandboxed execution* — no signing key or custodied wallet exists behind them
+yet. AFP is off by default and mounts only when `ACARD_ENABLE_AFP=true`, because
+it moves money and that must be a deliberate deployment decision.
+
 ### infra/cdk — AWS Infrastructure
 - **Stack:** VPC, RDS Postgres, ALB, WAF, three Fargate services
 - **Deployment:** Single command: `npx cdk deploy`
@@ -111,7 +169,7 @@ A-CARD is built in layers with clear responsibilities and full test coverage:
 
 ### ✓ Ready Now (Public Beta)
 
-- **77 automated tests** (ledger invariants, concurrency, auth, webhooks, e2e)
+- **344 automated tests** (ledger invariants, concurrency, auth, webhooks, A-MERCHANT discovery and purchase notices, AFP routing and cross-rail ledger, e2e)
 - **Production-quality code** (async/await, error handling, HMAC signing, row-level locks)
 - **Hardened AWS stack** (private subnets, WAF, encrypted RDS, TLS)
 - **Multi-currency** (ZAR + USD)

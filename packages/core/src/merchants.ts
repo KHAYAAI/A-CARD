@@ -264,9 +264,76 @@ export interface UpsertItemInput {
   leadTimeDays?: number;
 }
 
+// ---- purchase notices ------------------------------------------------------
+
+/**
+ * The feedback loop, and the narrowest thing that could close it.
+ *
+ * Discovery without this is a one-way mirror: an agent finds an offer, pays
+ * for it with an ordinary A-CARD card, and the merchant never learns the sale
+ * happened. That is not just a missing feature — it undermines the mechanic
+ * the whole product rests on, because a merchant with no evidence that anyone
+ * is buying has no reason to keep restating stock, and stale stock is the one
+ * thing this directory exists to prevent.
+ *
+ * A `PurchaseNotice` is a *claim by the buyer that a purchase occurred*. It is
+ * deliberately NOT an order, and this platform is deliberately not in the
+ * middle of it:
+ *
+ *   - No money moves here. Payment already happened, on a card, between the
+ *     buyer and the merchant's own acquirer. `cardTransactionId` is evidence
+ *     the merchant can reconcile against their own statement, not a payment
+ *     this platform settles, holds, or remits. Funds custody stays out of
+ *     scope exactly as it was before.
+ *   - No stock is decremented automatically. A buyer's claim is a claim; only
+ *     the merchant knows whether they actually fulfilled it. Silently mutating
+ *     a merchant's stock count from an unverified assertion would corrupt the
+ *     data honesty this directory is built to protect. The merchant confirms,
+ *     and confirming is the moment they restate — which is the entire point.
+ *   - No dispute resolution. `disputed` records that the merchant says this
+ *     did not happen as described. Who is right is a conversation between two
+ *     businesses, not a state machine this platform adjudicates.
+ */
+export type PurchaseNoticeStatus = "reported" | "acknowledged" | "disputed";
+
+export interface PurchaseNotice {
+  id: string;
+  merchantId: string;
+  itemId: string;
+  /**
+   * SKU, name and unit are copied in rather than joined on read: a notice has
+   * to still read correctly months later, after the item has been repriced,
+   * renamed, or deleted outright. What was bought is a historical fact.
+   */
+  sku: string;
+  itemName: string;
+  unit: string;
+  /** The A-CARD organisation that bought. Scopes the buyer's own view. */
+  accountHolderId: string;
+  quantity: number;
+  unitPriceCents: number;
+  totalCents: number;
+  currency: Currency;
+  /** The buyer's card transaction, when they supplied one — evidence, not a settlement link. */
+  cardTransactionId?: string;
+  status: PurchaseNoticeStatus;
+  /** The merchant's own words when acknowledging or disputing. */
+  note?: string;
+  reportedAt: string;
+  resolvedAt?: string;
+}
+
+export interface ReportPurchaseInput {
+  itemId: string;
+  accountHolderId: string;
+  quantity: number;
+  cardTransactionId?: string;
+}
+
 export interface SerializedMerchantDirectory {
   merchants: Merchant[];
   items: CatalogItem[];
+  purchases?: PurchaseNotice[];
 }
 
 // ---- the directory ---------------------------------------------------------
@@ -274,6 +341,7 @@ export interface SerializedMerchantDirectory {
 export class MerchantDirectory {
   private readonly merchants = new Map<string, Merchant>();
   private readonly items = new Map<string, CatalogItem>();
+  private readonly purchases = new Map<string, PurchaseNotice>();
 
   // -- merchant lifecycle ----------------------------------------------------
 
@@ -444,6 +512,78 @@ export class MerchantDirectory {
     return { items: items.length, ...counts, medianInventoryAgeHours: Math.round(median * 10) / 10 };
   }
 
+  // -- purchase notices ------------------------------------------------------
+
+  /**
+   * A buyer reporting that they bought something. Prices the line from the
+   * item as it stands *now* rather than trusting a buyer-supplied total —
+   * the buyer says what and how much, the catalog says what that costs.
+   */
+  reportPurchase(input: ReportPurchaseInput): PurchaseNotice {
+    if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) {
+      throw new DomainError("invalid_quantity", "quantity must be a positive integer");
+    }
+    const item = this.getItem(input.itemId);
+    const notice: PurchaseNotice = {
+      id: newId("pn"),
+      merchantId: item.merchantId,
+      itemId: item.id,
+      sku: item.sku,
+      itemName: item.name,
+      unit: item.unit,
+      accountHolderId: input.accountHolderId,
+      quantity: input.quantity,
+      unitPriceCents: item.unitPriceCents,
+      totalCents: item.unitPriceCents * input.quantity,
+      currency: item.currency,
+      cardTransactionId: input.cardTransactionId,
+      status: "reported",
+      reportedAt: new Date().toISOString(),
+    };
+    this.purchases.set(notice.id, notice);
+    return notice;
+  }
+
+  getPurchase(id: string): PurchaseNotice {
+    const notice = this.purchases.get(id);
+    if (!notice) throw new NotFoundError("purchase notice", id);
+    return notice;
+  }
+
+  /** A merchant's own notices, newest first. */
+  listPurchases(merchantId: string, filter: { status?: PurchaseNoticeStatus } = {}): PurchaseNotice[] {
+    return [...this.purchases.values()]
+      .filter((p) => p.merchantId === merchantId && (!filter.status || p.status === filter.status))
+      .sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
+  }
+
+  /** What a buyer reported, across every merchant — their own side of the same records. */
+  listPurchasesByBuyer(accountHolderId: string): PurchaseNotice[] {
+    return [...this.purchases.values()]
+      .filter((p) => p.accountHolderId === accountHolderId)
+      .sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
+  }
+
+  /**
+   * The merchant's answer. Terminal in both directions: a notice is resolved
+   * once, so an acknowledgement cannot later be quietly rewritten into a
+   * dispute (or the reverse) without a new record and a new conversation.
+   */
+  resolvePurchase(id: string, status: "acknowledged" | "disputed", note?: string): PurchaseNotice {
+    const notice = this.getPurchase(id);
+    if (notice.status !== "reported") {
+      throw new InvalidStateError(`purchase notice ${id} is already ${notice.status}`);
+    }
+    const next: PurchaseNotice = { ...notice, status, note, resolvedAt: new Date().toISOString() };
+    this.purchases.set(id, next);
+    return next;
+  }
+
+  /** Unresolved notices waiting on this merchant — the number worth putting in front of them. */
+  pendingPurchaseCount(merchantId: string): number {
+    return this.listPurchases(merchantId, { status: "reported" }).length;
+  }
+
   // -- discovery -------------------------------------------------------------
 
   /**
@@ -457,7 +597,11 @@ export class MerchantDirectory {
   // -- persistence -----------------------------------------------------------
 
   serialize(): SerializedMerchantDirectory {
-    return { merchants: [...this.merchants.values()], items: [...this.items.values()] };
+    return {
+      merchants: [...this.merchants.values()],
+      items: [...this.items.values()],
+      purchases: [...this.purchases.values()],
+    };
   }
 
   static hydrate(snapshot: SerializedMerchantDirectory): MerchantDirectory {
@@ -468,6 +612,8 @@ export class MerchantDirectory {
       directory.merchants.set(merchant.id, merchant);
     }
     for (const item of snapshot.items) directory.items.set(item.id, item);
+    // Back-compat: snapshots taken before purchase notices existed have none.
+    for (const notice of snapshot.purchases ?? []) directory.purchases.set(notice.id, notice);
     return directory;
   }
 }
