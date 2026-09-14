@@ -141,7 +141,19 @@ export interface AppConfig {
    * enforcement on is the decision that can lock out live customers, so it is
    * deliberately separate from turning verification on.
    */
-  compliance?: { provider: CompliancePort; store: ComplianceStorePort; enforce?: boolean };
+  compliance?: {
+    provider: CompliancePort;
+    store: ComplianceStorePort;
+    enforce?: boolean;
+    /**
+     * Submit settled charges for AML transaction monitoring. Separate from
+     * `enforce` because it is a different obligation (ongoing surveillance,
+     * not onboarding) with a different failure mode: it costs per transaction
+     * and never blocks anything, so it is safe to turn on well before
+     * enforcement.
+     */
+    monitorTransactions?: boolean;
+  };
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -390,6 +402,23 @@ const disputePurchaseSchema = z.object({
   note: z.string().min(1).max(500),
 });
 
+const blocklistEntrySchema = z.object({
+  entry_type: z.enum(["user", "business", "email", "phone", "document", "ip_address"]),
+  value: z.string().min(1),
+  reason: z.string().max(500).optional(),
+});
+
+const monitorTransactionSchema = z.object({
+  transaction_id: z.string().min(1),
+  card_id: z.string().min(1),
+  amount: z.number().int().positive(),
+  currency: currencySchema,
+  merchant_name: z.string().min(1),
+  merchant_category: z.string().min(1),
+  merchant_country: z.string().optional(),
+  occurred_at: z.string().optional(),
+});
+
 const complianceOverrideSchema = z.object({
   status: z.enum(["approved", "declined"]),
   reason: z.string().min(1).max(500),
@@ -448,6 +477,51 @@ export function createApp(config: AppConfig) {
   const kybDocuments = config.kybDocuments ? asKybDocumentStore(config.kybDocuments) : undefined;
   const afp = config.afp;
   const compliance = config.compliance;
+
+  /**
+   * Hand a settled charge to the monitoring engine, and swallow anything that
+   * goes wrong. Called with `void` from the capture path — see the comment
+   * there. Failures are logged, not thrown: a monitoring outage is a gap in
+   * surveillance to be backfilled, never a reason to fail a charge that has
+   * already settled.
+   */
+  const submitToMonitoring = async (tx: {
+    id: string;
+    accountHolderId: string;
+    cardId: string;
+    amount: number;
+    currency: string;
+    merchantName: string;
+    merchantCategory: string;
+    createdAt: string;
+  }): Promise<void> => {
+    if (!compliance?.monitorTransactions) return;
+    try {
+      // The screening signals the sanctions/PEP rules key on come from this
+      // org's own verification record, which is the only sanctions data this
+      // platform holds.
+      const record = await compliance.store.find("account_holder", tx.accountHolderId);
+      const outcome = await compliance.provider.submitTransaction({
+        transactionId: tx.id,
+        accountHolderId: tx.accountHolderId,
+        cardId: tx.cardId,
+        amount: tx.amount,
+        currency: tx.currency,
+        merchantName: tx.merchantName,
+        merchantCategory: tx.merchantCategory,
+        occurredAt: tx.createdAt,
+        sanctionsHit: record?.amlRisk === "hit",
+        pepCounterparty: record?.amlRisk === "possible_match",
+      });
+      if (outcome.status !== "approved") {
+        console.warn(
+          `compliance: transaction ${tx.id} came back ${outcome.status} (score ${outcome.score ?? "?"}) — rules: ${outcome.triggeredRules.join(", ") || "none"}`,
+        );
+      }
+    } catch (error) {
+      console.error(`compliance: monitoring submission failed for ${tx.id}:`, error instanceof Error ? error.message : error);
+    }
+  };
   const platform = asService(config.platform);
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
@@ -511,6 +585,22 @@ export function createApp(config: AppConfig) {
 
   app.post("/v1/signup", async (c) => {
     const body = signupSchema.parse(await c.req.json());
+    // Checked before the account exists, not after: someone already decided
+    // about is refused at the door rather than re-screened, re-billed, and
+    // then blocked. Failing open on a provider error is deliberate — a
+    // blocklist outage must not stop legitimate signups, and verification
+    // still stands behind this.
+    if (compliance) {
+      const blocked = await compliance.provider
+        .isBlocked([{ entryType: "email", value: body.email }])
+        .catch(() => undefined);
+      if (blocked) {
+        return c.json(
+          { error: { code: "blocked", message: "this identity cannot be onboarded — contact compliance@a-card.cc" } },
+          403,
+        );
+      }
+    }
     const holder = await platform.signup({ email: body.email, name: body.name, currency: body.currency, accountType: body.account_type });
     const issued = await platform.issueApiKey(holder.id, "default");
     await provisionEmbeddedWallet(holder.id);
@@ -1238,7 +1328,14 @@ export function createApp(config: AppConfig) {
       const data = z
         .object({ authorization_id: z.string(), final_amount: z.number().int().positive().optional() })
         .parse(event.data);
-      await platform.capture(data.authorization_id, data.final_amount);
+      const captured = await platform.capture(data.authorization_id, data.final_amount);
+      // Monitoring runs AFTER the money has settled and is deliberately not
+      // awaited: it is a network call to a third party, and the issuer is
+      // holding this connection open inside its own timeout. A monitoring
+      // provider being slow or down must never turn into a failed capture —
+      // the charge already happened either way, and the AML obligation is to
+      // review it, not to block on it.
+      void submitToMonitoring(captured);
       return c.json({ received: true });
     }
 
@@ -2006,6 +2103,58 @@ export function createApp(config: AppConfig) {
 
     app.get("/v1/compliance/registry/:candidateId", requireRole("admin"), async (c) => {
       return c.json({ company: await provider.selectRegistryCandidate(c.req.param("candidateId")) });
+    });
+
+    // ---- cases: the investigations the provider opened ---------------------
+    //
+    // AML hits and monitoring rules open cases on the provider's side. Without
+    // these routes those cases are invisible from A-CARD — a loop that opens
+    // and is never closed.
+
+    app.get("/v1/compliance/cases", requireRole("admin"), async (c) => {
+      const status = c.req.query("status");
+      return c.json({ cases: await provider.listCases(status ? { status } : {}) });
+    });
+
+    app.get("/v1/compliance/cases/:caseId", requireRole("admin"), async (c) => {
+      try {
+        return c.json({ case: await provider.getCase(c.req.param("caseId")) });
+      } catch {
+        return c.json({ error: { code: "not_found", message: "case not found" } }, 404);
+      }
+    });
+
+    // ---- blocklist ---------------------------------------------------------
+
+    app.get("/v1/compliance/blocklist", requireRole("admin"), async (c) => {
+      return c.json({ entries: await provider.listBlocklist() });
+    });
+
+    app.post("/v1/compliance/blocklist", requireRole("admin"), async (c) => {
+      const body = blocklistEntrySchema.parse(await c.req.json());
+      const entry = await provider.addToBlocklist({
+        entryType: body.entry_type,
+        value: body.value,
+        reason: body.reason,
+      });
+      return c.json({ entry }, 201);
+    });
+
+    /** Submit a settled charge for monitoring by hand — backfill, or a replay after an outage. */
+    app.post("/v1/compliance/transactions", requireRole("admin"), async (c) => {
+      const body = monitorTransactionSchema.parse(await c.req.json());
+      const outcome = await provider.submitTransaction({
+        transactionId: body.transaction_id,
+        accountHolderId: c.get("holder").id,
+        cardId: body.card_id,
+        amount: body.amount,
+        currency: body.currency,
+        merchantName: body.merchant_name,
+        merchantCategory: body.merchant_category,
+        merchantCountry: body.merchant_country,
+        occurredAt: body.occurred_at ?? new Date().toISOString(),
+      });
+      return c.json({ outcome }, 201);
     });
   }
 

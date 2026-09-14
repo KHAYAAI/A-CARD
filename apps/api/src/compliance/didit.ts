@@ -2,6 +2,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AmlRisk, VerificationStatus } from "@acard/core";
 import type {
   AmlScreenInput,
+  BlocklistEntry,
+  BlocklistEntryType,
+  ComplianceCase,
+  MonitoredTransaction,
+  MonitoringOutcome,
+  MonitoringStatus,
   AmlScreenResult,
   CompliancePort,
   ProviderDecision,
@@ -67,6 +73,19 @@ export function mapAmlRisk(aml: { status?: string; total_hits?: number } | undef
   if (aml.status === "In Review") return "possible_match";
   if (aml.status === "Approved") return (aml.total_hits ?? 0) > 0 ? "possible_match" : "clear";
   return "not_screened";
+}
+
+/** The monitoring engine's own status vocabulary → ours. */
+const MONITORING_STATUS_MAP: Record<string, MonitoringStatus> = {
+  APPROVED: "approved",
+  IN_REVIEW: "in_review",
+  DECLINED: "declined",
+  AWAITING_USER: "in_review",
+};
+
+export function mapMonitoringStatus(raw: string | undefined): MonitoringStatus {
+  if (!raw) return "unknown";
+  return MONITORING_STATUS_MAP[raw.toUpperCase()] ?? "unknown";
 }
 
 export interface DiditConfig {
@@ -257,6 +276,82 @@ export class DiditComplianceProvider implements CompliancePort {
 
     return parseWebhookBody(rawBody);
   }
+  // ---- transaction monitoring ----------------------------------------------
+
+  async submitTransaction(input: MonitoredTransaction): Promise<MonitoringOutcome> {
+    const body = await this.request<{
+      status?: string;
+      score?: number;
+      triggered_rules?: Array<{ title?: string } | string>;
+    }>("/v2/transactions/", {
+      method: "POST",
+      body: JSON.stringify({
+        transaction_id: input.transactionId,
+        transaction_category: "finance",
+        transaction_at: input.occurredAt,
+        subject: { vendor_data: input.accountHolderId },
+        counterparty: { name: input.merchantName, country: input.merchantCountry },
+        transaction_details: {
+          // A card charge is money leaving the org's wallet, which is what
+          // the outbound-velocity and in-and-out presets key on.
+          direction: "OUTBOUND",
+          amount: input.amount,
+          currency: input.currency,
+          payment_details: input.merchantName,
+        },
+        custom_properties: {
+          card_id: input.cardId,
+          merchant_name: input.merchantName,
+          merchant_category: input.merchantCategory,
+          sanctions_hit: input.sanctionsHit ?? false,
+          pep_counterparty: input.pepCounterparty ?? false,
+        },
+      }),
+    });
+    return {
+      transactionId: input.transactionId,
+      status: mapMonitoringStatus(body.status),
+      score: body.score,
+      triggeredRules: (body.triggered_rules ?? []).map((r) => (typeof r === "string" ? r : (r.title ?? "rule"))),
+    };
+  }
+
+  // ---- cases ----------------------------------------------------------------
+
+  async listCases(filter: { status?: string } = {}): Promise<ComplianceCase[]> {
+    const query = filter.status ? `?status=${encodeURIComponent(filter.status)}` : "";
+    const body = await this.request<{ results?: unknown[] }>(`/v2/cases/${query}`);
+    return (body.results ?? []).map((row) => toCase(row as Record<string, unknown>));
+  }
+
+  async getCase(caseId: string): Promise<ComplianceCase> {
+    return toCase(await this.request<Record<string, unknown>>(`/v2/cases/${encodeURIComponent(caseId)}/`));
+  }
+
+  // ---- blocklist ------------------------------------------------------------
+
+  async listBlocklist(): Promise<BlocklistEntry[]> {
+    const body = await this.request<{ results?: unknown[] }>("/v2/blocklist/");
+    return (body.results ?? []).map((row) => toBlocklistEntry(row as Record<string, unknown>));
+  }
+
+  async addToBlocklist(entry: Omit<BlocklistEntry, "addedAt">): Promise<BlocklistEntry> {
+    const body = await this.request<Record<string, unknown>>("/v2/blocklist/", {
+      method: "POST",
+      body: JSON.stringify({ entry_type: entry.entryType, value: entry.value, comment: entry.reason }),
+    });
+    return toBlocklistEntry(body);
+  }
+
+  async isBlocked(
+    candidates: Array<{ entryType: BlocklistEntryType; value: string }>,
+  ): Promise<BlocklistEntry | undefined> {
+    // Read-and-compare rather than a per-candidate lookup: the blocklist is
+    // small by nature (it holds the people you have already decided about),
+    // and one request at signup beats N.
+    const entries = await this.listBlocklist();
+    return matchBlocklist(entries, candidates);
+  }
 }
 
 /** Exported so the sandbox provider and the tests parse an event the identical way. */
@@ -280,4 +375,39 @@ export function parseWebhookBody(rawBody: string): WebhookEvent | undefined {
   } catch {
     return undefined;
   }
+}
+
+function toCase(row: Record<string, unknown>): ComplianceCase {
+  return {
+    caseId: String(row.uuid ?? row.id ?? row.case_id ?? ""),
+    status: String(row.status ?? "unknown"),
+    title: typeof row.title === "string" ? row.title : undefined,
+    subjectId: typeof row.vendor_data === "string" ? row.vendor_data : undefined,
+    openedAt: typeof row.created_at === "string" ? row.created_at : undefined,
+    updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined,
+  };
+}
+
+function toBlocklistEntry(row: Record<string, unknown>): BlocklistEntry {
+  return {
+    entryType: (row.entry_type ?? "user") as BlocklistEntryType,
+    value: String(row.value ?? ""),
+    reason: typeof row.comment === "string" ? row.comment : undefined,
+    addedAt: typeof row.created_at === "string" ? row.created_at : undefined,
+  };
+}
+
+/**
+ * Shared by both providers so "is this identifier blocked" means exactly one
+ * thing. Comparison is case-insensitive and trimmed: a blocklist that misses
+ * because someone typed a capital letter is not a blocklist.
+ */
+export function matchBlocklist(
+  entries: BlocklistEntry[],
+  candidates: Array<{ entryType: BlocklistEntryType; value: string }>,
+): BlocklistEntry | undefined {
+  const norm = (v: string) => v.trim().toLowerCase();
+  return entries.find((entry) =>
+    candidates.some((c) => c.entryType === entry.entryType && norm(c.value) === norm(entry.value)),
+  );
 }

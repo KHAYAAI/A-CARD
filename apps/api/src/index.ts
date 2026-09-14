@@ -37,6 +37,7 @@ const afpX402PayerAddress = process.env.ACARD_AFP_X402_PAYER_ADDRESS;
 const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
+const complianceMonitor = process.env.ACARD_COMPLIANCE_MONITOR_TRANSACTIONS === "true";
 const diditApiKey = process.env.DIDIT_API_KEY;
 const diditKycWorkflowId = process.env.DIDIT_KYC_WORKFLOW_ID;
 const diditKybWorkflowId = process.env.DIDIT_KYB_WORKFLOW_ID;
@@ -188,7 +189,7 @@ if (afpEnabled) {
  * never bills, and verifies nobody. It is logged loudly as such, because a
  * compliance layer that silently approves everyone is worse than none at all.
  */
-let compliance: { provider: CompliancePort; store: ComplianceStorePort; enforce: boolean } | undefined;
+let compliance: { provider: CompliancePort; store: ComplianceStorePort; enforce: boolean; monitorTransactions: boolean } | undefined;
 
 if (complianceEnabled) {
   let provider: CompliancePort;
@@ -225,13 +226,18 @@ if (complianceEnabled) {
     store = new InMemoryComplianceStore(new ComplianceService());
   }
 
-  compliance = { provider, store, enforce: complianceEnforce };
+  compliance = { provider, store, enforce: complianceEnforce, monitorTransactions: complianceMonitor };
   console.log(
     `A-CARD API: compliance enabled via ${provider.label} — ${
       complianceEnforce
         ? "ENFORCING: unverified organisations cannot fund wallets or issue cards"
         : "recording only, nothing is blocked (set ACARD_COMPLIANCE_ENFORCE=true to start refusing unverified money movement)"
     }`,
+  );
+  console.log(
+    complianceMonitor
+      ? "A-CARD API: AML transaction monitoring ON — every settled capture is submitted after the fact, never on the authorization path"
+      : "A-CARD API: AML transaction monitoring off (set ACARD_COMPLIANCE_MONITOR_TRANSACTIONS=true — FICA expects ongoing monitoring, not just onboarding checks)",
   );
 }
 

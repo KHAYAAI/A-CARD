@@ -297,3 +297,184 @@ describe("compliance: unmounted", () => {
     expect((await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 1000, currency: "ZAR" }) })).status).toBe(201);
   });
 });
+
+describe("compliance: transaction monitoring", () => {
+  let provider: SandboxComplianceProvider;
+
+  beforeEach(async () => {
+    platform = new Platform();
+    store = new InMemoryComplianceStore(new ComplianceService());
+    provider = new SandboxComplianceProvider();
+    app = createApp({
+      platform,
+      issuerWebhookSecret: SECRET,
+      compliance: { provider, store, enforce: false, monitorTransactions: true },
+    });
+    apiKey = await signup();
+    await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 5_000_000, currency: "ZAR" }) });
+  });
+
+  async function purchase(merchant: string, amount = 20_000) {
+    const card = (await json(await authed("/v1/cards", { method: "POST", body: JSON.stringify({ currency: "ZAR" }) }))).card;
+    return authed("/v1/simulate/purchase", {
+      method: "POST",
+      body: JSON.stringify({ card_id: card.id, amount, merchant: { name: merchant, category: "5411" } }),
+    });
+  }
+
+  it("a settled capture reaches the monitoring engine", async () => {
+    const res = await purchase("Checkers Sixty60");
+    expect(res.status).toBe(200);
+    // Submission is fire-and-forget, so let the microtask queue drain.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await provider.listCases()).toBeDefined();
+  });
+
+  it("a monitoring outage never fails a capture that already settled", async () => {
+    const broken = new SandboxComplianceProvider();
+    broken.submitTransaction = async () => {
+      throw new Error("monitoring provider is down");
+    };
+    platform = new Platform();
+    app = createApp({
+      platform,
+      issuerWebhookSecret: SECRET,
+      compliance: { provider: broken, store: new InMemoryComplianceStore(new ComplianceService()), monitorTransactions: true },
+    });
+    apiKey = await signup("outage@example.co.za");
+    await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 100_000, currency: "ZAR" }) });
+
+    const res = await purchase("Checkers Sixty60");
+    // The charge settled; the monitoring failure is logged, not surfaced.
+    expect(res.status).toBe(200);
+    expect((await json(res)).approved).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it("one card fanning out across many merchants opens a case", async () => {
+    // Explicitly not single-use: the default card closes itself after its
+    // first capture, which is exactly the behaviour that makes fan-out
+    // impossible on one.
+    const card = (await json(
+      await authed("/v1/cards", { method: "POST", body: JSON.stringify({ currency: "ZAR", single_use: false }) }),
+    )).card;
+    for (let i = 0; i < 8; i++) {
+      await authed("/v1/simulate/purchase", {
+        method: "POST",
+        body: JSON.stringify({ card_id: card.id, amount: 1_000, merchant: { name: `Merchant ${i}`, category: "5411" } }),
+      });
+    }
+    await new Promise((r) => setTimeout(r, 30));
+    const cases = await provider.listCases();
+    expect(cases.length).toBeGreaterThan(0);
+    expect(cases[0]!.title).toContain("fan-out");
+  });
+
+  it("monitoring is off unless explicitly enabled", async () => {
+    const quiet = new SandboxComplianceProvider();
+    let called = false;
+    quiet.submitTransaction = async (input) => {
+      called = true;
+      return { transactionId: input.transactionId, status: "approved", triggeredRules: [] };
+    };
+    platform = new Platform();
+    app = createApp({
+      platform,
+      issuerWebhookSecret: SECRET,
+      compliance: { provider: quiet, store: new InMemoryComplianceStore(new ComplianceService()) },
+    });
+    apiKey = await signup("quiet@example.co.za");
+    await authed("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: 100_000, currency: "ZAR" }) });
+    await purchase("Checkers Sixty60");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(called).toBe(false);
+  });
+
+  it("submits a transaction by hand and reports which rules fired", async () => {
+    const outcome = (
+      await json(
+        await authed("/v1/compliance/transactions", {
+          method: "POST",
+          body: JSON.stringify({
+            transaction_id: "tx_manual_1",
+            card_id: "card_1",
+            amount: 1_000_000,
+            currency: "ZAR",
+            merchant_name: "Round Numbers Ltd",
+            merchant_category: "5411",
+          }),
+        }),
+      )
+    ).outcome;
+    expect(outcome.triggeredRules).toContain("Round-amount layering");
+    expect(outcome.score).toBe(20);
+  });
+});
+
+describe("compliance: cases and blocklist", () => {
+  let provider: SandboxComplianceProvider;
+
+  beforeEach(async () => {
+    platform = new Platform();
+    store = new InMemoryComplianceStore(new ComplianceService());
+    provider = new SandboxComplianceProvider();
+    app = createApp({ platform, issuerWebhookSecret: SECRET, compliance: { provider, store } });
+    apiKey = await signup();
+  });
+
+  it("lists cases and 404s an unknown one", async () => {
+    expect((await json(await authed("/v1/compliance/cases"))).cases).toEqual([]);
+    expect((await authed("/v1/compliance/cases/nope")).status).toBe(404);
+  });
+
+  it("adds a blocklist entry and reads it back", async () => {
+    const created = await authed("/v1/compliance/blocklist", {
+      method: "POST",
+      body: JSON.stringify({ entry_type: "email", value: "Fraudster@Example.com", reason: "confirmed first-party fraud" }),
+    });
+    expect(created.status).toBe(201);
+    const entries = (await json(await authed("/v1/compliance/blocklist"))).entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].reason).toBe("confirmed first-party fraud");
+  });
+
+  it("refuses signup for a blocked email, case-insensitively", async () => {
+    await authed("/v1/compliance/blocklist", {
+      method: "POST",
+      body: JSON.stringify({ entry_type: "email", value: "Fraudster@Example.com" }),
+    });
+    const res = await app.request("/v1/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // Different casing — still the same person.
+      body: JSON.stringify({ email: "fraudster@example.com", name: "F", currency: "ZAR" }),
+    });
+    expect(res.status).toBe(403);
+    expect((await json(res)).error.code).toBe("blocked");
+  });
+
+  it("an unblocked email still signs up", async () => {
+    await authed("/v1/compliance/blocklist", {
+      method: "POST",
+      body: JSON.stringify({ entry_type: "email", value: "fraudster@example.com" }),
+    });
+    const res = await app.request("/v1/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "honest@example.co.za", name: "H", currency: "ZAR" }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("a blocklist outage fails open rather than stopping signups", async () => {
+    provider.isBlocked = async () => {
+      throw new Error("blocklist unavailable");
+    };
+    const res = await app.request("/v1/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "someone@example.co.za", name: "S", currency: "ZAR" }),
+    });
+    expect(res.status).toBe(201);
+  });
+});

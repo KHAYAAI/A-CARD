@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import type { AmlRisk } from "@acard/core";
-import { parseWebhookBody } from "./didit.js";
+import { matchBlocklist, parseWebhookBody } from "./didit.js";
 import type {
   AmlScreenInput,
+  BlocklistEntry,
+  BlocklistEntryType,
+  ComplianceCase,
+  MonitoredTransaction,
+  MonitoringOutcome,
   AmlScreenResult,
   CompliancePort,
   ProviderDecision,
@@ -37,6 +42,10 @@ export class SandboxComplianceProvider implements CompliancePort {
   readonly isLive = false;
 
   private readonly sessions = new Map<string, { subjectId: string; subject: string }>();
+  private readonly transactions = new Map<string, MonitoredTransaction>();
+  private readonly merchantsByCard = new Map<string, Set<string>>();
+  private readonly cases = new Map<string, ComplianceCase>();
+  private readonly blocklist: BlocklistEntry[] = [];
 
   private outcome(subjectId: string): { status: ProviderDecision["status"]; amlRisk: AmlRisk; reasons: string[] } {
     const id = subjectId.toLowerCase();
@@ -104,4 +113,88 @@ export class SandboxComplianceProvider implements CompliancePort {
   verifyWebhook(rawBody: string): WebhookEvent | undefined {
     return parseWebhookBody(rawBody);
   }
+
+  // ---- transaction monitoring ----------------------------------------------
+
+  /**
+   * Deterministic stand-in for the rules engine, mirroring the shape of the
+   * presets actually installed: a large round amount reviews, a sanctions or
+   * PEP signal declines, and one card fanning out across many merchants in a
+   * short window reviews. Enough to exercise every branch of the calling code
+   * without a network round trip.
+   */
+  async submitTransaction(input: MonitoredTransaction): Promise<MonitoringOutcome> {
+    const seen = this.merchantsByCard.get(input.cardId) ?? new Set<string>();
+    seen.add(input.merchantName);
+    this.merchantsByCard.set(input.cardId, seen);
+    this.transactions.set(input.transactionId, input);
+
+    const triggeredRules: string[] = [];
+    let status: MonitoringOutcome["status"] = "approved";
+    let score = 0;
+
+    if (input.sanctionsHit) {
+      triggeredRules.push("Sanctions counterparty");
+      status = "declined";
+      score += 90;
+    }
+    if (input.pepCounterparty) {
+      triggeredRules.push("PEP counterparty exposure");
+      if (status !== "declined") status = "in_review";
+      score += 40;
+    }
+    if (ROUND_AMOUNTS.has(input.amount)) {
+      triggeredRules.push("Round-amount layering");
+      score += 20;
+    }
+    if (seen.size >= 8) {
+      triggeredRules.push("Agent card merchant fan-out");
+      if (status !== "declined") status = "in_review";
+      score += 55;
+      this.cases.set(`sbxcase_${input.cardId}`, {
+        caseId: `sbxcase_${input.cardId}`,
+        status: "open",
+        title: `Agent card merchant fan-out — ${input.cardId}`,
+        subjectId: input.accountHolderId,
+        openedAt: new Date().toISOString(),
+      });
+    }
+    return { transactionId: input.transactionId, status, score, triggeredRules };
+  }
+
+  // ---- cases ----------------------------------------------------------------
+
+  async listCases(filter: { status?: string } = {}): Promise<ComplianceCase[]> {
+    return [...this.cases.values()].filter((c) => !filter.status || c.status === filter.status);
+  }
+
+  async getCase(caseId: string): Promise<ComplianceCase> {
+    const found = this.cases.get(caseId);
+    if (!found) throw new Error(`sandbox: unknown case ${caseId}`);
+    return found;
+  }
+
+  // ---- blocklist ------------------------------------------------------------
+
+  async listBlocklist(): Promise<BlocklistEntry[]> {
+    return [...this.blocklist];
+  }
+
+  async addToBlocklist(entry: Omit<BlocklistEntry, "addedAt">): Promise<BlocklistEntry> {
+    const stored: BlocklistEntry = { ...entry, addedAt: new Date().toISOString() };
+    this.blocklist.push(stored);
+    return stored;
+  }
+
+  async isBlocked(
+    candidates: Array<{ entryType: BlocklistEntryType; value: string }>,
+  ): Promise<BlocklistEntry | undefined> {
+    // Same matcher the real provider uses, so "blocked" means one thing.
+    return matchBlocklist(this.blocklist, candidates);
+  }
 }
+
+/** The amounts the round-amount-layering preset keys on, in minor units. */
+const ROUND_AMOUNTS = new Set([
+  1_000_000, 1_500_000, 2_000_000, 2_500_000, 5_000_000, 7_500_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000,
+]);

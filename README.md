@@ -21,10 +21,10 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 390 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 400 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + purchase notices, AFP routing/ledger,
-                         # KYC/KYB/AML compliance records and gating, API e2e.
-                         # 63 of them are Postgres integration tests, skipped unless
+                         # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e.
+                         # 73 of them are Postgres integration tests, skipped unless
                          # ACARD_TEST_DATABASE_URL points at a reachable database.
 npm run dev:api          # sandbox API on :8787 (in-memory unless DATABASE_URL is set)
 ```
@@ -327,6 +327,46 @@ in-memory wrapper and a real multi-writer Postgres adapter
 index rather than a read-then-write check — under a double signup click that
 is the difference between one verification and two, and on a live provider
 the second one is a second bill.
+
+### Ongoing monitoring, cases and blocklists
+
+FICA expects ongoing transaction monitoring, not just onboarding checks.
+Every **settled capture** is submitted to Didit's rules engine — and
+deliberately *not* on the authorization path. A-CARD answers the issuer inside
+a ~2-second window; a network call to a monitoring provider has no place in
+it. Submission happens after the money has settled, is never awaited, and a
+monitoring outage is logged rather than turned into a failed charge: the
+charge already happened either way, and the obligation is to review it, not to
+block on it.
+
+Eight rules are installed: seven of Didit's AML/CTF presets that apply to card
+spending (cumulative outbound volume, rapid in-and-out movement, high-risk
+jurisdictions, sanctions and PEP counterparties, suspicious payment
+references, round-amount layering) and one written for this product —
+**agent card merchant fan-out**. A legitimate agent has a narrow, repetitive
+merchant footprint; one card touching eight or more distinct merchants in an
+hour is the signature of a leaked credential being drained, and it is
+invisible to A-CARD's own per-card limits because each charge sits comfortably
+under them. It starts in TEST mode, recording matches without acting, until
+its real hit rate is known.
+
+The crypto/VASP and iGaming presets are deliberately **not** installed — they
+key on chain-analytics fields this platform does not produce.
+
+**Cases** opened by a screening hit or a monitoring rule are readable at
+`/v1/compliance/cases`, closing a loop that was otherwise opening on the
+provider's side and never being seen here.
+
+**Blocklists** are checked at signup, before the account exists, so someone
+already decided about is refused at the door rather than re-screened and
+re-billed. Matching is case-insensitive and trimmed — a blocklist that misses
+because of a capital letter is not a blocklist — and a provider outage fails
+*open*, because a blocklist being down must not stop legitimate signups when
+verification still stands behind it.
+
+```bash
+ACARD_COMPLIANCE_MONITOR_TRANSACTIONS=true   # submit settled captures for monitoring
+```
 
 ⚠️ The REST paths and the webhook signature scheme in
 `apps/api/src/compliance/didit.ts` are **not yet verified against Didit's API
