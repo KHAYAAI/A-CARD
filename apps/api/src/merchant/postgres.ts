@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 import {
+  canTransitionOrder,
   classifyFreshness,
   DomainError,
+  MerchantDirectory,
   evaluateOffers,
   hashSessionToken,
   InvalidStateError,
@@ -22,8 +24,13 @@ import {
   type MerchantSessionContext,
   type MerchantStatus,
   type MerchantUser,
+  type MerchantReliability,
   type OfferQuery,
   type OfferSearchResult,
+  type Order,
+  type OrderLine,
+  type OrderStatus,
+  type PlaceOrderInput,
   type PurchaseNotice,
   type PurchaseNoticeStatus,
   type RegisterMerchantInput,
@@ -156,6 +163,28 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS acard_purchase_notices_merchant_idx ON acard_purchase_notices(merchant_id, status);
   CREATE INDEX IF NOT EXISTS acard_purchase_notices_buyer_idx ON acard_purchase_notices(account_holder_id);
 
+  CREATE TABLE IF NOT EXISTS acard_orders (
+    id TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    account_holder_id TEXT NOT NULL,
+    lines JSONB NOT NULL,
+    total_cents BIGINT NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    fulfilment JSONB NOT NULL,
+    card_transaction_id TEXT,
+    note TEXT,
+    history JSONB NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS acard_orders_merchant_idx ON acard_orders(merchant_id, status);
+  CREATE INDEX IF NOT EXISTS acard_orders_buyer_idx ON acard_orders(account_holder_id);
+
+  -- Operating hours and the outbound webhook live on the merchant row.
+  ALTER TABLE acard_merchants ADD COLUMN IF NOT EXISTS operating_hours JSONB;
+  ALTER TABLE acard_merchants ADD COLUMN IF NOT EXISTS webhook JSONB;
+
   CREATE TABLE IF NOT EXISTS acard_merchant_invites (
     id TEXT PRIMARY KEY,
     hashed_token TEXT UNIQUE NOT NULL,
@@ -182,6 +211,8 @@ function rowToMerchant(row: any): Merchant {
     agentAccess: row.agent_access,
     allowedAccountHolderIds: row.allowed_account_holder_ids ?? [],
     kyb: row.kyb,
+    operatingHours: row.operating_hours ?? undefined,
+    webhook: row.webhook ?? undefined,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -224,6 +255,24 @@ function rowToNotice(row: any): PurchaseNotice {
     note: row.note ?? undefined,
     reportedAt: row.reported_at.toISOString(),
     resolvedAt: row.resolved_at?.toISOString(),
+  };
+}
+
+function rowToOrder(row: any): Order {
+  return {
+    id: row.id,
+    merchantId: row.merchant_id,
+    accountHolderId: row.account_holder_id,
+    lines: row.lines ?? [],
+    totalCents: Number(row.total_cents),
+    currency: row.currency,
+    status: row.status,
+    fulfilment: row.fulfilment ?? { method: "collection" },
+    cardTransactionId: row.card_transaction_id ?? undefined,
+    note: row.note ?? undefined,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+    history: row.history ?? [],
   };
 }
 
@@ -574,6 +623,188 @@ export class PostgresMerchantDirectory implements MerchantDirectoryPort {
       [merchantId],
     );
     return rows[0].n;
+  }
+
+  // -- orders ----------------------------------------------------------------
+  //
+  // Placement and reliability reuse the in-memory directory's own logic
+  // rather than reimplementing it in SQL — same discipline as `search()`.
+  // SQL stores and retrieves; the tested pure logic decides.
+
+  async placeOrder(input: PlaceOrderInput): Promise<Order> {
+    const merchant = await this.get(input.merchantId);
+    if (merchant.status !== "verified") {
+      throw new InvalidStateError(`merchant ${merchant.id} is ${merchant.status} and cannot take orders`);
+    }
+    if (input.lines.length === 0) throw new DomainError("empty_order", "an order needs at least one line");
+    if (input.fulfilment.method === "delivery" && !input.fulfilment.address) {
+      throw new DomainError("address_required", "a delivery order needs a delivery address");
+    }
+
+    const lines: OrderLine[] = [];
+    for (const line of input.lines) {
+      if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) {
+        throw new DomainError("invalid_quantity", "every order line needs a positive integer quantity");
+      }
+      const item = await this.getItem(line.itemId);
+      if (item.merchantId !== input.merchantId) {
+        throw new DomainError("wrong_merchant", `item ${item.id} does not belong to merchant ${input.merchantId}`);
+      }
+      lines.push({
+        itemId: item.id,
+        sku: item.sku,
+        name: item.name,
+        unit: item.unit,
+        quantity: line.quantity,
+        unitPriceCents: item.unitPriceCents,
+        lineTotalCents: item.unitPriceCents * line.quantity,
+      });
+    }
+
+    const currencies = new Set<string>();
+    for (const l of lines) currencies.add((await this.getItem(l.itemId)).currency);
+    if (currencies.size > 1) {
+      throw new DomainError("mixed_currency", "every line on an order must be priced in the same currency");
+    }
+
+    const now = new Date();
+    const history = [{ status: "placed", at: now.toISOString(), by: "buyer", note: input.note }];
+    const { rows } = await this.pool.query(
+      `INSERT INTO acard_orders
+         (id, merchant_id, account_holder_id, lines, total_cents, currency, status, fulfilment,
+          card_transaction_id, note, history, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'placed',$7,$8,$9,$10,$11,$11) RETURNING *`,
+      [
+        newId("ord"),
+        input.merchantId,
+        input.accountHolderId,
+        JSON.stringify(lines),
+        lines.reduce((sum, l) => sum + l.lineTotalCents, 0),
+        [...currencies][0],
+        JSON.stringify(input.fulfilment),
+        input.cardTransactionId ?? null,
+        input.note ?? null,
+        JSON.stringify(history),
+        now,
+      ],
+    );
+    return rowToOrder(rows[0]);
+  }
+
+  async getOrder(id: string): Promise<Order> {
+    const { rows } = await this.pool.query("SELECT * FROM acard_orders WHERE id = $1", [id]);
+    if (!rows[0]) throw new NotFoundError("order", id);
+    return rowToOrder(rows[0]);
+  }
+
+  async listOrders(merchantId: string, filter: { status?: OrderStatus } = {}): Promise<Order[]> {
+    const { rows } = filter.status
+      ? await this.pool.query("SELECT * FROM acard_orders WHERE merchant_id = $1 AND status = $2 ORDER BY created_at DESC", [merchantId, filter.status])
+      : await this.pool.query("SELECT * FROM acard_orders WHERE merchant_id = $1 ORDER BY created_at DESC", [merchantId]);
+    return rows.map(rowToOrder);
+  }
+
+  async listOrdersByBuyer(accountHolderId: string): Promise<Order[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM acard_orders WHERE account_holder_id = $1 ORDER BY created_at DESC",
+      [accountHolderId],
+    );
+    return rows.map(rowToOrder);
+  }
+
+  async advanceOrder(
+    id: string,
+    to: OrderStatus,
+    by: "buyer" | "merchant",
+    detail: { note?: string; promisedAt?: string; trackingReference?: string } = {},
+  ): Promise<Order> {
+    return withTransaction(this.pool, async (client) => {
+      // Locked then checked inside the transaction: two staff tapping
+      // "dispatched" at once must not both append to the history.
+      const current = await client.query("SELECT * FROM acard_orders WHERE id = $1 FOR UPDATE", [id]);
+      if (!current.rows[0]) throw new NotFoundError("order", id);
+      const order = rowToOrder(current.rows[0]);
+
+      if (!canTransitionOrder(order.status, to)) {
+        throw new InvalidStateError(`an order that is ${order.status} cannot become ${to}`);
+      }
+      if (to === "cancelled" && by !== "buyer") {
+        throw new DomainError("forbidden_transition", "only the buyer cancels an order; a merchant rejects it");
+      }
+      if (to !== "cancelled" && by !== "merchant") {
+        throw new DomainError("forbidden_transition", `only the merchant can move an order to ${to}`);
+      }
+
+      const now = new Date();
+      const fulfilment = {
+        ...order.fulfilment,
+        promisedAt: detail.promisedAt ?? order.fulfilment.promisedAt,
+        trackingReference: detail.trackingReference ?? order.fulfilment.trackingReference,
+        deliveredAt: to === "delivered" ? now.toISOString() : order.fulfilment.deliveredAt,
+      };
+      const history = [...order.history, { status: to, at: now.toISOString(), by, note: detail.note }];
+      const { rows } = await client.query(
+        `UPDATE acard_orders SET status = $2, fulfilment = $3, note = COALESCE($4, note), history = $5, updated_at = $6
+          WHERE id = $1 RETURNING *`,
+        [id, to, JSON.stringify(fulfilment), detail.note ?? null, JSON.stringify(history), now],
+      );
+      return rowToOrder(rows[0]);
+    });
+  }
+
+  async openOrderCount(merchantId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COUNT(*)::int AS n FROM acard_orders
+        WHERE merchant_id = $1 AND status IN ('placed','accepted','preparing','ready','dispatched')`,
+      [merchantId],
+    );
+    return rows[0].n;
+  }
+
+  async reliability(merchantId: string): Promise<MerchantReliability> {
+    // Hydrate a throwaway in-memory directory with this merchant's orders and
+    // notices, then let the tested scoring function do the work — one scoring
+    // implementation, two backends, same reasoning as evaluateOffers.
+    const [orders, notices] = await Promise.all([this.listOrders(merchantId), this.listPurchases(merchantId)]);
+    const scratch = MerchantDirectory.hydrate({
+      merchants: [await this.get(merchantId)],
+      items: [],
+      purchases: notices,
+      orders,
+    });
+    return scratch.reliability(merchantId);
+  }
+
+  async setWebhook(merchantId: string, input: { url: string; events?: string[] }) {
+    const secret = `mwh_${randomBytes(24).toString("hex")}`;
+    const webhook = {
+      url: input.url,
+      hashedSecret: hashSessionToken(secret),
+      events: input.events ?? [],
+      createdAt: new Date().toISOString(),
+      consecutiveFailures: 0,
+    };
+    await this.pool.query("UPDATE acard_merchants SET webhook = $2, updated_at = now() WHERE id = $1", [
+      merchantId,
+      JSON.stringify(webhook),
+    ]);
+    return { webhook, secret };
+  }
+
+  async clearWebhook(merchantId: string): Promise<void> {
+    await this.pool.query("UPDATE acard_merchants SET webhook = NULL, updated_at = now() WHERE id = $1", [merchantId]);
+  }
+
+  async recordWebhookDelivery(merchantId: string, ok: boolean): Promise<void> {
+    const merchant = await this.get(merchantId);
+    if (!merchant.webhook) return;
+    const next = {
+      ...merchant.webhook,
+      lastDeliveryAt: new Date().toISOString(),
+      lastDeliveryOk: ok,
+      consecutiveFailures: ok ? 0 : merchant.webhook.consecutiveFailures + 1,
+    };
+    await this.pool.query("UPDATE acard_merchants SET webhook = $2 WHERE id = $1", [merchantId, JSON.stringify(next)]);
   }
 
   async search(query: OfferQuery): Promise<OfferSearchResult> {

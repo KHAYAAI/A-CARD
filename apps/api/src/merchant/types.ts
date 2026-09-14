@@ -11,8 +11,13 @@ import type {
   MerchantSessionContext,
   MerchantStatus,
   MerchantUser,
+  MerchantReliability,
+  MerchantWebhook,
   OfferQuery,
   OfferSearchResult,
+  Order,
+  OrderStatus,
+  PlaceOrderInput,
   PurchaseNotice,
   PurchaseNoticeStatus,
   RegisterMerchantInput,
@@ -45,7 +50,7 @@ export interface MerchantDirectoryPort {
   attachKybDocument(id: string, doc: Omit<KybDocument, "uploadedAt">): Promise<Merchant>;
   updateProfile(
     id: string,
-    patch: Partial<Pick<Merchant, "name" | "tradingName" | "address" | "serviceRadiusKm" | "agentAccess" | "allowedAccountHolderIds" | "merchantCategoryCode">>,
+    patch: Partial<Pick<Merchant, "name" | "tradingName" | "address" | "serviceRadiusKm" | "agentAccess" | "allowedAccountHolderIds" | "merchantCategoryCode" | "operatingHours" | "webhook">>,
   ): Promise<Merchant>;
   upsertItem(merchantId: string, input: UpsertItemInput): Promise<CatalogItem>;
   restate(itemId: string, state: { availability: Availability; quantityAvailable?: number }): Promise<CatalogItem>;
@@ -62,6 +67,25 @@ export interface MerchantDirectoryPort {
   listPurchasesByBuyer(accountHolderId: string): Promise<PurchaseNotice[]>;
   resolvePurchase(id: string, status: "acknowledged" | "disputed", note?: string): Promise<PurchaseNotice>;
   pendingPurchaseCount(merchantId: string): Promise<number>;
+
+  // -- orders ---------------------------------------------------------------
+  placeOrder(input: PlaceOrderInput): Promise<Order>;
+  getOrder(id: string): Promise<Order>;
+  listOrders(merchantId: string, filter?: { status?: OrderStatus }): Promise<Order[]>;
+  listOrdersByBuyer(accountHolderId: string): Promise<Order[]>;
+  advanceOrder(
+    id: string,
+    to: OrderStatus,
+    by: "buyer" | "merchant",
+    detail?: { note?: string; promisedAt?: string; trackingReference?: string },
+  ): Promise<Order>;
+  openOrderCount(merchantId: string): Promise<number>;
+  reliability(merchantId: string): Promise<MerchantReliability>;
+
+  /** Where this merchant's system wants events pushed. Secret is returned once. */
+  setWebhook(merchantId: string, input: { url: string; events?: string[] }): Promise<{ webhook: MerchantWebhook; secret: string }>;
+  clearWebhook(merchantId: string): Promise<void>;
+  recordWebhookDelivery(merchantId: string, ok: boolean): Promise<void>;
 }
 
 export interface MerchantAuthPort {

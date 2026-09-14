@@ -723,3 +723,272 @@ describe("the merchant's own API — what a POS integrates against", () => {
 function apiKeyFor() {
   return apiKey;
 }
+
+describe("orders, fulfilment, and the POS connection", () => {
+  async function shopWithKeyAndItem() {
+    const merchantId = await registerVerifiedMerchant();
+    const token = await onboardMerchantOwner(merchantId, {
+      workosUserId: `wu_ord_${merchantId}`,
+      email: "owner@kasihardware.co.za",
+      name: "Thandi",
+    });
+    const secret = (
+      await json(await portal("/v1/merchant-portal/api-keys", token, { method: "POST", body: JSON.stringify({ name: "Till" }) }))
+    ).secret as string;
+    await app.request("/v1/merchant-api/catalog", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+      body: JSON.stringify({ items: [{ sku: "CEM-50", name: "Cement 50kg", unit: "bag", unit_price_cents: 8_800, quantity_available: 600 }] }),
+    });
+    const item = (
+      await json(
+        await app.request("/v1/merchant-api/catalog", { headers: { authorization: `Bearer ${secret}` } }),
+      )
+    ).items[0];
+    return { merchantId, token, secret, item };
+  }
+
+  const mApi = (path: string, secret: string, init: RequestInit = {}) =>
+    app.request(path, {
+      ...init,
+      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+
+  it("an agent places an order and the merchant walks it to delivered", async () => {
+    const { merchantId, secret, item } = await shopWithKeyAndItem();
+
+    const placed = await authed(`/v1/merchants/${merchantId}/orders`, {
+      method: "POST",
+      body: JSON.stringify({
+        lines: [{ item_id: item.id, quantity: 400 }],
+        fulfilment: { method: "delivery", address: "Soweto site", needed_by: "2026-09-19T00:00:00.000Z" },
+      }),
+    });
+    expect(placed.status).toBe(201);
+    const order = (await json(placed)).order;
+    expect(order.totalCents).toBe(8_800 * 400);
+    expect(order.status).toBe("placed");
+
+    // It shows up as work for the merchant.
+    expect((await json(await mApi("/v1/merchant-api/orders?status=placed", secret))).orders).toHaveLength(1);
+
+    const advance = (status: string, body: Record<string, unknown> = {}) =>
+      mApi(`/v1/merchant-api/orders/${order.id}/advance`, secret, { method: "POST", body: JSON.stringify({ status, ...body }) });
+
+    await advance("accepted", { promised_at: "2026-09-18T10:00:00.000Z" });
+    await advance("preparing");
+    await advance("dispatched", { tracking_reference: "TRK-9" });
+    const delivered = (await json(await advance("delivered"))).order;
+
+    expect(delivered.status).toBe("delivered");
+    expect(delivered.fulfilment.trackingReference).toBe("TRK-9");
+    expect(delivered.fulfilment.deliveredAt).toBeTruthy();
+  });
+
+  it("an illegal transition is refused", async () => {
+    const { merchantId, secret, item } = await shopWithKeyAndItem();
+    const order = (
+      await json(
+        await authed(`/v1/merchants/${merchantId}/orders`, {
+          method: "POST",
+          body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 1 }], fulfilment: { method: "collection" } }),
+        }),
+      )
+    ).order;
+    await mApi(`/v1/merchant-api/orders/${order.id}/advance`, secret, { method: "POST", body: JSON.stringify({ status: "rejected" }) });
+    const again = await mApi(`/v1/merchant-api/orders/${order.id}/advance`, secret, {
+      method: "POST",
+      body: JSON.stringify({ status: "accepted" }),
+    });
+    expect(again.status).toBe(409);
+  });
+
+  it("a buyer can cancel before acceptance and sees only their own orders", async () => {
+    const { merchantId, item } = await shopWithKeyAndItem();
+    const order = (
+      await json(
+        await authed(`/v1/merchants/${merchantId}/orders`, {
+          method: "POST",
+          body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 1 }], fulfilment: { method: "collection" } }),
+        }),
+      )
+    ).order;
+
+    expect((await json(await authed("/v1/orders"))).orders).toHaveLength(1);
+    const cancelled = await authed(`/v1/orders/${order.id}/cancel`, { method: "POST", body: JSON.stringify({}) });
+    expect((await json(cancelled)).order.status).toBe("cancelled");
+  });
+
+  it("an order against an unverified merchant is refused", async () => {
+    const res = await authed("/v1/merchants", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Unverified Co",
+        merchant_category_code: "5211",
+        address: JOBURG,
+        kyb: { registration_number: "x", contact_email: "a@b.co.za" },
+      }),
+    });
+    const unverifiedId = (await json(res)).merchant.id;
+    const placed = await authed(`/v1/merchants/${unverifiedId}/orders`, {
+      method: "POST",
+      body: JSON.stringify({ lines: [{ item_id: "item_x", quantity: 1 }], fulfilment: { method: "collection" } }),
+    });
+    expect(placed.status).toBe(409);
+  });
+
+  it("reliability is reported with its confidence, and a new merchant is not punished for being new", async () => {
+    const { merchantId, secret } = await shopWithKeyAndItem();
+    const fresh = (await json(await authed(`/v1/merchants/${merchantId}`))).reliability;
+    expect(fresh.confidence).toBe("none");
+    expect(fresh.score).toBe(0.5);
+    expect((await json(await mApi("/v1/merchant-api/reliability", secret))).reliability.orders).toBe(0);
+  });
+});
+
+describe("POS connection: events actually reach the merchant's system", () => {
+  /** Stands in for a POS endpoint, capturing exactly what we send it. */
+  function fakePos(options: { fail?: boolean } = {}) {
+    const received: Array<{ body: string; signature: string | null; event: string | null }> = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      received.push({
+        body: String(init?.body ?? ""),
+        signature: headers.get("x-acard-signature"),
+        event: headers.get("x-acard-event"),
+      });
+      return new Response(options.fail ? "nope" : "ok", { status: options.fail ? 500 : 200 });
+    }) as unknown as typeof fetch;
+    return { received, fetchImpl };
+  }
+
+  async function setup(pos: ReturnType<typeof fakePos>) {
+    platform = new Platform();
+    merchantAuth = platform.merchantAuth;
+    authKit = fakeAuthKit();
+    app = createApp({
+      platform,
+      issuerWebhookSecret: SECRET,
+      dashboardUrl: DASHBOARD_URL,
+      merchants: new InMemoryMerchantDirectory(platform.merchants),
+      merchantAuth: new InMemoryMerchantAuth(merchantAuth),
+      merchantAuthKit: authKit,
+      merchantWebhookFetch: pos.fetchImpl,
+    });
+    const su = await app.request("/v1/signup", {
+      method: "POST",
+      body: JSON.stringify({ email: "dev@example.co.za", name: "Dev", currency: "ZAR" }),
+      headers: { "content-type": "application/json" },
+    });
+    apiKey = (await json(su)).api_key;
+
+    const merchantId = await registerVerifiedMerchant();
+    const token = await onboardMerchantOwner(merchantId, { workosUserId: "wu_pos", email: "o@k.co.za", name: "T" });
+    const secret = (
+      await json(await portal("/v1/merchant-portal/api-keys", token, { method: "POST", body: JSON.stringify({ name: "Till" }) }))
+    ).secret as string;
+    const mApi = (path: string, init: RequestInit = {}) =>
+      app.request(path, { ...init, headers: { authorization: `Bearer ${secret}`, "content-type": "application/json", ...(init.headers ?? {}) } });
+
+    await mApi("/v1/merchant-api/catalog", {
+      method: "PUT",
+      body: JSON.stringify({ items: [{ sku: "CEM", name: "Cement", unit_price_cents: 8_800 }] }),
+    });
+    const item = (await json(await mApi("/v1/merchant-api/catalog"))).items[0];
+    return { merchantId, secret, mApi, item };
+  }
+
+  it("registers an endpoint and pushes a signed order.placed to it", async () => {
+    const pos = fakePos();
+    const { merchantId, mApi, item } = await setup(pos);
+
+    const registered = await mApi("/v1/merchant-api/webhook", {
+      method: "PUT",
+      body: JSON.stringify({ url: "https://pos.example/acard" }),
+    });
+    expect(registered.status).toBe(201);
+    const body = await json(registered);
+    expect(body.secret.startsWith("mwh_")).toBe(true);
+    // The stored hash is never handed back.
+    expect(body.webhook.hashedSecret).toBeUndefined();
+
+    await authed(`/v1/merchants/${merchantId}/orders`, {
+      method: "POST",
+      body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 5 }], fulfilment: { method: "collection" } }),
+    });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(pos.received).toHaveLength(1);
+    expect(pos.received[0]!.event).toBe("order.placed");
+    // Same t=…,v1=… scheme as the issuer webhook, so one verifier handles both.
+    expect(pos.received[0]!.signature).toMatch(/^t=\d+,v1=[0-9a-f]{64}$/);
+    expect(JSON.parse(pos.received[0]!.body).data.order.lines[0].sku).toBe("CEM");
+  });
+
+  it("a dead endpoint never fails the agent's order, and the failure is visible", async () => {
+    const pos = fakePos({ fail: true });
+    const { merchantId, mApi, item } = await setup(pos);
+    await mApi("/v1/merchant-api/webhook", { method: "PUT", body: JSON.stringify({ url: "https://dead.example/hook" }) });
+
+    const placed = await authed(`/v1/merchants/${merchantId}/orders`, {
+      method: "POST",
+      body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 1 }], fulfilment: { method: "collection" } }),
+    });
+    // The order succeeded regardless.
+    expect(placed.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 30));
+
+    const merchant = await platform.merchants.get(merchantId);
+    expect(merchant.webhook!.lastDeliveryOk).toBe(false);
+    expect(merchant.webhook!.consecutiveFailures).toBe(1);
+  });
+
+  it("redelivers an order a dead endpoint missed", async () => {
+    const pos = fakePos();
+    const { merchantId, mApi, item } = await setup(pos);
+    const order = (
+      await json(
+        await authed(`/v1/merchants/${merchantId}/orders`, {
+          method: "POST",
+          body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 1 }], fulfilment: { method: "collection" } }),
+        }),
+      )
+    ).order;
+    // Endpoint registered only AFTER the order was placed — the classic case.
+    await mApi("/v1/merchant-api/webhook", { method: "PUT", body: JSON.stringify({ url: "https://pos.example/acard" }) });
+    expect(pos.received).toHaveLength(0);
+
+    await mApi(`/v1/merchant-api/orders/${order.id}/redeliver`, { method: "POST" });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pos.received).toHaveLength(1);
+  });
+
+  it("respects an event subscription filter", async () => {
+    const pos = fakePos();
+    const { merchantId, mApi, item } = await setup(pos);
+    await mApi("/v1/merchant-api/webhook", {
+      method: "PUT",
+      body: JSON.stringify({ url: "https://pos.example/acard", events: ["order.cancelled"] }),
+    });
+    await authed(`/v1/merchants/${merchantId}/orders`, {
+      method: "POST",
+      body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 1 }], fulfilment: { method: "collection" } }),
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    // Subscribed to cancellations only, so a placement is not delivered.
+    expect(pos.received).toHaveLength(0);
+  });
+
+  it("clearing the endpoint stops delivery", async () => {
+    const pos = fakePos();
+    const { merchantId, mApi, item } = await setup(pos);
+    await mApi("/v1/merchant-api/webhook", { method: "PUT", body: JSON.stringify({ url: "https://pos.example/acard" }) });
+    await mApi("/v1/merchant-api/webhook", { method: "DELETE" });
+    await authed(`/v1/merchants/${merchantId}/orders`, {
+      method: "POST",
+      body: JSON.stringify({ lines: [{ item_id: item.id, quantity: 1 }], fulfilment: { method: "collection" } }),
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pos.received).toHaveLength(0);
+  });
+});

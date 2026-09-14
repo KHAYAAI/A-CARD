@@ -4,6 +4,7 @@ import {
   classifyFreshness,
   distanceKm,
   FRESH_INVENTORY_HOURS,
+  isOpenAt,
   MerchantDirectory,
   Platform,
   publicMerchant,
@@ -420,5 +421,226 @@ describe("purchase notices — closing the feedback loop", () => {
 
     const { purchases: _dropped, ...older } = snapshot;
     expect(MerchantDirectory.hydrate(older).listPurchases(merchant.id)).toHaveLength(0);
+  });
+});
+
+describe("orders and fulfilment", () => {
+  const setup = () => {
+    const directory = new MerchantDirectory();
+    const merchant = verifiedMerchant(directory);
+    const cement = directory.upsertItem(merchant.id, {
+      sku: "CEM-50", name: "Cement 50kg", unit: "bag", unitPriceCents: 8_800, quantityAvailable: 600,
+    });
+    const sand = directory.upsertItem(merchant.id, { sku: "SAND", name: "River sand", unitPriceCents: 45_000 });
+    return { directory, merchant, cement, sand };
+  };
+
+  const place = (d: MerchantDirectory, merchantId: string, itemId: string, quantity = 500) =>
+    d.placeOrder({
+      merchantId,
+      accountHolderId: "ah_1",
+      lines: [{ itemId, quantity }],
+      fulfilment: { method: "collection" },
+    });
+
+  it("prices lines from the catalog and totals them", () => {
+    const { directory, merchant, cement, sand } = setup();
+    const order = directory.placeOrder({
+      merchantId: merchant.id,
+      accountHolderId: "ah_1",
+      lines: [{ itemId: cement.id, quantity: 500 }, { itemId: sand.id, quantity: 2 }],
+      fulfilment: { method: "delivery", address: "Soweto site" },
+    });
+    expect(order.totalCents).toBe(8_800 * 500 + 45_000 * 2);
+    expect(order.status).toBe("placed");
+    expect(order.lines[0]!.sku).toBe("CEM-50");
+  });
+
+  it("does not reserve or decrement stock — A-CARD is not the stock system of record", () => {
+    const { directory, merchant, cement } = setup();
+    const before = directory.getItem(cement.id);
+    place(directory, merchant.id, cement.id);
+    const after = directory.getItem(cement.id);
+    expect(after.quantityAvailable).toBe(before.quantityAvailable);
+    expect(after.inventoryUpdatedAt).toBe(before.inventoryUpdatedAt);
+  });
+
+  it("refuses an order against an unverified merchant", () => {
+    const directory = new MerchantDirectory();
+    const merchant = directory.register({
+      name: "Unverified", merchantCategoryCode: "5211", address: address(JOBURG_CBD),
+      kyb: { registrationNumber: "x", contactEmail: "a@b.co.za" },
+    });
+    const item = directory.upsertItem(merchant.id, { sku: "X", name: "X", unitPriceCents: 100 });
+    expect(() => place(directory, merchant.id, item.id)).toThrow(/pending_kyb/);
+  });
+
+  it("refuses a delivery order with no address, and an empty order", () => {
+    const { directory, merchant, cement } = setup();
+    expect(() =>
+      directory.placeOrder({
+        merchantId: merchant.id, accountHolderId: "ah_1",
+        lines: [{ itemId: cement.id, quantity: 1 }], fulfilment: { method: "delivery" },
+      }),
+    ).toThrow(/delivery address/);
+    expect(() =>
+      directory.placeOrder({ merchantId: merchant.id, accountHolderId: "ah_1", lines: [], fulfilment: { method: "collection" } }),
+    ).toThrow(/at least one line/);
+  });
+
+  it("refuses a line belonging to a different merchant", () => {
+    const { directory, merchant, cement } = setup();
+    const other = verifiedMerchant(directory, { name: "Other" });
+    expect(() => place(directory, other.id, cement.id)).toThrow(/does not belong/);
+  });
+
+  it("walks the fulfilment lifecycle and records who moved it", () => {
+    const { directory, merchant, cement } = setup();
+    const order = place(directory, merchant.id, cement.id);
+
+    const accepted = directory.advanceOrder(order.id, "accepted", "merchant", { promisedAt: "2026-09-18T10:00:00.000Z" });
+    expect(accepted.fulfilment.promisedAt).toBe("2026-09-18T10:00:00.000Z");
+
+    directory.advanceOrder(order.id, "preparing", "merchant");
+    directory.advanceOrder(order.id, "dispatched", "merchant", { trackingReference: "TRK-1" });
+    const delivered = directory.advanceOrder(order.id, "delivered", "merchant");
+
+    expect(delivered.status).toBe("delivered");
+    expect(delivered.fulfilment.deliveredAt).toBeTruthy();
+    expect(delivered.fulfilment.trackingReference).toBe("TRK-1");
+    expect(delivered.history.map((h) => h.status)).toEqual(["placed", "accepted", "preparing", "dispatched", "delivered"]);
+  });
+
+  it("refuses an illegal transition", () => {
+    const { directory, merchant, cement } = setup();
+    const order = place(directory, merchant.id, cement.id);
+    directory.advanceOrder(order.id, "accepted", "merchant");
+    directory.advanceOrder(order.id, "delivered", "merchant");
+    expect(() => directory.advanceOrder(order.id, "preparing", "merchant")).toThrow(/cannot become/);
+  });
+
+  it("only the buyer cancels; only the merchant does the rest", () => {
+    const { directory, merchant, cement } = setup();
+    const a = place(directory, merchant.id, cement.id);
+    expect(() => directory.advanceOrder(a.id, "cancelled", "merchant")).toThrow(/only the buyer cancels/);
+    expect(() => directory.advanceOrder(a.id, "accepted", "buyer")).toThrow(/only the merchant/);
+    expect(directory.advanceOrder(a.id, "cancelled", "buyer").status).toBe("cancelled");
+  });
+
+  it("counts what still needs the merchant's attention", () => {
+    const { directory, merchant, cement } = setup();
+    const a = place(directory, merchant.id, cement.id);
+    const b = place(directory, merchant.id, cement.id);
+    expect(directory.openOrderCount(merchant.id)).toBe(2);
+    directory.advanceOrder(a.id, "rejected", "merchant");
+    expect(directory.openOrderCount(merchant.id)).toBe(1);
+    directory.advanceOrder(b.id, "accepted", "merchant");
+    directory.advanceOrder(b.id, "delivered", "merchant");
+    expect(directory.openOrderCount(merchant.id)).toBe(0);
+  });
+});
+
+describe("merchant reliability", () => {
+  const setup = () => {
+    const directory = new MerchantDirectory();
+    const merchant = verifiedMerchant(directory);
+    const item = directory.upsertItem(merchant.id, { sku: "CEM", name: "Cement", unitPriceCents: 8_800 });
+    return { directory, merchant, item };
+  };
+  const place = (d: MerchantDirectory, m: string, i: string) =>
+    d.placeOrder({ merchantId: m, accountHolderId: "ah_1", lines: [{ itemId: i, quantity: 1 }], fulfilment: { method: "collection" } });
+
+  it("delivering without ever promising a time scores neutral on punctuality, not perfect", () => {
+    const { directory, merchant, item } = setup();
+    const o = place(directory, merchant.id, item.id);
+    directory.advanceOrder(o.id, "accepted", "merchant");
+    directory.advanceOrder(o.id, "delivered", "merchant");
+    const r = directory.reliability(merchant.id);
+    expect(r.fulfilmentRate).toBe(1);
+    // No promise was made, so there is nothing to have been late against.
+    expect(r.onTimeRate).toBe(0.5);
+  });
+
+  it("a brand new merchant scores neutral, not bottom — being new is not being bad", () => {
+    const { directory, merchant } = setup();
+    const r = directory.reliability(merchant.id);
+    expect(r.confidence).toBe("none");
+    expect(r.score).toBe(0.5);
+    expect(r.orders).toBe(0);
+  });
+
+  it("confidence grows with the sample and is reported alongside the score", () => {
+    const { directory, merchant, item } = setup();
+    for (let i = 0; i < 4; i++) {
+      const o = place(directory, merchant.id, item.id);
+      directory.advanceOrder(o.id, "accepted", "merchant");
+      directory.advanceOrder(o.id, "delivered", "merchant");
+    }
+    expect(directory.reliability(merchant.id).confidence).toBe("low");
+
+    for (let i = 0; i < 25; i++) {
+      const o = place(directory, merchant.id, item.id);
+      // Promise a time far enough out that delivery is genuinely on time —
+      // a merchant who never promises anything scores NEUTRAL on punctuality,
+      // not perfect, because there is no signal either way.
+      directory.advanceOrder(o.id, "accepted", "merchant", { promisedAt: "2099-01-01T00:00:00.000Z" });
+      directory.advanceOrder(o.id, "delivered", "merchant");
+    }
+    const r = directory.reliability(merchant.id);
+    expect(r.confidence).toBe("high");
+    expect(r.fulfilmentRate).toBe(1);
+    expect(r.onTimeRate).toBeGreaterThan(0.8);
+    expect(r.score).toBeGreaterThan(0.9);
+  });
+
+  it("rejecting and failing to fulfil both pull the score down", () => {
+    const { directory, merchant, item } = setup();
+    for (let i = 0; i < 5; i++) directory.advanceOrder(place(directory, merchant.id, item.id).id, "rejected", "merchant");
+    const r = directory.reliability(merchant.id);
+    expect(r.acceptanceRate).toBe(0);
+    expect(r.score).toBeLessThan(0.5);
+  });
+
+  it("late delivery is distinguished from no delivery", () => {
+    const { directory, merchant, item } = setup();
+    const late = place(directory, merchant.id, item.id);
+    directory.advanceOrder(late.id, "accepted", "merchant", { promisedAt: "2020-01-01T00:00:00.000Z" });
+    directory.advanceOrder(late.id, "delivered", "merchant");
+
+    const r = directory.reliability(merchant.id);
+    expect(r.fulfilmentRate).toBe(1);
+    expect(r.onTimeRate).toBe(0);
+  });
+
+  it("disputed purchase notices count against reliability", () => {
+    const { directory, merchant, item } = setup();
+    const notice = directory.reportPurchase({ itemId: item.id, accountHolderId: "ah_1", quantity: 1 });
+    directory.resolvePurchase(notice.id, "disputed", "never happened");
+    expect(directory.reliability(merchant.id).disputeRate).toBe(1);
+  });
+});
+
+describe("operating hours", () => {
+  const monday10am = new Date("2026-09-14T10:00:00");
+  const monday8pm = new Date("2026-09-14T20:00:00");
+  const sunday10am = new Date("2026-09-13T10:00:00");
+
+  it("unknown hours read as open — a merchant is not excluded for not filling in a form", () => {
+    expect(isOpenAt(undefined, monday10am)).toBe(true);
+    expect(isOpenAt({}, monday10am)).toBe(true);
+  });
+
+  it("respects the window on a day that has one", () => {
+    const hours = { 1: { open: "08:00", close: "17:00" } };
+    expect(isOpenAt(hours, monday10am)).toBe(true);
+    expect(isOpenAt(hours, monday8pm)).toBe(false);
+  });
+
+  it("an explicit null means closed that day", () => {
+    expect(isOpenAt({ 0: null }, sunday10am)).toBe(false);
+  });
+
+  it("a day with no entry at all is open, not closed", () => {
+    expect(isOpenAt({ 1: { open: "08:00", close: "17:00" } }, sunday10am)).toBe(true);
   });
 });

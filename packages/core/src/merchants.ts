@@ -91,6 +91,33 @@ export interface KybRecord {
   documents: KybDocument[];
 }
 
+/**
+ * When a merchant is actually open, keyed 0 (Sunday) to 6 (Saturday).
+ * `null` for a day means closed. Times are local "HH:MM" in the merchant's
+ * own wall clock — deliberately not timestamps: a shop's hours are a
+ * recurring local fact, and storing them as instants makes every read a
+ * timezone bug waiting to happen.
+ */
+export type OperatingHours = Partial<Record<0 | 1 | 2 | 3 | 4 | 5 | 6, { open: string; close: string } | null>>;
+
+/** Is the merchant open at this local time? Unknown hours count as open — see `isOpenAt`. */
+export function isOpenAt(hours: OperatingHours | undefined, at: Date): boolean {
+  // A merchant who has not published hours is treated as open rather than
+  // closed. Excluding an offer because nobody filled in a form would punish
+  // exactly the low-digitisation merchants this layer exists to reach.
+  if (!hours || Object.keys(hours).length === 0) return true;
+  const day = at.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  const window = hours[day];
+  if (window === null) return false;
+  if (!window) return true;
+  const minutes = at.getHours() * 60 + at.getMinutes();
+  const toMinutes = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  };
+  return minutes >= toMinutes(window.open) && minutes < toMinutes(window.close);
+}
+
 export interface Merchant {
   id: string;
   name: string;
@@ -106,8 +133,34 @@ export interface Merchant {
   agentAccess: AgentAccess;
   /** Account holder ids permitted to transact when `agentAccess` is allowlist. */
   allowedAccountHolderIds: string[];
+  /** When this merchant is open. Absent means "unknown", which reads as open. */
+  operatingHours?: OperatingHours;
+  /** Where this merchant's own system wants orders pushed. See `MerchantWebhook`. */
+  webhook?: MerchantWebhook;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Where a merchant's POS or ERP wants to be told about orders.
+ *
+ * Outbound push rather than polling, because the integration that matters is
+ * a till that needs to print a docket the moment an order lands — a merchant
+ * polling every five minutes is a merchant who finds out five minutes late.
+ * Signed with the same HMAC scheme as A-CARD's own issuer webhook, so a
+ * merchant integrating both verifies them the same way.
+ */
+export interface MerchantWebhook {
+  url: string;
+  /** Stored as a hash; the plaintext is returned once at registration. */
+  hashedSecret: string;
+  /** Events this endpoint wants. Empty means all of them. */
+  events: string[];
+  createdAt: string;
+  lastDeliveryAt?: string;
+  lastDeliveryOk?: boolean;
+  /** Consecutive failures. A merchant whose endpoint has been dead for days should be visible. */
+  consecutiveFailures: number;
 }
 
 /**
@@ -115,10 +168,15 @@ export interface Merchant {
  * know a merchant is verified, never the registration number, VAT number, or
  * contact details behind that verification.
  */
-export type PublicMerchant = Omit<Merchant, "kyb"> & { verified: boolean };
+export type PublicMerchant = Omit<Merchant, "kyb" | "webhook"> & { verified: boolean };
 
 export function publicMerchant(merchant: Merchant): PublicMerchant {
-  const { kyb: _kyb, ...rest } = merchant;
+  // `webhook` is stripped alongside `kyb`: it carries a secret hash and the
+  // merchant's internal endpoint, neither of which is an agent's business.
+  // Destructured out rather than picked, so a field added to Merchant later
+  // is visible-by-default and has to be *chosen* to be hidden — the reverse
+  // would silently expose the next secret somebody adds.
+  const { kyb: _kyb, webhook: _webhook, ...rest } = merchant;
   return { ...rest, verified: merchant.status === "verified" };
 }
 
@@ -323,6 +381,137 @@ export interface PurchaseNotice {
   resolvedAt?: string;
 }
 
+// ---- orders and fulfilment -------------------------------------------------
+
+/**
+ * An order is a *request to fulfil*, placed before the goods move — which is
+ * what makes it different from a `PurchaseNotice`, a claim recorded after the
+ * fact. Both exist on purpose: an agent buying over the counter reports a
+ * notice; an agent asking a supplier to prepare 500 bags places an order.
+ *
+ * What this deliberately is NOT:
+ *
+ *   - **Not an escrow.** No money moves through an order. The agent pays by
+ *     card exactly as before, and `cardTransactionId` is evidence the merchant
+ *     reconciles against their own statement. Funds custody stays out of scope,
+ *     which is the boundary the whole layer is built around.
+ *   - **Not a stock reservation.** Placing an order does not decrement
+ *     anything. A-CARD is not the stock system of record — the merchant's POS
+ *     is — so committing stock is something the merchant does when they
+ *     *accept*, and acceptance can carry a restatement in the same call.
+ *   - **Not arbitrated.** If a merchant rejects or an agent cancels, the
+ *     record says so and stops. Who was right is a conversation between two
+ *     businesses.
+ */
+export type OrderStatus =
+  | "placed"
+  | "accepted"
+  | "rejected"
+  | "preparing"
+  | "ready"
+  | "dispatched"
+  | "delivered"
+  | "cancelled";
+
+/** Which transitions are legal. An order moves forward, or it stops. */
+const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  placed: ["accepted", "rejected", "cancelled"],
+  accepted: ["preparing", "ready", "dispatched", "delivered", "cancelled"],
+  preparing: ["ready", "dispatched", "delivered", "cancelled"],
+  ready: ["dispatched", "delivered", "cancelled"],
+  dispatched: ["delivered"],
+  // Terminal.
+  delivered: [],
+  rejected: [],
+  cancelled: [],
+};
+
+export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean {
+  return ORDER_TRANSITIONS[from].includes(to);
+}
+
+export type FulfilmentMethod = "collection" | "delivery";
+
+export interface OrderLine {
+  itemId: string;
+  /** Copied in, so the line still reads correctly after the item changes or is deleted. */
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
+}
+
+export interface Order {
+  id: string;
+  merchantId: string;
+  accountHolderId: string;
+  lines: OrderLine[];
+  totalCents: number;
+  currency: Currency;
+  status: OrderStatus;
+  fulfilment: {
+    method: FulfilmentMethod;
+    /** Where it goes, for delivery. */
+    address?: string;
+    /** When the buyer needs it by. */
+    neededBy?: string;
+    /** When the merchant committed to having it ready. Set on acceptance. */
+    promisedAt?: string;
+    /** When it actually completed. */
+    deliveredAt?: string;
+    /** The merchant's own tracking reference, if they have one. */
+    trackingReference?: string;
+  };
+  /** Evidence for the merchant's reconciliation, never a settlement link. */
+  cardTransactionId?: string;
+  /** Free-text from whichever side last moved it. */
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+  history: Array<{ status: OrderStatus; at: string; by: "buyer" | "merchant"; note?: string }>;
+}
+
+export interface PlaceOrderInput {
+  merchantId: string;
+  accountHolderId: string;
+  lines: Array<{ itemId: string; quantity: number }>;
+  fulfilment: { method: FulfilmentMethod; address?: string; neededBy?: string };
+  cardTransactionId?: string;
+  note?: string;
+}
+
+/**
+ * How dependable a merchant has actually been, computed from what happened
+ * rather than stored — the same discipline as freshness and compliance
+ * gating, and for the same reason: a stored score is a stale score.
+ *
+ * `confidence` is not decoration. A merchant with two orders behind them
+ * must not read the same as one with two hundred, and a *new* merchant must
+ * not be ranked to the bottom simply for being new — that would make the
+ * directory impossible to join, which is the opposite of the point. So an
+ * unknown reliability scores neutral, and the sample size travels with it.
+ */
+export interface MerchantReliability {
+  orders: number;
+  /** Of orders the merchant answered, how many they took on. */
+  acceptanceRate: number;
+  /** Of orders they accepted, how many actually completed. */
+  fulfilmentRate: number;
+  /** Of completed orders with a promise attached, how many landed on time. */
+  onTimeRate: number;
+  /** Of purchase notices raised against them, how many they disputed. */
+  disputeRate: number;
+  /** 0–1, higher is better. Neutral (0.5) when there is nothing to go on. */
+  score: number;
+  confidence: "none" | "low" | "medium" | "high";
+}
+
+/** Below this many resolved orders, a score is indicative rather than meaningful. */
+export const RELIABILITY_LOW_CONFIDENCE = 5;
+export const RELIABILITY_HIGH_CONFIDENCE = 25;
+
 export interface ReportPurchaseInput {
   itemId: string;
   accountHolderId: string;
@@ -334,6 +523,7 @@ export interface SerializedMerchantDirectory {
   merchants: Merchant[];
   items: CatalogItem[];
   purchases?: PurchaseNotice[];
+  orders?: Order[];
 }
 
 // ---- the directory ---------------------------------------------------------
@@ -342,6 +532,7 @@ export class MerchantDirectory {
   private readonly merchants = new Map<string, Merchant>();
   private readonly items = new Map<string, CatalogItem>();
   private readonly purchases = new Map<string, PurchaseNotice>();
+  private readonly orders = new Map<string, Order>();
 
   // -- merchant lifecycle ----------------------------------------------------
 
@@ -416,7 +607,7 @@ export class MerchantDirectory {
 
   updateProfile(
     id: string,
-    patch: Partial<Pick<Merchant, "name" | "tradingName" | "address" | "serviceRadiusKm" | "agentAccess" | "allowedAccountHolderIds" | "merchantCategoryCode">>,
+    patch: Partial<Pick<Merchant, "name" | "tradingName" | "address" | "serviceRadiusKm" | "agentAccess" | "allowedAccountHolderIds" | "merchantCategoryCode" | "operatingHours" | "webhook">>,
   ): Merchant {
     const merchant = this.get(id);
     const next = { ...merchant, ...patch, updatedAt: new Date().toISOString() };
@@ -584,6 +775,179 @@ export class MerchantDirectory {
     return this.listPurchases(merchantId, { status: "reported" }).length;
   }
 
+  // -- orders ----------------------------------------------------------------
+
+  /**
+   * Place an order. Lines are priced from the catalog as it stands now — the
+   * buyer says what and how many, the catalog says what that costs, same rule
+   * purchase notices follow.
+   */
+  placeOrder(input: PlaceOrderInput): Order {
+    if (input.lines.length === 0) throw new DomainError("empty_order", "an order needs at least one line");
+    const merchant = this.get(input.merchantId);
+    if (merchant.status !== "verified") {
+      throw new InvalidStateError(`merchant ${merchant.id} is ${merchant.status} and cannot take orders`);
+    }
+    if (input.fulfilment.method === "delivery" && !input.fulfilment.address) {
+      throw new DomainError("address_required", "a delivery order needs a delivery address");
+    }
+
+    const lines: OrderLine[] = input.lines.map((line) => {
+      if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) {
+        throw new DomainError("invalid_quantity", "every order line needs a positive integer quantity");
+      }
+      const item = this.getItem(line.itemId);
+      if (item.merchantId !== input.merchantId) {
+        throw new DomainError("wrong_merchant", `item ${item.id} does not belong to merchant ${input.merchantId}`);
+      }
+      return {
+        itemId: item.id,
+        sku: item.sku,
+        name: item.name,
+        unit: item.unit,
+        quantity: line.quantity,
+        unitPriceCents: item.unitPriceCents,
+        lineTotalCents: item.unitPriceCents * line.quantity,
+      };
+    });
+
+    const currencies = new Set(lines.map((l) => this.getItem(l.itemId).currency));
+    if (currencies.size > 1) {
+      throw new DomainError("mixed_currency", "every line on an order must be priced in the same currency");
+    }
+
+    const now = new Date().toISOString();
+    const order: Order = {
+      id: newId("ord"),
+      merchantId: input.merchantId,
+      accountHolderId: input.accountHolderId,
+      lines,
+      totalCents: lines.reduce((sum, l) => sum + l.lineTotalCents, 0),
+      currency: this.getItem(lines[0]!.itemId).currency,
+      status: "placed",
+      fulfilment: { ...input.fulfilment },
+      cardTransactionId: input.cardTransactionId,
+      note: input.note,
+      createdAt: now,
+      updatedAt: now,
+      history: [{ status: "placed", at: now, by: "buyer", note: input.note }],
+    };
+    this.orders.set(order.id, order);
+    return order;
+  }
+
+  getOrder(id: string): Order {
+    const order = this.orders.get(id);
+    if (!order) throw new NotFoundError("order", id);
+    return order;
+  }
+
+  listOrders(merchantId: string, filter: { status?: OrderStatus } = {}): Order[] {
+    return [...this.orders.values()]
+      .filter((o) => o.merchantId === merchantId && (!filter.status || o.status === filter.status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  listOrdersByBuyer(accountHolderId: string): Order[] {
+    return [...this.orders.values()]
+      .filter((o) => o.accountHolderId === accountHolderId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /**
+   * Move an order along. Refuses an illegal transition rather than silently
+   * accepting it: an order that has been delivered cannot go back to
+   * preparing, and one the merchant rejected is over.
+   */
+  advanceOrder(
+    id: string,
+    to: OrderStatus,
+    by: "buyer" | "merchant",
+    detail: { note?: string; promisedAt?: string; trackingReference?: string } = {},
+  ): Order {
+    const order = this.getOrder(id);
+    if (!canTransitionOrder(order.status, to)) {
+      throw new InvalidStateError(`an order that is ${order.status} cannot become ${to}`);
+    }
+    // Only the buyer cancels; only the merchant does everything else. Letting
+    // either side drive the whole machine would make the history meaningless.
+    if (to === "cancelled" && by !== "buyer") {
+      throw new DomainError("forbidden_transition", "only the buyer cancels an order; a merchant rejects it");
+    }
+    if (to !== "cancelled" && by !== "merchant") {
+      throw new DomainError("forbidden_transition", `only the merchant can move an order to ${to}`);
+    }
+
+    const now = new Date().toISOString();
+    const next: Order = {
+      ...order,
+      status: to,
+      note: detail.note ?? order.note,
+      fulfilment: {
+        ...order.fulfilment,
+        promisedAt: detail.promisedAt ?? order.fulfilment.promisedAt,
+        trackingReference: detail.trackingReference ?? order.fulfilment.trackingReference,
+        deliveredAt: to === "delivered" ? now : order.fulfilment.deliveredAt,
+      },
+      updatedAt: now,
+      history: [...order.history, { status: to, at: now, by, note: detail.note }],
+    };
+    this.orders.set(id, next);
+    return next;
+  }
+
+  /** Orders still needing the merchant to do something. */
+  openOrderCount(merchantId: string): number {
+    const open: OrderStatus[] = ["placed", "accepted", "preparing", "ready", "dispatched"];
+    return this.listOrders(merchantId).filter((o) => open.includes(o.status)).length;
+  }
+
+  /**
+   * What this merchant has actually done, scored. See `MerchantReliability`
+   * for why confidence travels with the number and why unknown is neutral.
+   */
+  reliability(merchantId: string): MerchantReliability {
+    const orders = this.listOrders(merchantId);
+    const answered = orders.filter((o) => o.status !== "placed" && o.status !== "cancelled");
+    const accepted = answered.filter((o) => o.status !== "rejected");
+    const delivered = orders.filter((o) => o.status === "delivered");
+    const promised = delivered.filter((o) => o.fulfilment.promisedAt && o.fulfilment.deliveredAt);
+    const onTime = promised.filter((o) => o.fulfilment.deliveredAt! <= o.fulfilment.promisedAt!);
+
+    const notices = this.listPurchases(merchantId);
+    const resolvedNotices = notices.filter((n) => n.status !== "reported");
+    const disputed = notices.filter((n) => n.status === "disputed");
+
+    const rate = (numerator: number, denominator: number, fallback = 0.5) =>
+      denominator === 0 ? fallback : numerator / denominator;
+
+    const acceptanceRate = rate(accepted.length, answered.length);
+    const fulfilmentRate = rate(delivered.length, accepted.length);
+    const onTimeRate = rate(onTime.length, promised.length);
+    const disputeRate = rate(disputed.length, resolvedNotices.length, 0);
+
+    const sample = answered.length;
+    const confidence =
+      sample === 0 ? "none" : sample < RELIABILITY_LOW_CONFIDENCE ? "low" : sample < RELIABILITY_HIGH_CONFIDENCE ? "medium" : "high";
+
+    // Neutral when there is nothing to go on, so a new merchant is not
+    // punished for being new.
+    const score =
+      confidence === "none"
+        ? 0.5
+        : Math.round((acceptanceRate * 0.3 + fulfilmentRate * 0.35 + onTimeRate * 0.25 + (1 - disputeRate) * 0.1) * 1000) / 1000;
+
+    return {
+      orders: orders.length,
+      acceptanceRate: Math.round(acceptanceRate * 1000) / 1000,
+      fulfilmentRate: Math.round(fulfilmentRate * 1000) / 1000,
+      onTimeRate: Math.round(onTimeRate * 1000) / 1000,
+      disputeRate: Math.round(disputeRate * 1000) / 1000,
+      score,
+      confidence,
+    };
+  }
+
   // -- discovery -------------------------------------------------------------
 
   /**
@@ -601,6 +965,7 @@ export class MerchantDirectory {
       merchants: [...this.merchants.values()],
       items: [...this.items.values()],
       purchases: [...this.purchases.values()],
+      orders: [...this.orders.values()],
     };
   }
 
@@ -614,6 +979,8 @@ export class MerchantDirectory {
     for (const item of snapshot.items) directory.items.set(item.id, item);
     // Back-compat: snapshots taken before purchase notices existed have none.
     for (const notice of snapshot.purchases ?? []) directory.purchases.set(notice.id, notice);
+    // Back-compat: snapshots taken before orders existed have none.
+    for (const order of snapshot.orders ?? []) directory.orders.set(order.id, order);
     return directory;
   }
 }

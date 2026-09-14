@@ -21,7 +21,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 430 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 459 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + purchase notices, AFP routing/ledger,
                          # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e.
                          # 73 of them are Postgres integration tests, skipped unless
@@ -228,6 +228,71 @@ then runs, unmodified, against whichever backend supplied the rows. A
 dedicated test (`apps/api/test/pg-merchant-service.test.ts`) seeds identical
 data into both backends and asserts the Postgres-backed search returns the
 exact same ranked offers, in the same order, as the in-memory one.
+
+### Orders and fulfilment
+
+A **purchase notice** records a sale after the fact. An **order** is a request
+to fulfil, placed before the goods move — an agent asking a supplier to prepare
+500 bags is not the same act as an agent reporting a counter purchase, so both
+exist.
+
+An order walks `placed → accepted → preparing → ready → dispatched → delivered`,
+with `rejected` and `cancelled` as terminal exits. Illegal transitions are
+refused, not silently accepted. Only the buyer cancels; only the merchant does
+everything else — letting either side drive the whole machine would make the
+history meaningless.
+
+What an order deliberately is **not**:
+
+- **Not an escrow.** No money moves through it. The agent pays by card exactly
+  as before; `cardTransactionId` is evidence the merchant reconciles against
+  their own statement.
+- **Not a stock reservation.** Placing an order decrements nothing. A-CARD is
+  not the stock system of record — the merchant's POS is — so stock is
+  committed when the merchant *accepts*, and acceptance can carry a restatement
+  in the same call.
+- **Not arbitrated.** A rejection or cancellation is recorded and stops there.
+
+### Supplier reliability — computed, never stored
+
+`reliability()` scores what a merchant actually did: acceptance rate,
+fulfilment rate, on-time rate against their own promised times, and dispute
+rate on purchase notices. Computed on read for the same reason freshness and
+compliance gating are — a stored score is a stale score.
+
+**Confidence travels with the number**, and this is the part that matters: a
+merchant with two orders behind them must not read the same as one with two
+hundred, and a *new* merchant must not rank bottom simply for being new — that
+would make the directory impossible to join. So unknown reliability scores
+**neutral (0.5)**, not zero. A merchant who delivers but never promises a time
+scores neutral on punctuality too: there is no signal either way, and inventing
+one would be dishonest in the merchant's favour.
+
+### Operating hours
+
+Stored as recurring local windows keyed by weekday, not timestamps — a shop's
+hours are a local fact, and storing them as instants makes every read a
+timezone bug. **Unknown hours read as open**: excluding a merchant because
+nobody filled in a form would punish exactly the low-digitisation merchants
+this layer exists to reach.
+
+### Pushing events to a merchant's system
+
+The merchant API lets a POS pull. That is the wrong shape for an order
+arriving — a till that polls finds out late, and late means the agent already
+bought elsewhere. So a merchant registers an endpoint and orders are **pushed**,
+signed with the exact same `t=…,v1=…` HMAC scheme as A-CARD's own issuer
+webhook so one verifier handles both.
+
+This is **not a durable queue**, deliberately. Delivery is attempted once with
+a short timeout and the outcome is recorded on the merchant, so a dead endpoint
+is *visible* rather than silent. Nothing is lost — the order is still readable
+from `/v1/merchant-api/orders`, and there is an explicit redelivery endpoint for
+the classic case where the endpoint was registered after the order arrived.
+Building a real retry queue before a single POS partner has integrated would be
+guessing at requirements.
+
+A merchant's endpoint being down **never fails an agent's order.** Tested.
 
 ### The merchant's own API — what a POS or ERP integrates against
 

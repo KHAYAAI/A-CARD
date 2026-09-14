@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { hashSessionToken } from "@acard/core";
 import type { MerchantAuthService, MerchantDirectory, MerchantUser } from "@acard/core";
 import type { MerchantAuthPort, MerchantDirectoryPort } from "./types.js";
 
@@ -66,6 +68,54 @@ export class InMemoryMerchantDirectory implements MerchantDirectoryPort {
   }
   async search(...args: Parameters<MerchantDirectory["search"]>) {
     return this.directory.search(...args);
+  }
+  async placeOrder(...args: Parameters<MerchantDirectory["placeOrder"]>) {
+    return this.directory.placeOrder(...args);
+  }
+  async getOrder(...args: Parameters<MerchantDirectory["getOrder"]>) {
+    return this.directory.getOrder(...args);
+  }
+  async listOrders(...args: Parameters<MerchantDirectory["listOrders"]>) {
+    return this.directory.listOrders(...args);
+  }
+  async listOrdersByBuyer(...args: Parameters<MerchantDirectory["listOrdersByBuyer"]>) {
+    return this.directory.listOrdersByBuyer(...args);
+  }
+  async advanceOrder(...args: Parameters<MerchantDirectory["advanceOrder"]>) {
+    return this.directory.advanceOrder(...args);
+  }
+  async openOrderCount(...args: Parameters<MerchantDirectory["openOrderCount"]>) {
+    return this.directory.openOrderCount(...args);
+  }
+  async reliability(...args: Parameters<MerchantDirectory["reliability"]>) {
+    return this.directory.reliability(...args);
+  }
+  async setWebhook(merchantId: string, input: { url: string; events?: string[] }) {
+    const secret = `mwh_${randomBytes(24).toString("hex")}`;
+    const webhook = {
+      url: input.url,
+      hashedSecret: hashSessionToken(secret),
+      events: input.events ?? [],
+      createdAt: new Date().toISOString(),
+      consecutiveFailures: 0,
+    };
+    this.directory.updateProfile(merchantId, { webhook });
+    return { webhook, secret };
+  }
+  async clearWebhook(merchantId: string) {
+    this.directory.updateProfile(merchantId, { webhook: undefined });
+  }
+  async recordWebhookDelivery(merchantId: string, ok: boolean) {
+    const current = this.directory.get(merchantId).webhook;
+    if (!current) return;
+    this.directory.updateProfile(merchantId, {
+      webhook: {
+        ...current,
+        lastDeliveryAt: new Date().toISOString(),
+        lastDeliveryOk: ok,
+        consecutiveFailures: ok ? 0 : current.consecutiveFailures + 1,
+      },
+    });
   }
 }
 

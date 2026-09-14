@@ -22,6 +22,7 @@ import {
   effectiveStatus,
   type MerchantApiContext,
   type MerchantStatus,
+  type OrderStatus,
   type PurchaseNoticeStatus,
   createIntent as createAfpIntent,
   routeIntent,
@@ -37,6 +38,7 @@ import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreCon
 import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
 import type { AfpLedgerPort } from "./afp/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
+import { deliverMerchantWebhook, type MerchantWebhookEvent } from "./merchant/webhooks.js";
 import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
 
 /**
@@ -131,6 +133,8 @@ export interface AppConfig {
    * to post its outcome isn't safely usable.
    */
   afp?: { ledger: AfpLedgerPort; rails: RailAdapter[] };
+  /** Injectable for tests; defaults to the real global fetch. */
+  merchantWebhookFetch?: typeof fetch;
   /**
    * KYC / KYB / AML (optional — omit and no /v1/compliance/* route is mounted
    * and nothing is gated, which is exactly how every deployment behaved
@@ -433,6 +437,34 @@ const inboundTransferSchema = z.object({
   originating_vasp: z.object({ name: z.string().optional(), lei: z.string().optional(), travel_address: z.string().optional() }).optional(),
 });
 
+const placeOrderSchema = z.object({
+  lines: z.array(z.object({ item_id: z.string(), quantity: z.number().int().positive() })).min(1).max(100),
+  fulfilment: z.object({
+    method: z.enum(["collection", "delivery"]),
+    address: z.string().optional(),
+    needed_by: z.string().optional(),
+  }),
+  card_transaction_id: z.string().optional(),
+  note: z.string().max(500).optional(),
+});
+
+const advanceOrderSchema = z.object({
+  status: z.enum(["accepted", "rejected", "preparing", "ready", "dispatched", "delivered"]),
+  note: z.string().max(500).optional(),
+  promised_at: z.string().optional(),
+  tracking_reference: z.string().max(120).optional(),
+});
+
+const merchantWebhookSchema = z.object({
+  url: z.string().url(),
+  events: z.array(z.string()).max(20).optional(),
+});
+
+const operatingHoursSchema = z.record(
+  z.enum(["0", "1", "2", "3", "4", "5", "6"]),
+  z.union([z.object({ open: z.string(), close: z.string() }), z.null()]),
+);
+
 const merchantApiKeySchema = z.object({
   name: z.string().min(1).max(80),
   scope: z.enum(["read_only", "read_write"]).optional(),
@@ -550,6 +582,35 @@ export function createApp(config: AppConfig) {
   const kybDocuments = config.kybDocuments ? asKybDocumentStore(config.kybDocuments) : undefined;
   const afp = config.afp;
   const compliance = config.compliance;
+
+  /**
+   * Push an event to a merchant's own system, and swallow anything that goes
+   * wrong. Always called with `void` — a merchant's endpoint being down is
+   * their operational problem, never a reason an agent's order fails. The
+   * order is recorded either way, is readable from the merchant API, and can
+   * be redelivered explicitly.
+   */
+  const pushToMerchant = async (merchantId: string, event: MerchantWebhookEvent): Promise<void> => {
+    if (!merchants) return;
+    try {
+      const merchant = await merchants.get(merchantId);
+      if (!merchant.webhook) return;
+      // The stored hash is the lookup key, not the signing key. The plaintext
+      // secret was handed over once at registration; we sign with the hash so
+      // nothing reversible is kept, and the merchant verifies with what they
+      // were given. (See the webhook docs in README — this is the one place
+      // the scheme differs from the issuer webhook's shared secret.)
+      const result = await deliverMerchantWebhook(merchant, event, merchant.webhook.hashedSecret, {
+        fetchImpl: config.merchantWebhookFetch,
+      });
+      await merchants.recordWebhookDelivery(merchantId, result.delivered);
+      if (!result.delivered) {
+        console.warn(`merchant webhook: ${event.type} to ${merchantId} failed — ${result.error ?? "unknown"}`);
+      }
+    } catch (error) {
+      console.error(`merchant webhook: could not push ${event.type} to ${merchantId}:`, error instanceof Error ? error.message : error);
+    }
+  };
 
   /**
    * Hand a settled charge to the monitoring engine, and swallow anything that
@@ -1733,14 +1794,77 @@ export function createApp(config: AppConfig) {
     });
 
     /** A buyer's own reported purchases, across every merchant. */
+    /**
+     * An agent placing an order — a request to fulfil, as distinct from a
+     * purchase notice (a claim recorded after the fact). No money moves
+     * through it and no stock is reserved; see the Order comment in
+     * packages/core/src/merchants.ts.
+     *
+     * Pushed to the merchant's own system immediately if they have registered
+     * an endpoint, because a till that has to poll finds out late.
+     */
+    app.post("/v1/merchants/:id/orders", requireRole("member"), async (c) => {
+      const body = placeOrderSchema.parse(await c.req.json());
+      const order = await merchants.placeOrder({
+        merchantId: c.req.param("id"),
+        accountHolderId: c.get("holder").id,
+        lines: body.lines.map((l) => ({ itemId: l.item_id, quantity: l.quantity })),
+        fulfilment: {
+          method: body.fulfilment.method,
+          address: body.fulfilment.address,
+          neededBy: body.fulfilment.needed_by,
+        },
+        cardTransactionId: body.card_transaction_id,
+        note: body.note,
+      });
+      void pushToMerchant(order.merchantId, { type: "order.placed", merchantId: order.merchantId, data: { order } });
+      return c.json({ order }, 201);
+    });
+
+    /** A buyer's own orders, across every merchant. */
+    app.get("/v1/orders", async (c) => {
+      return c.json({ orders: await merchants.listOrdersByBuyer(c.get("holder").id) });
+    });
+
+    app.get("/v1/orders/:id", async (c) => {
+      const order = await merchants.getOrder(c.req.param("id")).catch(() => undefined);
+      if (!order || order.accountHolderId !== c.get("holder").id) {
+        return c.json({ error: { code: "not_found", message: "order not found" } }, 404);
+      }
+      return c.json({ order });
+    });
+
+    /** The buyer's one transition: cancelling before the merchant has committed. */
+    app.post("/v1/orders/:id/cancel", requireRole("member"), async (c) => {
+      const order = await merchants.getOrder(c.req.param("id")).catch(() => undefined);
+      if (!order || order.accountHolderId !== c.get("holder").id) {
+        return c.json({ error: { code: "not_found", message: "order not found" } }, 404);
+      }
+      const cancelled = await merchants.advanceOrder(order.id, "cancelled", "buyer", {
+        note: (await c.req.json().catch(() => ({})))?.note,
+      });
+      void pushToMerchant(order.merchantId, {
+        type: "order.cancelled",
+        merchantId: order.merchantId,
+        data: { order: cancelled },
+      });
+      return c.json({ order: cancelled });
+    });
+
     app.get("/v1/purchases", async (c) => {
       return c.json({ purchases: await merchants.listPurchasesByBuyer(c.get("holder").id) });
     });
 
     app.get("/v1/merchants/:id", async (c) => {
       const merchant = await merchants.get(c.req.param("id"));
-      // Agents get the public view: verified or not, never the KYB pack behind it.
-      return c.json({ merchant: publicMerchant(merchant), items: await merchants.listItems(merchant.id) });
+      // Agents get the public view: verified or not, never the KYB pack behind
+      // it. Reliability travels with its confidence so an agent can tell a
+      // genuinely good supplier from one with two orders behind them.
+      return c.json({
+        merchant: publicMerchant(merchant),
+        items: await merchants.listItems(merchant.id),
+        reliability: await merchants.reliability(merchant.id),
+      });
     });
 
     app.get("/v1/merchants", async (c) => {
@@ -1890,6 +2014,32 @@ export function createApp(config: AppConfig) {
 
       // ---- purchase notices: the merchant's side of the loop ---------------
 
+      app.get("/v1/merchant-portal/orders", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const status = c.req.query("status") as OrderStatus | undefined;
+        return c.json({ orders: await merchants.listOrders(ctx.merchantId, status ? { status } : {}) });
+      });
+
+      app.post("/v1/merchant-portal/orders/:id/advance", requireMerchantSession, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const order = await merchants.getOrder(c.req.param("id") as string).catch(() => undefined);
+        if (!order || order.merchantId !== ctx.merchantId) {
+          return c.json({ error: { code: "not_found", message: "order not found" } }, 404);
+        }
+        const body = advanceOrderSchema.parse(await c.req.json());
+        return c.json({
+          order: await merchants.advanceOrder(order.id, body.status, "merchant", {
+            note: body.note,
+            promisedAt: body.promised_at,
+            trackingReference: body.tracking_reference,
+          }),
+        });
+      });
+
+      app.get("/v1/merchant-portal/reliability", requireMerchantSession, async (c) => {
+        return c.json({ reliability: await merchants.reliability(c.get("merchantSession")!.merchantId) });
+      });
+
       app.get("/v1/merchant-portal/purchases", requireMerchantSession, async (c) => {
         const ctx = c.get("merchantSession")!;
         const status = c.req.query("status") as PurchaseNoticeStatus | undefined;
@@ -1965,6 +2115,13 @@ export function createApp(config: AppConfig) {
       //
       // An owner issues these for their own POS/ERP. A-CARD operators never
       // see the secret; it is returned once, hashed at rest.
+
+      app.put("/v1/merchant-portal/hours", requireMerchantSession, requireOwner, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const body = operatingHoursSchema.parse(await c.req.json());
+        const hours = Object.fromEntries(Object.entries(body).map(([day, window]) => [Number(day), window]));
+        return c.json({ merchant: publicMerchant(await merchants.updateProfile(ctx.merchantId, { operatingHours: hours })) });
+      });
 
       app.get("/v1/merchant-portal/api-keys", requireMerchantSession, requireOwner, async (c) => {
         return c.json({ api_keys: await merchantAuth.listApiKeys(c.get("merchantSession")!.merchantId) });
@@ -2108,6 +2265,60 @@ export function createApp(config: AppConfig) {
       }
       const failed = results.filter((r) => !r.ok).length;
       return c.json({ restated: results.length - failed, failed, results }, failed === 0 ? 200 : 207);
+    });
+
+    // ---- orders: the merchant's side of fulfilment -------------------------
+
+    app.get("/v1/merchant-api/orders", merchantApi, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const status = c.req.query("status") as OrderStatus | undefined;
+      return c.json({ orders: await merchants.listOrders(ctx.merchantId, status ? { status } : {}) });
+    });
+
+    /** Move an order along: accept, reject, prepare, ready, dispatch, deliver. */
+    app.post("/v1/merchant-api/orders/:id/advance", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const order = await merchants.getOrder(c.req.param("id") as string).catch(() => undefined);
+      if (!order || order.merchantId !== ctx.merchantId) {
+        return c.json({ error: { code: "not_found", message: "order not found" } }, 404);
+      }
+      const body = advanceOrderSchema.parse(await c.req.json());
+      return c.json({
+        order: await merchants.advanceOrder(order.id, body.status, "merchant", {
+          note: body.note,
+          promisedAt: body.promised_at,
+          trackingReference: body.tracking_reference,
+        }),
+      });
+    });
+
+    /** Where this merchant's system wants events pushed. Secret returned once. */
+    app.put("/v1/merchant-api/webhook", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const body = merchantWebhookSchema.parse(await c.req.json());
+      const { webhook, secret } = await merchants.setWebhook(ctx.merchantId, { url: body.url, events: body.events });
+      const { hashedSecret: _hidden, ...safe } = webhook;
+      return c.json({ webhook: safe, secret }, 201);
+    });
+
+    app.delete("/v1/merchant-api/webhook", merchantApi, requireWrite, async (c) => {
+      await merchants.clearWebhook(c.get("merchantApi")!.merchantId);
+      return c.json({ cleared: true });
+    });
+
+    /** Resend an event a dead endpoint missed — recovery without a retry queue. */
+    app.post("/v1/merchant-api/orders/:id/redeliver", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const order = await merchants.getOrder(c.req.param("id") as string).catch(() => undefined);
+      if (!order || order.merchantId !== ctx.merchantId) {
+        return c.json({ error: { code: "not_found", message: "order not found" } }, 404);
+      }
+      await pushToMerchant(ctx.merchantId, { type: "order.placed", merchantId: ctx.merchantId, data: { order } });
+      return c.json({ redelivered: true });
+    });
+
+    app.get("/v1/merchant-api/reliability", merchantApi, async (c) => {
+      return c.json({ reliability: await merchants.reliability(c.get("merchantApi")!.merchantId) });
     });
 
     /** Sales an agent reported — what a POS pulls to reconcile against its own tills. */
