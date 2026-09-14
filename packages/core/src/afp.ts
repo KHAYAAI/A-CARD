@@ -431,6 +431,16 @@ export class AfpLedger {
   }
 
   /** Transactions whose window has genuinely elapsed and are still `posted` — what a settlement sweep would call `settle()` on. */
+  /**
+   * Everything parked as ambiguous. The reconciliation worker's inbox — and,
+   * when a rail cannot answer, the queue a human has to work.
+   */
+  listReconciling(): AfpTransaction[] {
+    return [...this.transactions.values()]
+      .filter((t) => t.status === "reconciling")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
   dueForSettlement(now = Date.now()): AfpTransaction[] {
     return [...this.transactions.values()].filter((t) => {
       if (t.status !== "posted") return false;

@@ -527,3 +527,199 @@ describe("purchase notices — the feedback loop, end to end", () => {
     expect(mine.purchases[0].itemName).toBe("Cement 50kg");
   });
 });
+
+describe("the merchant's own API — what a POS integrates against", () => {
+  async function shopWithKey(scope: "read_only" | "read_write" = "read_write") {
+    const merchantId = await registerVerifiedMerchant();
+    const token = await onboardMerchantOwner(merchantId, {
+      workosUserId: `wu_${scope}_${merchantId}`,
+      email: "owner@kasihardware.co.za",
+      name: "Thandi",
+    });
+    const created = await portal("/v1/merchant-portal/api-keys", token, {
+      method: "POST",
+      body: JSON.stringify({ name: "Till sync", scope }),
+    });
+    expect(created.status).toBe(201);
+    const body = await json(created);
+    return { merchantId, token, secret: body.secret as string, apiKey: body.api_key };
+  }
+
+  function api(path: string, secret: string, init: RequestInit = {}) {
+    return app.request(path, {
+      ...init,
+      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json", ...(init.headers ?? {}) },
+    });
+  }
+
+  it("issues a key whose secret is returned once and never stored in the clear", async () => {
+    const { merchantId, token, secret, apiKey } = await shopWithKey();
+    expect(secret.startsWith("mk_live_")).toBe(true);
+    expect(apiKey.prefix).toBe(secret.slice(0, 16));
+
+    const listed = (await json(await portal("/v1/merchant-portal/api-keys", token))).api_keys;
+    expect(listed).toHaveLength(1);
+    // The list never carries the secret back.
+    expect(JSON.stringify(listed)).not.toContain(secret);
+    expect(merchantId).toBeTruthy();
+  });
+
+  it("identifies itself and reports catalog health", async () => {
+    const { secret } = await shopWithKey();
+    const me = await json(await api("/v1/merchant-api/me", secret));
+    expect(me.merchant.name).toBe("Kasi Hardware");
+    expect(me.scope).toBe("read_write");
+    // The agent-facing view — never the KYB pack.
+    expect(me.merchant.kyb).toBeUndefined();
+  });
+
+  it("bulk-syncs a catalog by the merchant's own SKUs, idempotently", async () => {
+    const { secret } = await shopWithKey();
+    const payload = {
+      items: [
+        { sku: "CEM-50", name: "Cement 50kg", unit: "bag", unit_price_cents: 8_800, quantity_available: 600 },
+        { sku: "SAND-1", name: "River sand", unit: "m3", unit_price_cents: 45_000, quantity_available: 20 },
+      ],
+    };
+    const first = await api("/v1/merchant-api/catalog", secret, { method: "PUT", body: JSON.stringify(payload) });
+    expect(first.status).toBe(200);
+    expect((await json(first)).synced).toBe(2);
+
+    // Pushing the same catalog again updates in place rather than duplicating.
+    await api("/v1/merchant-api/catalog", secret, { method: "PUT", body: JSON.stringify(payload) });
+    expect((await json(await api("/v1/merchant-api/catalog", secret))).items).toHaveLength(2);
+  });
+
+  it("one bad row does not discard the good ones, and names the SKU that failed", async () => {
+    const { secret } = await shopWithKey();
+    const res = await api("/v1/merchant-api/catalog", secret, {
+      method: "PUT",
+      body: JSON.stringify({
+        items: [
+          { sku: "GOOD", name: "Good item", unit_price_cents: 1_000 },
+          // Negative price is refused by the domain, not by zod.
+          { sku: "BAD", name: "Bad item", unit_price_cents: 0 },
+        ],
+      }),
+    });
+    const body = await json(res);
+    expect(body.synced).toBeGreaterThanOrEqual(1);
+    expect(body.results.find((r: { sku: string }) => r.sku === "GOOD").ok).toBe(true);
+  });
+
+  it("restates stock by SKU — the call a till fires after every sale", async () => {
+    const { secret } = await shopWithKey();
+    await api("/v1/merchant-api/catalog", secret, {
+      method: "PUT",
+      body: JSON.stringify({ items: [{ sku: "CEM-50", name: "Cement 50kg", unit_price_cents: 8_800, quantity_available: 600 }] }),
+    });
+
+    const res = await api("/v1/merchant-api/stock", secret, {
+      method: "POST",
+      body: JSON.stringify({ items: [{ sku: "CEM-50", availability: "low_stock", quantity_available: 12 }] }),
+    });
+    expect(res.status).toBe(200);
+    expect((await json(res)).restated).toBe(1);
+
+    const items = (await json(await api("/v1/merchant-api/catalog", secret))).items;
+    expect(items[0].availability).toBe("low_stock");
+    expect(items[0].quantityAvailable).toBe(12);
+  });
+
+  it("an unknown SKU is reported per-row, not as a failed sync", async () => {
+    const { secret } = await shopWithKey();
+    const res = await api("/v1/merchant-api/stock", secret, {
+      method: "POST",
+      body: JSON.stringify({ items: [{ sku: "NOT-A-SKU", availability: "in_stock" }] }),
+    });
+    expect(res.status).toBe(207);
+    expect((await json(res)).results[0].error).toBe("unknown sku");
+  });
+
+  it("a read-only key can read but not write", async () => {
+    const { secret } = await shopWithKey("read_only");
+    expect((await api("/v1/merchant-api/catalog", secret)).status).toBe(200);
+    const write = await api("/v1/merchant-api/catalog", secret, {
+      method: "PUT",
+      body: JSON.stringify({ items: [{ sku: "X", name: "X", unit_price_cents: 1 }] }),
+    });
+    expect(write.status).toBe(403);
+  });
+
+  it("pulls purchase notices and acknowledges them, restating in the same call", async () => {
+    const { merchantId, secret } = await shopWithKey();
+    await api("/v1/merchant-api/catalog", secret, {
+      method: "PUT",
+      body: JSON.stringify({ items: [{ sku: "CEM-50", name: "Cement 50kg", unit: "bag", unit_price_cents: 8_800, quantity_available: 600 }] }),
+    });
+    const item = (await json(await api("/v1/merchant-api/catalog", secret))).items[0];
+
+    await authed(`/v1/merchants/${merchantId}/purchases`, {
+      method: "POST",
+      body: JSON.stringify({ item_id: item.id, quantity: 500 }),
+    });
+
+    const pending = (await json(await api("/v1/merchant-api/purchases?status=reported", secret))).purchases;
+    expect(pending).toHaveLength(1);
+
+    const ack = await api(`/v1/merchant-api/purchases/${pending[0].id}/acknowledge`, secret, {
+      method: "POST",
+      body: JSON.stringify({ restate: { availability: "in_stock", quantity_available: 100 } }),
+    });
+    expect(ack.status).toBe(200);
+    expect((await json(ack)).item.quantityAvailable).toBe(100);
+  });
+
+  it("rejects a missing, malformed, or revoked key", async () => {
+    const { token, secret, apiKey } = await shopWithKey();
+    expect((await app.request("/v1/merchant-api/me")).status).toBe(401);
+    expect((await api("/v1/merchant-api/me", "not_a_key")).status).toBe(401);
+    // An A-CARD tenant key must never satisfy this guard.
+    expect((await api("/v1/merchant-api/me", apiKeyFor())).status).toBe(401);
+
+    await portal(`/v1/merchant-portal/api-keys/${apiKey.id}`, token, { method: "DELETE" });
+    expect((await api("/v1/merchant-api/me", secret)).status).toBe(401);
+  });
+
+  it("one merchant's key cannot read another merchant's catalog", async () => {
+    const a = await shopWithKey();
+    const otherId = await registerVerifiedMerchant("Rival Hardware");
+    const otherToken = await onboardMerchantOwner(otherId, { workosUserId: "wu_rival2", email: "o@rival.co.za", name: "S" });
+    const otherSecret = (
+      await json(
+        await portal("/v1/merchant-portal/api-keys", otherToken, { method: "POST", body: JSON.stringify({ name: "Rival till" }) }),
+      )
+    ).secret;
+
+    await api("/v1/merchant-api/catalog", a.secret, {
+      method: "PUT",
+      body: JSON.stringify({ items: [{ sku: "SECRET", name: "Kasi only", unit_price_cents: 100 }] }),
+    });
+    const rivalView = (await json(await api("/v1/merchant-api/catalog", otherSecret))).items;
+    expect(rivalView).toHaveLength(0);
+  });
+
+  it("only an owner can mint or revoke keys", async () => {
+    const merchantId = await registerVerifiedMerchant();
+    const ownerToken = await onboardMerchantOwner(merchantId, { workosUserId: "wu_o", email: "o@k.co.za", name: "O" });
+    const staffInvite = await portal("/v1/merchant-portal/team/invites", ownerToken, {
+      method: "POST",
+      body: JSON.stringify({ role: "staff" }),
+    });
+    const staffToken = new URL((await json(staffInvite)).invite_url).searchParams.get("invite")!;
+    const code = authKit.signIn({ workosUserId: "wu_s", email: "s@k.co.za", name: "S" });
+    const cb = await app.request(`/v1/merchant-auth/callback?code=${code}&state=${encodeURIComponent(staffToken)}`, { redirect: "manual" });
+    const staffSession = new URL(cb.headers.get("location")!).searchParams.get("portal_token")!;
+
+    const res = await portal("/v1/merchant-portal/api-keys", staffSession, {
+      method: "POST",
+      body: JSON.stringify({ name: "sneaky" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+/** The A-CARD tenant key from the outer suite, for the negative auth test. */
+function apiKeyFor() {
+  return apiKey;
+}

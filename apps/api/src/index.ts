@@ -7,7 +7,7 @@ import { attachSlackNotifications } from "./notifications.js";
 import { InMemoryMerchantAuth, InMemoryMerchantDirectory, PostgresMerchantAuth, PostgresMerchantDirectory } from "./merchant/index.js";
 import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.js";
 import { AfpLedger } from "@acard/core";
-import { InMemoryAfpLedger, PostgresAfpLedger, type AfpLedgerPort } from "./afp/index.js";
+import { InMemoryAfpLedger, PostgresAfpLedger, startAfpWorkers, type AfpLedgerPort } from "./afp/index.js";
 import { createCardRail, createX402Rail, createStablecoinRail, createSandboxStablecoinClient, SANDBOX_SIGNER, type RailAdapter } from "./rails/index.js";
 import { ComplianceService } from "@acard/core";
 import {
@@ -177,6 +177,19 @@ if (afpEnabled) {
   }
 
   afp = { ledger: afpLedger, rails };
+
+  // The machinery that moves transactions through the ledger's states over
+  // time. Without it a `posted` transaction never settles and a
+  // `reconciling` one never resolves — AFP could start payments it could not
+  // finish. Runs whenever AFP does; the interval is a knob, not a switch.
+  const tickSeconds = Number(process.env.ACARD_AFP_WORKER_INTERVAL_SECONDS ?? 300);
+  const stopWorkers = startAfpWorkers({ ledger: afpLedger, rails }, tickSeconds * 1000);
+  const previousClose = onClose;
+  onClose = async () => {
+    stopWorkers();
+    await previousClose?.();
+  };
+  console.log(`A-CARD API: AFP settlement and reconciliation workers running every ${tickSeconds}s`);
 }
 
 /**

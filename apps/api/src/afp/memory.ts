@@ -38,6 +38,9 @@ export class InMemoryAfpLedger implements AfpLedgerPort {
   async list(...args: Parameters<AfpLedger["list"]>) {
     return this.ledger.list(...args);
   }
+  async listReconciling() {
+    return this.ledger.listReconciling();
+  }
   async dueForSettlement(...args: Parameters<AfpLedger["dueForSettlement"]>) {
     return this.ledger.dueForSettlement(...args);
   }

@@ -99,4 +99,16 @@ export class InMemoryMerchantAuth implements MerchantAuthPort {
   async revokeSession(...args: Parameters<MerchantAuthService["revokeSession"]>) {
     return this.auth.revokeSession(...args);
   }
+  async createApiKey(...args: Parameters<MerchantAuthService["createApiKey"]>) {
+    return this.auth.createApiKey(...args);
+  }
+  async listApiKeys(...args: Parameters<MerchantAuthService["listApiKeys"]>) {
+    return this.auth.listApiKeys(...args);
+  }
+  async resolveApiKey(...args: Parameters<MerchantAuthService["resolveApiKey"]>) {
+    return this.auth.resolveApiKey(...args);
+  }
+  async revokeApiKey(...args: Parameters<MerchantAuthService["revokeApiKey"]>) {
+    return this.auth.revokeApiKey(...args);
+  }
 }

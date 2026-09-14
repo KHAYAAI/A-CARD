@@ -280,6 +280,13 @@ export class PostgresAfpLedger implements AfpLedgerPort {
     return rows.map(rowToTransaction);
   }
 
+  async listReconciling(): Promise<AfpTransaction[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM acard_afp_transactions WHERE status = 'reconciling' ORDER BY created_at ASC",
+    );
+    return rows.map(rowToTransaction);
+  }
+
   async dueForSettlement(now = Date.now()): Promise<AfpTransaction[]> {
     const { rows } = await this.pool.query("SELECT * FROM acard_afp_transactions WHERE status = 'posted'");
     return rows.map(rowToTransaction).filter((t) => {

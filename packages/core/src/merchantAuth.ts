@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { hashSessionToken } from "./auth.js";
 import { DomainError, InvalidStateError, NotFoundError } from "./errors.js";
 import { newId } from "./ids.js";
@@ -66,10 +67,48 @@ interface MerchantInviteRecord extends MerchantInvite {
   tokenHash: string;
 }
 
+/**
+ * A merchant's machine credential.
+ *
+ * The portal session assumes a human at a browser, which is the wrong shape
+ * for the integration that actually scales A-MERCHANT: a POS or ERP system
+ * syncing a catalog on a schedule, with nobody watching. That system needs a
+ * long-lived credential scoped to exactly one merchant — never an A-CARD
+ * tenant key, which would reach wallets and cards.
+ *
+ * `readWrite` is the default because the whole point is writing stock;
+ * `readOnly` exists for an analytics or monitoring integration that should
+ * never be able to change a price.
+ */
+export type MerchantApiKeyScope = "read_only" | "read_write";
+
+export interface MerchantApiKey {
+  id: string;
+  merchantId: string;
+  name: string;
+  hashedSecret: string;
+  /** First characters of the secret, for display in a list. */
+  prefix: string;
+  scope: MerchantApiKeyScope;
+  /** Who created it — an unattributed machine credential is an audit hole. */
+  createdBy: string;
+  lastUsedAt?: string;
+  createdAt: string;
+  revokedAt?: string;
+}
+
+/** What a merchant API key resolves to on an authenticated request. */
+export interface MerchantApiContext {
+  merchantId: string;
+  apiKeyId: string;
+  scope: MerchantApiKeyScope;
+}
+
 export interface SerializedMerchantAuth {
   users: MerchantUser[];
   sessions: Array<MerchantSessionRecord>;
   invites: Array<MerchantInviteRecord>;
+  apiKeys?: MerchantApiKey[];
 }
 
 export class MerchantAuthService {
@@ -77,6 +116,66 @@ export class MerchantAuthService {
   private readonly usersByWorkosId = new Map<string, string>();
   private readonly sessions = new Map<string, MerchantSessionRecord>(); // keyed by tokenHash
   private readonly invites = new Map<string, MerchantInviteRecord>(); // keyed by tokenHash
+  private readonly apiKeys = new Map<string, MerchantApiKey>(); // keyed by id
+  private readonly apiKeysByHash = new Map<string, string>(); // tokenHash → id
+
+  // -- machine credentials -----------------------------------------------
+
+  /**
+   * Issue a machine credential for one merchant. The secret is returned once
+   * and only the hash is kept, the same discipline as A-CARD's own API keys
+   * and session tokens — a credential this platform can read back is a
+   * credential an attacker can read back.
+   */
+  createApiKey(
+    merchantId: string,
+    input: { name: string; scope?: MerchantApiKeyScope; createdBy: string },
+  ): { apiKey: MerchantApiKey; secret: string } {
+    if (!input.createdBy) {
+      throw new DomainError("issuer_required", "a merchant API key must record who created it");
+    }
+    // The `mk_` prefix makes these impossible to confuse with an A-CARD
+    // tenant key (`ak_`) or a portal session (`sess_`) in a log or a header.
+    const secret = `mk_live_${randomBytes(24).toString("hex")}`;
+    const apiKey: MerchantApiKey = {
+      id: newId("mkey"),
+      merchantId,
+      name: input.name,
+      hashedSecret: hashSessionToken(secret),
+      prefix: secret.slice(0, 16),
+      scope: input.scope ?? "read_write",
+      createdBy: input.createdBy,
+      createdAt: new Date().toISOString(),
+    };
+    this.apiKeys.set(apiKey.id, apiKey);
+    this.apiKeysByHash.set(apiKey.hashedSecret, apiKey.id);
+    return { apiKey, secret };
+  }
+
+  listApiKeys(merchantId: string): MerchantApiKey[] {
+    return [...this.apiKeys.values()]
+      .filter((k) => k.merchantId === merchantId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /** Resolve a presented secret. Returns undefined for unknown or revoked keys — never throws. */
+  resolveApiKey(secret: string): MerchantApiContext | undefined {
+    const id = this.apiKeysByHash.get(hashSessionToken(secret));
+    if (!id) return undefined;
+    const key = this.apiKeys.get(id);
+    if (!key || key.revokedAt) return undefined;
+    // Recording last use is what makes an unused credential identifiable
+    // later, which is the first thing anyone auditing machine access asks.
+    key.lastUsedAt = new Date().toISOString();
+    return { merchantId: key.merchantId, apiKeyId: key.id, scope: key.scope };
+  }
+
+  revokeApiKey(merchantId: string, apiKeyId: string): MerchantApiKey {
+    const key = this.apiKeys.get(apiKeyId);
+    if (!key || key.merchantId !== merchantId) throw new NotFoundError("merchant API key", apiKeyId);
+    if (!key.revokedAt) key.revokedAt = new Date().toISOString();
+    return key;
+  }
 
   // -- invites -----------------------------------------------------------
 
@@ -220,11 +319,16 @@ export class MerchantAuthService {
 
   // -- persistence -----------------------------------------------------------
 
+  serializeApiKeys(): MerchantApiKey[] {
+    return [...this.apiKeys.values()];
+  }
+
   serialize(): SerializedMerchantAuth {
     return {
       users: [...this.users.values()],
       sessions: [...this.sessions.values()],
       invites: [...this.invites.values()],
+      apiKeys: [...this.apiKeys.values()],
     };
   }
 
@@ -236,6 +340,11 @@ export class MerchantAuthService {
     }
     for (const session of snapshot.sessions) service.sessions.set(session.tokenHash, session);
     for (const invite of snapshot.invites) service.invites.set(invite.tokenHash, invite);
+    // Back-compat: snapshots taken before merchant API keys existed have none.
+    for (const key of snapshot.apiKeys ?? []) {
+      service.apiKeys.set(key.id, key);
+      service.apiKeysByHash.set(key.hashedSecret, key.id);
+    }
     return service;
   }
 }

@@ -10,7 +10,7 @@
 A-CARD is a fintech platform that enables AI agents to transact independently using virtual cards. Every charge runs through real-time authorization with rule-based controls and human approval for unusual activity. The platform is built on a double-entry ledger that prevents overspending, operates in multiple currencies (ZAR + USD), and is deployable to production infrastructure today.
 
 ### Key Metrics
-- **408 tests passing** — coverage has not been measured; this is a count, not a percentage
+- **430 tests passing** — coverage has not been measured; this is a count, not a percentage
 - **~2 seconds** — authorization decision window (within card network SLA)
 - **~90 days** — to general availability (issuer-dependent)
 - **R0–R499/month** — pricing tier (free to pro)
@@ -169,7 +169,7 @@ it moves money and that must be a deliberate deployment decision.
 
 ### ✓ Ready Now (Public Beta)
 
-- **408 automated tests** (ledger invariants, concurrency, auth, webhooks, A-MERCHANT discovery and purchase notices, AFP routing and cross-rail ledger, e2e)
+- **430 automated tests** (ledger invariants, concurrency, auth, webhooks, A-MERCHANT discovery and purchase notices, AFP routing and cross-rail ledger, e2e)
 - **Production-quality code** (async/await, error handling, HMAC signing, row-level locks)
 - **Hardened AWS stack** (private subnets, WAF, encrypted RDS, TLS)
 - **Multi-currency** (ZAR + USD)

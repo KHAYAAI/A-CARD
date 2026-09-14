@@ -23,4 +23,6 @@ export interface AfpLedgerPort {
   getByIdempotencyKey(key: string): Promise<AfpTransaction | undefined>;
   list(accountHolderId: string): Promise<AfpTransaction[]>;
   dueForSettlement(now?: number): Promise<AfpTransaction[]>;
+  /** Everything parked as ambiguous — the reconciliation worker's inbox. */
+  listReconciling(): Promise<AfpTransaction[]>;
 }

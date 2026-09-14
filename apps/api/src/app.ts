@@ -20,6 +20,7 @@ import {
   type MerchantSessionContext,
   canMoveMoney,
   effectiveStatus,
+  type MerchantApiContext,
   type MerchantStatus,
   type PurchaseNoticeStatus,
   createIntent as createAfpIntent,
@@ -209,6 +210,8 @@ type Env = {
     sessionUser?: PublicUser;
     /** Set only on `/v1/merchant-portal/*` routes — a wholly separate identity from `holder` above. */
     merchantSession?: MerchantSessionContext;
+    /** Set only on `/v1/merchant-api/*` routes — a merchant's machine credential, a third identity again. */
+    merchantApi?: MerchantApiContext;
   };
 };
 
@@ -428,6 +431,48 @@ const inboundTransferSchema = z.object({
   currency: z.string().optional(),
   amount: z.string().optional(),
   originating_vasp: z.object({ name: z.string().optional(), lei: z.string().optional(), travel_address: z.string().optional() }).optional(),
+});
+
+const merchantApiKeySchema = z.object({
+  name: z.string().min(1).max(80),
+  scope: z.enum(["read_only", "read_write"]).optional(),
+});
+
+/**
+ * A POS sync speaks in the merchant's OWN SKUs, never A-CARD's internal item
+ * ids — the integrating system has no reason to learn a second identifier for
+ * something it already names.
+ */
+const catalogSyncSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        sku: z.string().min(1),
+        name: z.string().min(1),
+        description: z.string().optional(),
+        unit: z.string().optional(),
+        unit_price_cents: z.number().int().nonnegative(),
+        currency: currencySchema.optional(),
+        availability: availabilitySchema.optional(),
+        quantity_available: z.number().int().nonnegative().optional(),
+        lead_time_days: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+const bulkRestateSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        sku: z.string().min(1),
+        availability: availabilitySchema,
+        quantity_available: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
 });
 
 const blocklistEntrySchema = z.object({
@@ -777,7 +822,16 @@ export function createApp(config: AppConfig) {
     // as a prefix check on this one guard rather than moving the routes out
     // from under /v1/*, since the ALB only forwards /v1/*, /webhooks/*, and
     // /health to this service (see infra/cdk) — anything else never reaches it.
-    if (c.req.path.startsWith("/v1/merchant-auth/") || c.req.path.startsWith("/v1/merchant-portal/")) return next();
+    if (
+      c.req.path.startsWith("/v1/merchant-auth/") ||
+      c.req.path.startsWith("/v1/merchant-portal/") ||
+      // A merchant API key is a third identity system: not an A-CARD tenant
+      // key, not a portal session. It carries its own guard below and must
+      // never satisfy this one.
+      c.req.path.startsWith("/v1/merchant-api/")
+    ) {
+      return next();
+    }
     const header = c.req.header("authorization") ?? "";
     const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
 
@@ -1907,6 +1961,37 @@ export function createApp(config: AppConfig) {
         });
       });
 
+      // ---- machine credentials the merchant manages themselves -----------
+      //
+      // An owner issues these for their own POS/ERP. A-CARD operators never
+      // see the secret; it is returned once, hashed at rest.
+
+      app.get("/v1/merchant-portal/api-keys", requireMerchantSession, requireOwner, async (c) => {
+        return c.json({ api_keys: await merchantAuth.listApiKeys(c.get("merchantSession")!.merchantId) });
+      });
+
+      app.post("/v1/merchant-portal/api-keys", requireMerchantSession, requireOwner, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        const body = merchantApiKeySchema.parse(await c.req.json());
+        const issuer = await merchantAuth.getUser(ctx.merchantUserId);
+        const { apiKey, secret } = await merchantAuth.createApiKey(ctx.merchantId, {
+          name: body.name,
+          scope: body.scope,
+          createdBy: issuer.email,
+        });
+        // Shown once. There is no endpoint that can return it again.
+        return c.json({ api_key: apiKey, secret }, 201);
+      });
+
+      app.delete("/v1/merchant-portal/api-keys/:id", requireMerchantSession, requireOwner, async (c) => {
+        const ctx = c.get("merchantSession")!;
+        try {
+          return c.json({ api_key: await merchantAuth.revokeApiKey(ctx.merchantId, c.req.param("id") as string) });
+        } catch {
+          return c.json({ error: { code: "not_found", message: "api key not found" } }, 404);
+        }
+      });
+
       app.post("/v1/merchant-portal/team/invites", requireMerchantSession, requireOwner, async (c) => {
         const ctx = c.get("merchantSession")!;
         const body = portalInviteSchema.parse(await c.req.json().catch(() => ({})));
@@ -1916,6 +2001,138 @@ export function createApp(config: AppConfig) {
         return c.json({ invite, invite_url: `${base}/v1/merchant-auth/authorize?invite=${encodeURIComponent(token)}` }, 201);
       });
     }
+  }
+
+  // ---- the merchant's own API: what a POS or ERP integrates against ----------------
+  //
+  // The portal assumes a human at a browser. That is the wrong shape for the
+  // integration that actually scales this layer — a POS syncing a catalog on
+  // a schedule with nobody watching. This surface is authenticated by a
+  // merchant API key (`mk_live_…`), scoped to exactly one merchant, and it
+  // speaks in the merchant's OWN SKUs rather than A-CARD's internal ids: an
+  // integrating system has no reason to learn a second identifier for
+  // something it already names.
+  //
+  // Mounted outside the `/v1/*` guard's reach by the same prefix exemption
+  // the portal uses — a merchant key is not an A-CARD tenant key and must
+  // never be able to reach a wallet or a card.
+  if (merchants && merchantAuth) {
+    const merchantApi = async (c: Context<Env>, next: () => Promise<void>) => {
+      const header = c.req.header("authorization") ?? "";
+      const secret = header.startsWith("Bearer ") ? header.slice(7) : "";
+      if (!secret.startsWith("mk_")) {
+        return c.json({ error: { code: "unauthorized", message: "a merchant API key is required" } }, 401);
+      }
+      const ctx = await merchantAuth.resolveApiKey(secret);
+      if (!ctx) return c.json({ error: { code: "unauthorized", message: "invalid or revoked merchant API key" } }, 401);
+      c.set("merchantApi", ctx);
+      return next();
+    };
+
+    /** A write on a read-only key is a 403, not a silent no-op. */
+    const requireWrite = async (c: Context<Env>, next: () => Promise<void>) => {
+      if (c.get("merchantApi")!.scope !== "read_write") {
+        return c.json({ error: { code: "forbidden", message: "this API key is read-only" } }, 403);
+      }
+      return next();
+    };
+
+    /** Who am I — the first call any integration makes. */
+    app.get("/v1/merchant-api/me", merchantApi, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const merchant = await merchants.get(ctx.merchantId);
+      return c.json({
+        merchant: publicMerchant(merchant),
+        scope: ctx.scope,
+        catalog_health: await merchants.catalogHealth(merchant.id),
+        pending_purchases: await merchants.pendingPurchaseCount(merchant.id),
+      });
+    });
+
+    app.get("/v1/merchant-api/catalog", merchantApi, async (c) => {
+      return c.json({ items: await merchants.listItems(c.get("merchantApi")!.merchantId) });
+    });
+
+    /**
+     * Bulk upsert — the main integration call. Idempotent by SKU, so a POS
+     * can push its whole catalog on a schedule without tracking what changed.
+     * Per-item results rather than all-or-nothing: one bad row in a 500-row
+     * sync must not discard the 499 good ones, and the integrator needs to
+     * know exactly which SKU failed, not that "the sync failed".
+     */
+    app.put("/v1/merchant-api/catalog", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const body = catalogSyncSchema.parse(await c.req.json());
+      const results: Array<{ sku: string; ok: boolean; item?: unknown; error?: string }> = [];
+      for (const row of body.items) {
+        try {
+          const item = await merchants.upsertItem(ctx.merchantId, {
+            sku: row.sku,
+            name: row.name,
+            description: row.description,
+            unit: row.unit,
+            unitPriceCents: row.unit_price_cents,
+            currency: row.currency,
+            availability: row.availability,
+            quantityAvailable: row.quantity_available,
+            leadTimeDays: row.lead_time_days,
+          });
+          results.push({ sku: row.sku, ok: true, item });
+        } catch (error) {
+          results.push({ sku: row.sku, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      const failed = results.filter((r) => !r.ok).length;
+      return c.json({ synced: results.length - failed, failed, results }, failed === 0 ? 200 : 207);
+    });
+
+    /**
+     * Stock-only sync, by SKU. The highest-value call in A-MERCHANT and the
+     * cheapest to make — a till that fires this after every sale keeps
+     * discovery honest without anyone remembering to.
+     */
+    app.post("/v1/merchant-api/stock", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const body = bulkRestateSchema.parse(await c.req.json());
+      const items = await merchants.listItems(ctx.merchantId);
+      const bySku = new Map(items.map((i) => [i.sku, i]));
+      const results: Array<{ sku: string; ok: boolean; error?: string }> = [];
+      for (const row of body.items) {
+        const item = bySku.get(row.sku);
+        if (!item) {
+          results.push({ sku: row.sku, ok: false, error: "unknown sku" });
+          continue;
+        }
+        await merchants.restate(item.id, { availability: row.availability, quantityAvailable: row.quantity_available });
+        results.push({ sku: row.sku, ok: true });
+      }
+      const failed = results.filter((r) => !r.ok).length;
+      return c.json({ restated: results.length - failed, failed, results }, failed === 0 ? 200 : 207);
+    });
+
+    /** Sales an agent reported — what a POS pulls to reconcile against its own tills. */
+    app.get("/v1/merchant-api/purchases", merchantApi, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const status = c.req.query("status") as PurchaseNoticeStatus | undefined;
+      return c.json({ purchases: await merchants.listPurchases(ctx.merchantId, status ? { status } : {}) });
+    });
+
+    app.post("/v1/merchant-api/purchases/:id/acknowledge", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const notice = await merchants.getPurchase(c.req.param("id") as string).catch(() => undefined);
+      if (!notice || notice.merchantId !== ctx.merchantId) {
+        return c.json({ error: { code: "not_found", message: "purchase notice not found" } }, 404);
+      }
+      const body = acknowledgePurchaseSchema.parse(await c.req.json().catch(() => ({})));
+      const resolved = await merchants.resolvePurchase(notice.id, "acknowledged", body.note);
+      const item = body.restate
+        ? await merchants.restate(notice.itemId, {
+            availability: body.restate.availability,
+            quantityAvailable: body.restate.quantity_available,
+          })
+        : undefined;
+      return c.json({ purchase: resolved, item });
+    });
   }
 
   // ---- AFP: the Agent Financial Platform -------------------------------------------

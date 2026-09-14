@@ -21,7 +21,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 408 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 430 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + purchase notices, AFP routing/ledger,
                          # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e.
                          # 73 of them are Postgres integration tests, skipped unless
@@ -228,6 +228,40 @@ then runs, unmodified, against whichever backend supplied the rows. A
 dedicated test (`apps/api/test/pg-merchant-service.test.ts`) seeds identical
 data into both backends and asserts the Postgres-backed search returns the
 exact same ranked offers, in the same order, as the in-memory one.
+
+### The merchant's own API — what a POS or ERP integrates against
+
+The portal assumes a human at a browser. That is the wrong shape for the
+integration that actually scales this layer: a POS syncing a catalog on a
+schedule with nobody watching. So every merchant can mint their own machine
+credentials (`mk_live_…`), scoped to exactly one merchant, managed by the
+merchant's owner from their own portal — A-CARD operators never see the secret,
+and it is returned once, hashed at rest.
+
+```bash
+PUT  /v1/merchant-api/catalog     # bulk upsert, idempotent by SKU
+POST /v1/merchant-api/stock       # stock-only restate, by SKU
+GET  /v1/merchant-api/purchases   # sales agents reported, to reconcile against tills
+POST /v1/merchant-api/purchases/:id/acknowledge
+GET  /v1/merchant-api/me          # identity + catalog health + pending sales
+```
+
+Three deliberate choices:
+
+- **It speaks the merchant's own SKUs**, never A-CARD's internal item ids. An
+  integrating system has no reason to learn a second identifier for something
+  it already names.
+- **Per-item results, not all-or-nothing.** One bad row in a 500-row sync must
+  not discard the 499 good ones, and the integrator needs to know exactly which
+  SKU failed — a `207` with a per-SKU breakdown rather than a bare `400`.
+- **A third identity system.** A merchant key is not an A-CARD tenant key
+  (`ak_`) and not a portal session (`sess_`). It is exempt from the `/v1`
+  tenant guard and carries its own, so it can never reach a wallet or a card.
+  Tested explicitly: presenting a valid A-CARD tenant key to `/v1/merchant-api/*`
+  is a 401.
+
+`read_only` keys exist for analytics integrations that should never change a
+price; a write on one is a 403, not a silent no-op.
 
 ### Merchant portal (WorkOS AuthKit)
 
@@ -494,6 +528,21 @@ idempotency enforced by a Postgres `UNIQUE INDEX` plus
 picks between them exactly as it does for A-MERCHANT — Postgres when
 `platform` is a `PostgresPlatformService`, in-memory otherwise — but only
 once AFP itself is turned on.
+
+**Lifecycle workers.** The ledger's states were complete from the day it
+shipped; nothing drove them. `dueForSettlement()` had no production caller, so
+a `posted` transaction sat there forever, and `reconciling` — the state that
+exists precisely for "money may or may not have moved" — had no exit but direct
+database access. `apps/api/src/afp/workers.ts` closes that: a tick settles
+whatever its own clock says is due, then works the reconciliation queue by
+**asking the rail that produced the ambiguity**.
+
+It never guesses. A rail that cannot tell yet, a rail that is unreachable, a
+rail with no `confirm` capability, and a rail no longer configured on this
+instance are four distinct outcomes — and all four leave the transaction
+parked. Guessing "failed" double-pays on retry; guessing "settled" believes
+money moved when it may not have. Settlement, by contrast, asks nobody: the
+window elapsing *is* the event.
 
 **Turning it on:** set `ACARD_ENABLE_AFP=true`. The card rail is always
 included when AFP is enabled — it's the same tested authorization path

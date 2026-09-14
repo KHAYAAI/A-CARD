@@ -3,6 +3,9 @@ import type {
   CatalogItem,
   KybDocument,
   Merchant,
+  MerchantApiContext,
+  MerchantApiKey,
+  MerchantApiKeyScope,
   MerchantInvite,
   MerchantRole,
   MerchantSessionContext,
@@ -71,4 +74,13 @@ export interface MerchantAuthPort {
   createSession(user: MerchantUser): Promise<{ token: string; context: MerchantSessionContext }>;
   resolveSession(token: string): Promise<MerchantSessionContext | undefined>;
   revokeSession(token: string): Promise<void>;
+
+  /** Machine credentials — one merchant's POS/ERP integration. See merchantAuth.ts. */
+  createApiKey(
+    merchantId: string,
+    input: { name: string; scope?: MerchantApiKeyScope; createdBy: string },
+  ): Promise<{ apiKey: MerchantApiKey; secret: string }>;
+  listApiKeys(merchantId: string): Promise<MerchantApiKey[]>;
+  resolveApiKey(secret: string): Promise<MerchantApiContext | undefined>;
+  revokeApiKey(merchantId: string, apiKeyId: string): Promise<MerchantApiKey>;
 }

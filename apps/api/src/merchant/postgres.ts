@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import pg from "pg";
 import {
   classifyFreshness,
@@ -13,6 +14,9 @@ import {
   type CatalogItem,
   type KybDocument,
   type Merchant,
+  type MerchantApiContext,
+  type MerchantApiKey,
+  type MerchantApiKeyScope,
   type MerchantInvite,
   type MerchantRole,
   type MerchantSessionContext,
@@ -114,6 +118,20 @@ const SCHEMA = `
     expires_at TIMESTAMPTZ NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS acard_merchant_api_keys (
+    id TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    hashed_secret TEXT UNIQUE NOT NULL,
+    prefix TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS acard_merchant_api_keys_merchant_idx ON acard_merchant_api_keys(merchant_id);
+
   CREATE TABLE IF NOT EXISTS acard_purchase_notices (
     id TEXT PRIMARY KEY,
     merchant_id TEXT NOT NULL,
@@ -206,6 +224,21 @@ function rowToNotice(row: any): PurchaseNotice {
     note: row.note ?? undefined,
     reportedAt: row.reported_at.toISOString(),
     resolvedAt: row.resolved_at?.toISOString(),
+  };
+}
+
+function rowToApiKey(row: any): MerchantApiKey {
+  return {
+    id: row.id,
+    merchantId: row.merchant_id,
+    name: row.name,
+    hashedSecret: row.hashed_secret,
+    prefix: row.prefix,
+    scope: row.scope,
+    createdBy: row.created_by,
+    lastUsedAt: row.last_used_at?.toISOString(),
+    createdAt: row.created_at.toISOString(),
+    revokedAt: row.revoked_at?.toISOString(),
   };
 }
 
@@ -677,6 +710,54 @@ export class PostgresMerchantAuth implements MerchantAuthPort {
       return undefined;
     }
     return { merchantUserId: row.merchant_user_id, merchantId: row.merchant_id, role: row.role };
+  }
+
+  // -- machine credentials ---------------------------------------------------
+
+  async createApiKey(
+    merchantId: string,
+    input: { name: string; scope?: MerchantApiKeyScope; createdBy: string },
+  ): Promise<{ apiKey: MerchantApiKey; secret: string }> {
+    if (!input.createdBy) throw new DomainError("issuer_required", "a merchant API key must record who created it");
+    const secret = `mk_live_${randomBytes(24).toString("hex")}`;
+    const { rows } = await this.pool.query(
+      `INSERT INTO acard_merchant_api_keys (id, merchant_id, name, hashed_secret, prefix, scope, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now()) RETURNING *`,
+      [newId("mkey"), merchantId, input.name, hashSessionToken(secret), secret.slice(0, 16), input.scope ?? "read_write", input.createdBy],
+    );
+    return { apiKey: rowToApiKey(rows[0]), secret };
+  }
+
+  async listApiKeys(merchantId: string): Promise<MerchantApiKey[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM acard_merchant_api_keys WHERE merchant_id = $1 ORDER BY created_at DESC",
+      [merchantId],
+    );
+    return rows.map(rowToApiKey);
+  }
+
+  async resolveApiKey(secret: string): Promise<MerchantApiContext | undefined> {
+    // Updates last_used_at in the same statement that resolves the key, so a
+    // credential's last use is recorded even under concurrent requests.
+    const { rows } = await this.pool.query(
+      `UPDATE acard_merchant_api_keys SET last_used_at = now()
+        WHERE hashed_secret = $1 AND revoked_at IS NULL
+        RETURNING *`,
+      [hashSessionToken(secret)],
+    );
+    if (!rows[0]) return undefined;
+    const key = rowToApiKey(rows[0]);
+    return { merchantId: key.merchantId, apiKeyId: key.id, scope: key.scope };
+  }
+
+  async revokeApiKey(merchantId: string, apiKeyId: string): Promise<MerchantApiKey> {
+    const { rows } = await this.pool.query(
+      `UPDATE acard_merchant_api_keys SET revoked_at = COALESCE(revoked_at, now())
+        WHERE id = $1 AND merchant_id = $2 RETURNING *`,
+      [apiKeyId, merchantId],
+    );
+    if (!rows[0]) throw new NotFoundError("merchant API key", apiKeyId);
+    return rowToApiKey(rows[0]);
   }
 
   async revokeSession(token: string): Promise<void> {
