@@ -17,6 +17,13 @@ import type {
   StartVerificationInput,
   WebhookEvent,
 } from "./types.js";
+import type {
+  CryptoCompliancePort,
+  InboundTransferRecord,
+  ScreenableChain,
+  Vasp,
+  WalletScreeningResult,
+} from "./crypto.js";
 
 /**
  * A deterministic local stand-in for Didit — the same relationship the mock
@@ -198,3 +205,43 @@ export class SandboxComplianceProvider implements CompliancePort {
 const ROUND_AMOUNTS = new Set([
   1_000_000, 1_500_000, 2_000_000, 2_500_000, 5_000_000, 7_500_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000,
 ]);
+
+/**
+ * Deterministic crypto compliance, for testing the wiring without a provider
+ * connection. Outcomes key off the address so every branch is reachable:
+ * an address containing "sanction" is a sanctions hit, "risk" is high
+ * severity, anything else is low.
+ */
+export class SandboxCryptoCompliance implements CryptoCompliancePort {
+  private readonly inbound = new Map<string, InboundTransferRecord>();
+
+  async screenWallet(input: {
+    address: string;
+    chain: ScreenableChain;
+    direction?: "inbound" | "outbound";
+  }): Promise<WalletScreeningResult> {
+    const a = input.address.toLowerCase();
+    const sanctionsHit = a.includes("sanction");
+    const high = sanctionsHit || a.includes("risk");
+    return {
+      address: input.address,
+      chain: input.chain,
+      riskScore: sanctionsHit ? 99 : high ? 72 : 4,
+      severity: sanctionsHit ? "severe" : high ? "high" : "low",
+      sanctionsHit,
+      sourceOfFunds: high ? [{ category: "darknet_market", percentage: 41 }] : [{ category: "exchange", percentage: 100 }],
+      destinationOfFunds: [{ category: "exchange", percentage: 100 }],
+    };
+  }
+
+  async searchVasps(search?: string): Promise<Vasp[]> {
+    return [{ name: search ?? "Sandbox VASP", travelAddress: "ta_sandbox", dueDiligenceScore: 80 }];
+  }
+
+  async registerInboundTransfer(input: InboundTransferRecord): Promise<{ registered: boolean; transferId?: string }> {
+    // Deduped on txid the way the real sunrise flow is.
+    const key = `${input.txid}:${input.walletAddress}`;
+    this.inbound.set(key, input);
+    return { registered: true, transferId: `sbxtr_${createHash("sha256").update(key).digest("hex").slice(0, 16)}` };
+  }
+}

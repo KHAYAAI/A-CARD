@@ -21,6 +21,20 @@ export class RailAmbiguousOutcomeError extends Error {}
 export interface RailAdapter {
   readonly profile: RailProfile;
   /**
+   * Whether this adapter moves real value, as opposed to simulating it.
+   *
+   * This is not documentation — it is a load-bearing gate. The crypto
+   * compliance layer (Travel Rule, wallet screening) mounts only when some
+   * rail reports `true`, so a sandboxed deployment cannot accidentally
+   * present itself as meeting obligations it is not subject to, and a
+   * deployment that swaps in a real signer starts meeting them without
+   * anyone having to remember a second switch.
+   *
+   * It is computed from what was INJECTED (a real signer, a real custody
+   * client), never configured, so it cannot drift away from the truth.
+   */
+  readonly carriesRealValue: boolean;
+  /**
    * A quote should never have a side effect a repeated call would compound —
    * calling it twice must be as safe as calling it once. Real network
    * quoting (a live FX rate, a card network's current interchange estimate)

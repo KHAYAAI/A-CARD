@@ -12,11 +12,15 @@ import { createCardRail, createX402Rail, createStablecoinRail, createSandboxStab
 import { ComplianceService } from "@acard/core";
 import {
   DiditComplianceProvider,
+  DiditCryptoCompliance,
+  SandboxCryptoCompliance,
+  evaluateCryptoGate,
   InMemoryComplianceStore,
   PostgresComplianceStore,
   SandboxComplianceProvider,
   type CompliancePort,
   type ComplianceStorePort,
+  type CryptoCompliancePort,
 } from "./compliance/index.js";
 
 const port = Number(process.env.PORT ?? 8787);
@@ -38,6 +42,11 @@ const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
 const complianceMonitor = process.env.ACARD_COMPLIANCE_MONITOR_TRANSACTIONS === "true";
+/**
+ * A legal determination this deployment makes about itself, not something
+ * code can infer — and inert while AFP's crypto rails are still sandboxed.
+ */
+const assertsVasp = process.env.ACARD_COMPLIANCE_ASSERTS_VASP === "true";
 const diditApiKey = process.env.DIDIT_API_KEY;
 const diditKycWorkflowId = process.env.DIDIT_KYC_WORKFLOW_ID;
 const diditKybWorkflowId = process.env.DIDIT_KYB_WORKFLOW_ID;
@@ -189,7 +198,16 @@ if (afpEnabled) {
  * never bills, and verifies nobody. It is logged loudly as such, because a
  * compliance layer that silently approves everyone is worse than none at all.
  */
-let compliance: { provider: CompliancePort; store: ComplianceStorePort; enforce: boolean; monitorTransactions: boolean } | undefined;
+let compliance:
+  | {
+      provider: CompliancePort;
+      store: ComplianceStorePort;
+      enforce: boolean;
+      monitorTransactions: boolean;
+      crypto: CryptoCompliancePort;
+      assertsVasp: boolean;
+    }
+  | undefined;
 
 if (complianceEnabled) {
   let provider: CompliancePort;
@@ -226,7 +244,21 @@ if (complianceEnabled) {
     store = new InMemoryComplianceStore(new ComplianceService());
   }
 
-  compliance = { provider, store, enforce: complianceEnforce, monitorTransactions: complianceMonitor };
+  // Crypto compliance is built either way; whether it runs is decided by the
+  // rails, below, not here.
+  const cryptoProvider: CryptoCompliancePort =
+    provider instanceof DiditComplianceProvider
+      ? new DiditCryptoCompliance((path, init) => provider.request(path, init))
+      : new SandboxCryptoCompliance();
+
+  compliance = {
+    provider,
+    store,
+    enforce: complianceEnforce,
+    monitorTransactions: complianceMonitor,
+    crypto: cryptoProvider,
+    assertsVasp,
+  };
   console.log(
     `A-CARD API: compliance enabled via ${provider.label} — ${
       complianceEnforce
@@ -239,6 +271,12 @@ if (complianceEnabled) {
       ? "A-CARD API: AML transaction monitoring ON — every settled capture is submitted after the fact, never on the authorization path"
       : "A-CARD API: AML transaction monitoring off (set ACARD_COMPLIANCE_MONITOR_TRANSACTIONS=true — FICA expects ongoing monitoring, not just onboarding checks)",
   );
+}
+
+if (compliance) {
+  // Reported after the rails are built, because the rails are what decide it.
+  const gate = evaluateCryptoGate(afp?.rails, assertsVasp);
+  console.log(`A-CARD API: crypto compliance — ${gate.reason}`);
 }
 
 const app = createApp({

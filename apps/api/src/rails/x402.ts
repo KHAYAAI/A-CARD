@@ -48,6 +48,13 @@ interface X402Required {
 
 /** Produces the signed `authorization` object the "exact" EVM scheme's payload carries — the one piece that needs a real key. */
 export interface X402Signer {
+  /**
+   * Set by a signer that produces cryptographically meaningless signatures.
+   * A real signer simply omits it — so the default for anything anyone
+   * writes later is "this is real", which is the safe direction: a new
+   * signer is treated as carrying real value until it says otherwise.
+   */
+  readonly isSandbox?: boolean;
   sign(input: {
     requirement: X402PaymentRequirement;
     from: string;
@@ -60,6 +67,7 @@ export interface X402Signer {
 
 /** Round-trips the flow so it's genuinely testable — never wire this into a deployment that touches real money. */
 export const SANDBOX_SIGNER: X402Signer = {
+  isSandbox: true,
   async sign() {
     return { signature: `0xsandbox${Math.random().toString(16).slice(2)}` };
   },
@@ -109,6 +117,7 @@ export function createX402Rail(config: X402RailConfig): RailAdapter {
 
   return {
     profile: X402_PROFILE,
+    carriesRealValue: config.signer.isSandbox !== true,
 
     async quote(intent) {
       // No live preflight: probing the counterparty URL to "get a quote"

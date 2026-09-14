@@ -36,6 +36,7 @@ import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreCon
 import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
 import type { AfpLedgerPort } from "./afp/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
+import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
 
 /**
  * A-CARD REST API.
@@ -153,6 +154,18 @@ export interface AppConfig {
      * enforcement.
      */
     monitorTransactions?: boolean;
+    /**
+     * Travel Rule and wallet screening. Supplying this does NOT switch them
+     * on — `evaluateCryptoGate` decides that from whether AFP's crypto rails
+     * actually carry real value. See apps/api/src/compliance/crypto.ts.
+     */
+    crypto?: CryptoCompliancePort;
+    /**
+     * This deployment asserts it is a VASP subject to the Travel Rule. A
+     * legal determination, not an inference — and inert while every crypto
+     * rail is still sandboxed.
+     */
+    assertsVasp?: boolean;
   };
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
@@ -400,6 +413,21 @@ const acknowledgePurchaseSchema = z.object({
 
 const disputePurchaseSchema = z.object({
   note: z.string().min(1).max(500),
+});
+
+const screenWalletSchema = z.object({
+  address: z.string().min(1),
+  chain: z.enum(["BTC", "ETH", "LTC", "XRP", "BCH", "DOGE", "TRX", "SOL", "MATIC", "BNB", "USDT", "USDC"]),
+  direction: z.enum(["inbound", "outbound"]).optional(),
+});
+
+const inboundTransferSchema = z.object({
+  txid: z.string().min(1),
+  wallet_address: z.string().min(1),
+  chain: z.string().optional(),
+  currency: z.string().optional(),
+  amount: z.string().optional(),
+  originating_vasp: z.object({ name: z.string().optional(), lei: z.string().optional(), travel_address: z.string().optional() }).optional(),
 });
 
 const blocklistEntrySchema = z.object({
@@ -2139,6 +2167,54 @@ export function createApp(config: AppConfig) {
       });
       return c.json({ entry }, 201);
     });
+
+    // ---- crypto compliance: dormant until AFP's crypto rails are real ------
+    //
+    // The gate reads the rails that are actually wired, so this cannot be
+    // switched on by configuration alone and does not need to be switched on
+    // by hand once the rails become real. See compliance/crypto.ts.
+    const cryptoGate = evaluateCryptoGate(afp?.rails, compliance.assertsVasp);
+
+    /** Why crypto compliance is or is not running. Always readable, even when off. */
+    app.get("/v1/compliance/crypto/status", requireRole("admin"), async (c) => {
+      return c.json({ ...cryptoGate, provider_configured: compliance.crypto !== undefined });
+    });
+
+    if (compliance.crypto && cryptoGate.screeningActive) {
+      const crypto = compliance.crypto;
+
+      app.post("/v1/compliance/crypto/screen", requireRole("admin"), async (c) => {
+        const body = screenWalletSchema.parse(await c.req.json());
+        return c.json({
+          screening: await crypto.screenWallet({
+            address: body.address,
+            chain: body.chain as ScreenableChain,
+            direction: body.direction,
+          }),
+        });
+      });
+
+      if (cryptoGate.travelRuleActive) {
+        app.get("/v1/compliance/crypto/vasps", requireRole("admin"), async (c) => {
+          return c.json({ vasps: await crypto.searchVasps(c.req.query("search")) });
+        });
+
+        app.post("/v1/compliance/crypto/inbound", requireRole("admin"), async (c) => {
+          const body = inboundTransferSchema.parse(await c.req.json());
+          return c.json(
+            await crypto.registerInboundTransfer({
+              txid: body.txid,
+              walletAddress: body.wallet_address,
+              chain: body.chain,
+              currency: body.currency,
+              amount: body.amount,
+              originatingVasp: body.originating_vasp,
+            }),
+            201,
+          );
+        });
+      }
+    }
 
     /** Submit a settled charge for monitoring by hand — backfill, or a replay after an outage. */
     app.post("/v1/compliance/transactions", requireRole("admin"), async (c) => {

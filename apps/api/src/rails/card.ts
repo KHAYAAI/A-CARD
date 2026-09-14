@@ -27,6 +27,10 @@ export function createCardRail(platform: PlatformService, issuerWebhookSecret: s
   };
 
   return {
+    // Real by construction: it wraps A-CARD's own authorization path, the
+    // same one the issuer webhook drives. Nothing is simulated here that
+    // isn't already simulated for every other card charge.
+    carriesRealValue: true,
     profile: CARD_PROFILE,
 
     async quote(intent) {

@@ -36,6 +36,8 @@ export interface StablecoinTransferResult {
  * for linked crypto wallets elsewhere in this codebase.
  */
 export interface StablecoinRailClient {
+  /** Set by a client that moves no real value. A real one omits it — see `X402Signer.isSandbox`. */
+  readonly isSandbox?: boolean;
   transfer(input: { fromAddress: string; toAddress: string; amountMinorUnits: number; currency: string }): Promise<StablecoinTransferResult>;
 }
 
@@ -47,6 +49,7 @@ export interface StablecoinRailClient {
  */
 export function createSandboxStablecoinClient(): StablecoinRailClient {
   return {
+    isSandbox: true,
     async transfer(input) {
       const txHash = `0x${createHash("sha256")
         .update(`${input.fromAddress}:${input.toAddress}:${input.amountMinorUnits}:${randomBytes(8).toString("hex")}`)
@@ -66,6 +69,7 @@ export interface StablecoinRailConfig {
 export function createStablecoinRail(config: StablecoinRailConfig): RailAdapter {
   return {
     profile: STABLECOIN_PROFILE,
+    carriesRealValue: config.client.isSandbox !== true,
 
     async quote(intent) {
       // On-chain gas is real but rail-side, not payer-side, for the

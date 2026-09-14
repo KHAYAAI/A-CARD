@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ComplianceService, Platform } from "@acard/core";
 import { createApp } from "../src/app.js";
 import { InMemoryMerchantAuth, InMemoryMerchantDirectory } from "../src/merchant/index.js";
-import { InMemoryComplianceStore, SandboxComplianceProvider } from "../src/compliance/index.js";
+import { InMemoryComplianceStore, SandboxComplianceProvider, SandboxCryptoCompliance } from "../src/compliance/index.js";
+import { InMemoryAfpLedger } from "../src/afp/index.js";
+import { AfpLedger } from "@acard/core";
+import { InMemoryPlatformService } from "../src/service/index.js";
+import { createCardRail, createStablecoinRail, createX402Rail, createSandboxStablecoinClient, SANDBOX_SIGNER } from "../src/rails/index.js";
 
 const SECRET = "whsec_test";
 const JOBURG = { lat: -26.2041, lng: 28.0473, addressLine: "1 Main Road", city: "Johannesburg", province: "Gauteng", country: "ZA" };
@@ -476,5 +480,125 @@ describe("compliance: cases and blocklist", () => {
       body: JSON.stringify({ email: "someone@example.co.za", name: "S", currency: "ZAR" }),
     });
     expect(res.status).toBe(201);
+  });
+});
+
+describe("crypto compliance: dormant until AFP's rails are real", () => {
+  const railStub = (id: string, carriesRealValue: boolean) =>
+    ({
+      profile: { id, label: id, finality: { kind: "instant" } },
+      carriesRealValue,
+      quote: async () => ({ rail: id, available: true, costCents: 0, etaSeconds: 1 }),
+      execute: async () => ({ railReference: "r", immediate: true }),
+    }) as unknown as Parameters<typeof createApp>[0] extends { afp?: { rails: infer R } } ? R extends (infer I)[] ? I : never : never;
+
+  function buildWithRails(rails: unknown[], assertsVasp = false) {
+    platform = new Platform();
+    store = new InMemoryComplianceStore(new ComplianceService());
+    return createApp({
+      platform,
+      issuerWebhookSecret: SECRET,
+      afp: { ledger: new InMemoryAfpLedger(new AfpLedger()), rails: rails as never },
+      compliance: {
+        provider: new SandboxComplianceProvider(),
+        store,
+        crypto: new SandboxCryptoCompliance(),
+        assertsVasp,
+      },
+    });
+  }
+
+  it("is off when the crypto rails are sandboxed, and says why", async () => {
+    app = buildWithRails([railStub("card", true), railStub("x402", false), railStub("stablecoin", false)]);
+    apiKey = await signup();
+
+    const status = await json(await authed("/v1/compliance/crypto/status"));
+    expect(status.screeningActive).toBe(false);
+    expect(status.travelRuleActive).toBe(false);
+    expect(status.reason).toMatch(/still sandboxed/);
+    // The routes do not exist at all, rather than existing and refusing.
+    expect((await authed("/v1/compliance/crypto/screen", { method: "POST", body: JSON.stringify({ address: "0x1", chain: "ETH" }) })).status).toBe(404);
+  });
+
+  it("is off when no crypto rail is configured at all", async () => {
+    app = buildWithRails([railStub("card", true)]);
+    apiKey = await signup();
+    const status = await json(await authed("/v1/compliance/crypto/status"));
+    expect(status.reason).toMatch(/no crypto rails/);
+  });
+
+  it("a real signer switches screening on by itself — no second flag", async () => {
+    app = buildWithRails([railStub("card", true), railStub("x402", true)]);
+    apiKey = await signup();
+
+    const status = await json(await authed("/v1/compliance/crypto/status"));
+    expect(status.screeningActive).toBe(true);
+    expect(status.liveCryptoRails).toEqual(["x402"]);
+
+    const screened = (
+      await json(
+        await authed("/v1/compliance/crypto/screen", {
+          method: "POST",
+          body: JSON.stringify({ address: "0xsanctionedaddress", chain: "ETH" }),
+        }),
+      )
+    ).screening;
+    expect(screened.sanctionsHit).toBe(true);
+    expect(screened.severity).toBe("severe");
+  });
+
+  it("Travel Rule stays off until the deployment asserts it is a VASP, even with real rails", async () => {
+    app = buildWithRails([railStub("stablecoin", true)], false);
+    apiKey = await signup();
+
+    const status = await json(await authed("/v1/compliance/crypto/status"));
+    expect(status.screeningActive).toBe(true);
+    expect(status.travelRuleActive).toBe(false);
+    expect(status.reason).toMatch(/until this deployment asserts/);
+    expect((await authed("/v1/compliance/crypto/vasps")).status).toBe(404);
+  });
+
+  it("asserting VASP status with sandboxed rails does nothing — the rails gate comes first", async () => {
+    app = buildWithRails([railStub("x402", false)], true);
+    apiKey = await signup();
+    const status = await json(await authed("/v1/compliance/crypto/status"));
+    expect(status.travelRuleActive).toBe(false);
+  });
+
+  it("real rails plus a VASP assertion turns Travel Rule filing on", async () => {
+    app = buildWithRails([railStub("stablecoin", true)], true);
+    apiKey = await signup();
+
+    const status = await json(await authed("/v1/compliance/crypto/status"));
+    expect(status.travelRuleActive).toBe(true);
+
+    expect((await json(await authed("/v1/compliance/crypto/vasps?search=Acme"))).vasps[0].name).toBe("Acme");
+    const registered = await authed("/v1/compliance/crypto/inbound", {
+      method: "POST",
+      body: JSON.stringify({ txid: "0xdeadbeef", wallet_address: "0xabc", chain: "ethereum", amount: "10.5" }),
+    });
+    expect(registered.status).toBe(201);
+    expect((await json(registered)).registered).toBe(true);
+  });
+});
+
+describe("crypto compliance: the rails report their own truth", () => {
+  it("the real card rail carries real value; the sandbox crypto rails do not", () => {
+    const platform2 = new InMemoryPlatformService(new Platform());
+    expect(createCardRail(platform2, SECRET).carriesRealValue).toBe(true);
+    expect(createX402Rail({ payerAddress: "0x1", signer: SANDBOX_SIGNER }).carriesRealValue).toBe(false);
+    expect(
+      createStablecoinRail({
+        client: createSandboxStablecoinClient(),
+        fromAddress: "0x1",
+        resolveRecipient: () => "0x2",
+      }).carriesRealValue,
+    ).toBe(false);
+  });
+
+  it("a signer that does not declare itself a sandbox is treated as real", () => {
+    // The default for anything written later is "real" — the safe direction.
+    const realish = { async sign() { return { signature: "0xreal" }; } };
+    expect(createX402Rail({ payerAddress: "0x1", signer: realish }).carriesRealValue).toBe(true);
   });
 });

@@ -21,7 +21,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 400 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 408 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + purchase notices, AFP routing/ledger,
                          # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e.
                          # 73 of them are Postgres integration tests, skipped unless
@@ -367,6 +367,52 @@ verification still stands behind it.
 ```bash
 ACARD_COMPLIANCE_MONITOR_TRANSACTIONS=true   # submit settled captures for monitoring
 ```
+
+### Travel Rule and wallet screening — built, deliberately dormant
+
+Both obligations attach to moving real crypto value, and A-CARD moves none:
+AFP's x402 rail signs with `SANDBOX_SIGNER` and its stablecoin rail transfers
+through `createSandboxStablecoinClient`. Screening a wallet that will never be
+paid, or filing Travel Rule data for a transfer that moves nothing, is not
+compliance — it is theatre that costs per call and produces records asserting
+things that did not happen.
+
+So the code is complete and gated on `RailAdapter.carriesRealValue`, which each
+rail **computes from what was injected** rather than from configuration:
+
+```ts
+// x402.ts — the gate is the signer itself, not a flag next to it
+carriesRealValue: config.signer.isSandbox !== true
+```
+
+Two consequences, both deliberate. Nobody can switch this on with an
+environment variable while the rails are still fake. And nobody has to
+remember to switch it on either — the day a real signer or custody client
+replaces the sandbox one, screening starts applying by itself. That ordering
+is the only correct one; the alternative is discovering on go-live day that
+the Travel Rule flow was never wired.
+
+A signer that does *not* declare `isSandbox` is treated as real. The default
+for anything written later is "this carries real value", which is the safe
+direction to be wrong in.
+
+**Travel Rule needs one more thing on top**, because whether it applies is a
+legal question code cannot answer. It binds VASPs transmitting value between
+institutions; A-CARD paying an API provider over x402 is a customer paying a
+merchant, which very likely falls outside it. So filing stays off until a
+deployment explicitly asserts `ACARD_COMPLIANCE_ASSERTS_VASP=true` — and that
+assertion does nothing while the rails are still sandboxed. Wallet screening
+carries no such ambiguity: if you are sending real value to an address,
+screening it is prudent whether or not a regulator compels it.
+
+`GET /v1/compliance/crypto/status` always answers, even when everything is
+off, and says *why* in a sentence rather than returning a bare boolean.
+
+⚠️ Two things confirmed against the live Didit account rather than assumed:
+wallet screening returns 409 without a transaction-monitoring provider key,
+and the Travel Rule settings endpoint is permission-gated — our credentials
+are refused today. Turning this on therefore needs Didit-side provisioning and
+elevated permissions, not just real rails.
 
 ⚠️ The REST paths and the webhook signature scheme in
 `apps/api/src/compliance/didit.ts` are **not yet verified against Didit's API

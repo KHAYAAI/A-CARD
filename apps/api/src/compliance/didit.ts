@@ -17,6 +17,14 @@ import type {
   StartVerificationInput,
   WebhookEvent,
 } from "./types.js";
+import type {
+  CryptoCompliancePort,
+  InboundTransferRecord,
+  ScreenableChain,
+  Vasp,
+  WalletRiskSeverity,
+  WalletScreeningResult,
+} from "./crypto.js";
 
 /**
  * Didit — the KYC/KYB/AML provider.
@@ -115,7 +123,8 @@ export class DiditComplianceProvider implements CompliancePort {
     this.doFetch = config.fetchImpl ?? fetch;
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  /** Exposed to `DiditCryptoCompliance`, which shares this client's auth and base URL. */
+  async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -410,4 +419,77 @@ export function matchBlocklist(
   return entries.find((entry) =>
     candidates.some((c) => c.entryType === entry.entryType && norm(c.value) === norm(entry.value)),
   );
+}
+
+// ---- crypto compliance (dormant until AFP's crypto rails carry real value) --
+
+/**
+ * Travel Rule and wallet screening against Didit.
+ *
+ * ⚠️ Two things confirmed against the live account rather than assumed:
+ * wallet screening returns 409 unless a transaction-monitoring provider key
+ * is configured, and the Travel Rule settings endpoint is permission-gated —
+ * these credentials are refused outright. So even once AFP's rails are real,
+ * turning this on needs a Didit-side provider connection and elevated
+ * permissions, not just a code flag. `evaluateCryptoGate` deliberately does
+ * not pretend otherwise: it decides whether the obligation *applies*, not
+ * whether the account is *provisioned* for it.
+ */
+export class DiditCryptoCompliance implements CryptoCompliancePort {
+  constructor(private readonly request: <T>(path: string, init?: RequestInit) => Promise<T>) {}
+
+  async screenWallet(input: {
+    address: string;
+    chain: ScreenableChain;
+    direction?: "inbound" | "outbound";
+  }): Promise<WalletScreeningResult> {
+    const body = await this.request<{
+      risk_score?: number;
+      severity?: string;
+      sanctions_hit?: boolean;
+      source_of_funds?: Array<{ category?: string; percentage?: number }>;
+      destination_of_funds?: Array<{ category?: string; percentage?: number }>;
+    }>("/v2/transactions/screen-wallet/", {
+      method: "POST",
+      body: JSON.stringify({ wallet_address: input.address, blockchain: input.chain, direction: input.direction }),
+    });
+    const severity = (body.severity ?? "unknown").toLowerCase();
+    return {
+      address: input.address,
+      chain: input.chain,
+      riskScore: body.risk_score,
+      severity: (["low", "medium", "high", "severe"].includes(severity) ? severity : "unknown") as WalletRiskSeverity,
+      sanctionsHit: body.sanctions_hit === true,
+      sourceOfFunds: (body.source_of_funds ?? []).map((f) => ({ category: f.category ?? "unknown", percentage: f.percentage })),
+      destinationOfFunds: (body.destination_of_funds ?? []).map((f) => ({ category: f.category ?? "unknown", percentage: f.percentage })),
+    };
+  }
+
+  async searchVasps(search?: string): Promise<Vasp[]> {
+    const query = search ? `?search=${encodeURIComponent(search)}` : "";
+    const body = await this.request<{ results?: Array<{ name?: string; travel_address?: string; lei?: string; due_diligence_score?: number }> }>(
+      `/v2/travel-rule/vasps/${query}`,
+    );
+    return (body.results ?? []).map((v) => ({
+      name: v.name ?? "unknown",
+      travelAddress: v.travel_address,
+      lei: v.lei,
+      dueDiligenceScore: v.due_diligence_score,
+    }));
+  }
+
+  async registerInboundTransfer(input: InboundTransferRecord): Promise<{ registered: boolean; transferId?: string }> {
+    const body = await this.request<{ transaction_id?: string }>("/v2/travel-rule/inbound/", {
+      method: "POST",
+      body: JSON.stringify({
+        txid: input.txid,
+        wallet_address: input.walletAddress,
+        chain: input.chain,
+        currency: input.currency,
+        amount: input.amount,
+        originating_vasp: input.originatingVasp,
+      }),
+    });
+    return { registered: true, transferId: body.transaction_id };
+  }
 }
