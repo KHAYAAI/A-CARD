@@ -77,7 +77,7 @@ is contracted.** These are two different bars.
   API, and MCP server on a public AWS URL, let developers sign up, create
   cards, and simulate purchases. This is a legitimate public beta.
 - The authorization engine, ledger, rules, approvals, webhooks, auth/RBAC, and
-  billing are production-quality and tested (344 automated tests, 51 of them
+  billing are production-quality and tested (390 automated tests, 63 of them
   Postgres integration tests run against a real database).
 - The AWS stack is hardened (private networking, WAF, TLS, encrypted DB) and
   deploys with one command.
@@ -136,7 +136,7 @@ Grouped by when you need them.
 | Dependency | Purpose | Where / how | Cost |
 |---|---|---|---|
 | **Card issuing partner (BIN sponsor)** | Actually issues Visa/Mastercard, hosts PANs (keeps you out of PCI scope), provides the real authorization webhook | Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stitch, or Stripe Issuing — start a commercial conversation | Deal-dependent (setup + per-card + interchange share) |
-| **KYC/FICA provider** | Identity verification of account holders | Usually via the issuing partner; standalone options: Smile ID, Onfido | Per-verification |
+| **KYC/FICA provider** | Identity verification of account holders | **Integrated: Didit** (`apps/api/src/compliance/`) — SA ID lookup against Home Affairs, liveness, face match, sanctions/PEP screening with ongoing monitoring. What remains is commercial and POPIA groundwork, not engineering. | ~$0.15 document / $2.20 SA ID lookup / AML per screen |
 | **Compliance/legal counsel** | SARB / NPS Act / FICA posture, T&Cs | SA fintech counsel | Project fee |
 | **Production funding rail** | Real wallet top-ups that settle | PayFast — wired (same processor/webhook as subscription billing above), needs real-sandbox verification | ~2.9-3.5%+ per transaction |
 
@@ -202,7 +202,7 @@ Grouped by when you need them.
 Do **not** move real cardholder money until every box is ticked:
 
 - [ ] Signed issuing partner + their compliance onboarding complete.
-- [ ] KYC/FICA flow live for account holders.
+- [ ] KYC/FICA flow live for account holders (built — turn on `ACARD_ENABLE_COMPLIANCE`, then `ACARD_COMPLIANCE_ENFORCE` once the backlog is clear; confirm the POPIA consent and retention posture for the identity data it collects).
 - [ ] Legal sign-off on SARB / NPS Act / FICA and customer T&Cs.
 - [ ] Real funding rail settling into wallets.
 - [ ] TLS on a real domain; secrets in Secrets Manager (already wired).
@@ -218,8 +218,11 @@ Do **not** move real cardholder money until every box is ticked:
 
 - **Fraud ML** is not built — the rules engine carries hot-path decisions,
   which is the correct sequencing; ML scoring is a post-launch layer.
-- **KYC/FICA** is intentionally not built in-house — it rides the issuing
-  partner's compliance.
+- **KYC/FICA** is integrated via Didit rather than built in-house, and the
+  records/gating live in A-CARD (`packages/core/src/compliance.ts`). Still
+  open: a signed provider agreement, a POPIA-compliant consent and retention
+  posture, and confirming which of these checks the eventual issuing partner
+  accepts instead of duplicating.
 - The **snapshot persistence mode** remains for single-instance simplicity but
   the multi-writer Postgres store is the default and the path to scale.
 - Turning on CloudTrail/GuardDuty/WAF logging is not the same as someone

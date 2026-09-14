@@ -1,0 +1,106 @@
+import type { AmlRisk, VerificationStatus, VerificationSubject } from "@acard/core";
+
+/**
+ * The compliance provider boundary.
+ *
+ * Two implementations: `DiditComplianceProvider` (didit.ts) talks to the real
+ * Didit API; `SandboxComplianceProvider` (sandbox.ts) is deterministic, local,
+ * and never bills — the same relationship the mock issuer has to a real BIN
+ * sponsor. Every route and every test depends on this interface, never on
+ * which one is behind it.
+ */
+
+export interface StartVerificationInput {
+  subject: VerificationSubject;
+  /** Our own id for the subject — Didit calls this `vendor_data` and groups sessions by it. */
+  subjectId: string;
+  /** Pre-fills the provider's UI so the subject types less. */
+  contact?: { email?: string; phone?: string };
+  /** Where to send the subject once they are finished. */
+  callbackUrl?: string;
+  /** Echoed back on every webhook for this session. */
+  metadata?: Record<string, string>;
+}
+
+export interface StartedVerification {
+  providerSessionId: string;
+  providerWorkflowId: string;
+  verificationUrl: string;
+}
+
+/** A provider decision, already translated out of the provider's own vocabulary. */
+export interface ProviderDecision {
+  providerSessionId: string;
+  status: VerificationStatus;
+  amlRisk: AmlRisk;
+  reasons: string[];
+}
+
+export interface AmlScreenInput {
+  fullName: string;
+  entityType?: "person" | "company";
+  dateOfBirth?: string;
+  nationality?: string;
+  documentNumber?: string;
+  includeAdverseMedia?: boolean;
+  /** Keep screening after approval — a watchlist someone joins later is the point. */
+  ongoingMonitoring?: boolean;
+}
+
+export interface AmlScreenResult {
+  risk: AmlRisk;
+  /** 0–100 where the provider gives one. */
+  score?: number;
+  matches: Array<{ name: string; listName?: string; matchScore?: number }>;
+}
+
+/** One candidate company from a registry search. */
+export interface RegistryCandidate {
+  providerCandidateId: string;
+  name: string;
+  registrationNumber?: string;
+  status?: string;
+  address?: string;
+}
+
+export interface RegistryRecord {
+  name: string;
+  registrationNumber?: string;
+  status?: string;
+  incorporatedAt?: string;
+  address?: string;
+  officers: Array<{ name: string; role?: string }>;
+  beneficialOwners: Array<{ name: string; ownershipPercent?: number }>;
+  raw: unknown;
+}
+
+export interface CompliancePort {
+  /** Which provider this is, for logging and for the honesty banner on boot. */
+  readonly label: string;
+  /** True when decisions are real; false for the deterministic sandbox. */
+  readonly isLive: boolean;
+
+  startVerification(input: StartVerificationInput): Promise<StartedVerification>;
+  fetchDecision(providerSessionId: string): Promise<ProviderDecision>;
+
+  screenAml(input: AmlScreenInput): Promise<AmlScreenResult>;
+
+  searchRegistry(input: { countryCode: string; name?: string; registrationNumber?: string }): Promise<RegistryCandidate[]>;
+  selectRegistryCandidate(providerCandidateId: string): Promise<RegistryRecord>;
+
+  /**
+   * Verify a webhook actually came from the provider. Returns the parsed body
+   * on success and `undefined` on a bad signature — never throws, so a forged
+   * request is a 401 rather than a 500 that pages someone at 3am.
+   */
+  verifyWebhook(rawBody: string, headers: Record<string, string | undefined>): WebhookEvent | undefined;
+}
+
+export interface WebhookEvent {
+  providerSessionId: string;
+  status: VerificationStatus;
+  amlRisk: AmlRisk;
+  reasons: string[];
+  /** Our own subject id, echoed back by the provider. */
+  subjectId?: string;
+}

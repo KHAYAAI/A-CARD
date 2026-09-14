@@ -9,6 +9,15 @@ import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.j
 import { AfpLedger } from "@acard/core";
 import { InMemoryAfpLedger, PostgresAfpLedger, type AfpLedgerPort } from "./afp/index.js";
 import { createCardRail, createX402Rail, createStablecoinRail, createSandboxStablecoinClient, SANDBOX_SIGNER, type RailAdapter } from "./rails/index.js";
+import { ComplianceService } from "@acard/core";
+import {
+  DiditComplianceProvider,
+  InMemoryComplianceStore,
+  PostgresComplianceStore,
+  SandboxComplianceProvider,
+  type CompliancePort,
+  type ComplianceStorePort,
+} from "./compliance/index.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const issuerWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET ?? "whsec_sandbox_secret";
@@ -26,6 +35,12 @@ const awsRegion = process.env.AWS_REGION ?? "af-south-1";
 const afpEnabled = process.env.ACARD_ENABLE_AFP === "true";
 const afpX402PayerAddress = process.env.ACARD_AFP_X402_PAYER_ADDRESS;
 const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
+const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
+const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
+const diditApiKey = process.env.DIDIT_API_KEY;
+const diditKycWorkflowId = process.env.DIDIT_KYC_WORKFLOW_ID;
+const diditKybWorkflowId = process.env.DIDIT_KYB_WORKFLOW_ID;
+const diditWebhookSecret = process.env.DIDIT_WEBHOOK_SECRET;
 
 /**
  * Persistence modes:
@@ -154,9 +169,76 @@ if (afpEnabled) {
   afp = { ledger: afpLedger, rails };
 }
 
+/**
+ * Compliance (KYC / KYB / AML via Didit).
+ *
+ * Two independent switches, deliberately:
+ *
+ *   ACARD_ENABLE_COMPLIANCE=true  mounts /v1/compliance/* and starts
+ *                                 recording verification outcomes.
+ *   ACARD_COMPLIANCE_ENFORCE=true additionally REFUSES money movement from
+ *                                 an unverified organisation.
+ *
+ * They are separate because the second one can lock out live customers. The
+ * safe rollout is to enable the first, watch real traffic flow through
+ * verification, clear the backlog, and only then enforce — rather than
+ * discovering on enforcement day that half the book has no record.
+ *
+ * Without DIDIT_API_KEY the sandbox provider is used: deterministic, offline,
+ * never bills, and verifies nobody. It is logged loudly as such, because a
+ * compliance layer that silently approves everyone is worse than none at all.
+ */
+let compliance: { provider: CompliancePort; store: ComplianceStorePort; enforce: boolean } | undefined;
+
+if (complianceEnabled) {
+  let provider: CompliancePort;
+  if (diditApiKey && diditKycWorkflowId && diditKybWorkflowId) {
+    provider = new DiditComplianceProvider({
+      apiKey: diditApiKey,
+      kycWorkflowId: diditKycWorkflowId,
+      kybWorkflowId: diditKybWorkflowId,
+      webhookSecret: diditWebhookSecret,
+    });
+    if (!diditWebhookSecret) {
+      console.log(
+        "A-CARD API: ⚠️  DIDIT_WEBHOOK_SECRET is not set — every inbound compliance webhook will be REJECTED, so decisions will only arrive when polled",
+      );
+    }
+  } else {
+    provider = new SandboxComplianceProvider();
+    console.log(
+      "A-CARD API: ⚠️  compliance is running the SANDBOX provider — it verifies nobody and approves almost everyone. Set DIDIT_API_KEY, DIDIT_KYC_WORKFLOW_ID and DIDIT_KYB_WORKFLOW_ID for real verification",
+    );
+  }
+
+  let store: ComplianceStorePort;
+  if (platform instanceof PostgresPlatformService) {
+    const pgStore = new PostgresComplianceStore(databaseUrl as string);
+    await pgStore.migrate();
+    store = pgStore;
+    const previousClose = onClose;
+    onClose = async () => {
+      await previousClose?.();
+      await pgStore.close();
+    };
+  } else {
+    store = new InMemoryComplianceStore(new ComplianceService());
+  }
+
+  compliance = { provider, store, enforce: complianceEnforce };
+  console.log(
+    `A-CARD API: compliance enabled via ${provider.label} — ${
+      complianceEnforce
+        ? "ENFORCING: unverified organisations cannot fund wallets or issue cards"
+        : "recording only, nothing is blocked (set ACARD_COMPLIANCE_ENFORCE=true to start refusing unverified money movement)"
+    }`,
+  );
+}
+
 const app = createApp({
   platform,
   issuerWebhookSecret,
+  compliance,
   dashboardUrl,
   onMutation,
   merchants,

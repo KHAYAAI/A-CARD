@@ -10,8 +10,8 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 | Path | What it is |
 |---|---|
-| `packages/core` | Domain logic: AFP routing engine + cross-rail ledger (`afp.ts`), A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
-| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), AFP's routing/execution routes and rail adapters (`src/rails/` — card, x402, stablecoin), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
+| `packages/core` | Domain logic: compliance records and money-movement gating (`compliance.ts`), AFP routing engine + cross-rail ledger (`afp.ts`), A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
+| `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), AFP's routing/execution routes and rail adapters (`src/rails/` — card, x402, stablecoin), KYC/KYB/AML through Didit with a deterministic offline fallback (`src/compliance/`), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
 | `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management, A-MERCHANT operator console (onboarding, KYB, discovery preview) — plus a separate `/merchant` route: the merchant's own portal (WorkOS AuthKit login, catalog, one-tap restate) |
@@ -21,9 +21,10 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 344 tests: ledger invariants, auth flow, approvals, billing, webhooks,
-                         # A-MERCHANT discovery + purchase notices, AFP routing/ledger, API e2e.
-                         # 51 of them are Postgres integration tests, skipped unless
+npm test                 # 390 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+                         # A-MERCHANT discovery + purchase notices, AFP routing/ledger,
+                         # KYC/KYB/AML compliance records and gating, API e2e.
+                         # 63 of them are Postgres integration tests, skipped unless
                          # ACARD_TEST_DATABASE_URL points at a reachable database.
 npm run dev:api          # sandbox API on :8787 (in-memory unless DATABASE_URL is set)
 ```
@@ -274,6 +275,65 @@ below) and `DASHBOARD_URL` to enable the portal; without them, merchant
 registration and KYB still work, but a portal invite has nowhere to send the
 merchant, and `/v1/merchant-auth/*` / `/v1/merchant-portal/*` stay unmounted.
 
+## Compliance — KYC, KYB and AML
+
+Verification runs through **Didit**: document scan or a South African ID
+lookup against the Department of Home Affairs, passive liveness, face match,
+CIPC company registry (including beneficial owners), and sanctions/PEP/
+adverse-media screening with ongoing monitoring.
+
+**A-CARD's own records are separate from the provider's decisions**
+(`packages/core/src/compliance.ts`). What Didit decided and what a human at
+A-CARD decided afterwards are two different fields on the same record — an
+`override` never overwrites `providerDecision`. Collapsing them would destroy
+exactly the audit trail this exists to keep: you could no longer tell an
+automated approval from a human one, which is the first question anyone
+reviewing a bad account asks.
+
+**Gating is computed, never stored.** `canMoveMoney()` derives from the
+current record every time it is called, because a stored boolean goes stale
+the moment ongoing monitoring puts a sanctions hit on an account approved
+last month. A hit blocks money even on a verified identity — being
+verifiably the right person is not a reason to let a sanctioned party fund a
+wallet — and only an attributed operator override can clear it.
+
+**Two switches, deliberately separate:**
+
+```bash
+ACARD_ENABLE_COMPLIANCE=true   # mount /v1/compliance/*, record outcomes
+ACARD_COMPLIANCE_ENFORCE=true  # additionally REFUSE unverified money movement
+```
+
+Enforcement is what can lock out live customers, so it is not implied by
+turning verification on. The safe rollout is to record first, watch real
+traffic flow through verification, clear the backlog, then enforce. With
+enforcement on, exactly two things are gated — funding a wallet and issuing a
+card. Reads, discovery, approvals and team management are not: an unverified
+org can finish onboarding and look around, it just cannot move value.
+
+Without `DIDIT_API_KEY` a deterministic **sandbox provider** is used
+(`apps/api/src/compliance/sandbox.ts`) — offline, never billed, and it
+verifies nobody. The API logs that loudly on boot, because a compliance layer
+that silently approves everyone is worse than none at all.
+
+A merchant approved by the provider becomes discoverable automatically and a
+declined one is suspended, keeping A-MERCHANT's own KYB gate in step with the
+compliance decision instead of letting the two drift apart. An operator
+override moves both as well.
+
+Records live behind the same async-port pattern as everything else, with an
+in-memory wrapper and a real multi-writer Postgres adapter
+(`acard_verifications`). One verification per subject is enforced by a unique
+index rather than a read-then-write check — under a double signup click that
+is the difference between one verification and two, and on a live provider
+the second one is a second bill.
+
+⚠️ The REST paths and the webhook signature scheme in
+`apps/api/src/compliance/didit.ts` are **not yet verified against Didit's API
+reference** — they are isolated in that one file, the same containment
+`sudo.ts` uses for the card issuer. A wrong signature scheme fails closed
+(every webhook rejected), which is the safe direction to be wrong in.
+
 ## AFP — the Agent Financial Platform
 
 A-CARD decides *whether* an agent may spend. A-MERCHANT decides *where* it
@@ -382,7 +442,7 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 ## What's intentionally not built yet
 
 - **Fraud ML.** The rules engine carries hot-path decisions today, which is the correct sequencing — ML scoring is a post-launch layer.
-- **KYC/FICA.** Deliberately not built in-house — this should ride the issuing partner's compliance, not duplicate it, so it depends on which issuer is chosen.
+- **A KYC/AML *provider* relationship for production.** The integration is built (see the Compliance section above) and runs against Didit; what is not done is the commercial and data-protection groundwork around it — a signed agreement, a POPIA-compliant consent and retention posture for the identity data it collects, and confirmation of which checks the eventual issuing partner will accept as satisfying their own onboarding rather than duplicating.
 - **A-MERCHANT's money-handling write side.** Payment acceptance, settlement, refunds, and adjudicated disputes. Deliberately deferred, and the boundary is precise: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money — a licensing and partner-bank question rather than a schema. Purchase notices (above) deliberately stop short of that line: they record *that* a sale happened so a merchant has a reason to keep stock fresh, without any money passing through this platform.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
 - **AFP's real rail settlement (x402 signing, stablecoin custody).** The routing engine and cross-rail ledger are real and tested, on both the in-memory and Postgres backends; the card rail is fully real (it's A-CARD's own authorization path). x402 and stablecoin are real protocol/interface implementations with sandboxed execution — genuinely useful for proving the ledger's finality and reconciliation logic, not yet safe to carry real value. Turning them real needs the same kind of decision a contracted issuer needs: a signing key with real funds behind it for x402, a custody provider (or self-hosted signer) for stablecoin.

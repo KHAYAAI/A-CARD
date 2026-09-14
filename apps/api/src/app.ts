@@ -18,6 +18,8 @@ import {
   type SubscriptionTier,
   type MerchantRole,
   type MerchantSessionContext,
+  canMoveMoney,
+  effectiveStatus,
   type MerchantStatus,
   type PurchaseNoticeStatus,
   createIntent as createAfpIntent,
@@ -33,6 +35,7 @@ import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantA
 import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreConfig } from "./kybDocuments.js";
 import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
 import type { AfpLedgerPort } from "./afp/index.js";
+import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
 
 /**
  * A-CARD REST API.
@@ -126,6 +129,19 @@ export interface AppConfig {
    * to post its outcome isn't safely usable.
    */
   afp?: { ledger: AfpLedgerPort; rails: RailAdapter[] };
+  /**
+   * KYC / KYB / AML (optional — omit and no /v1/compliance/* route is mounted
+   * and nothing is gated, which is exactly how every deployment behaved
+   * before this existed).
+   *
+   * `enforce` is the switch that actually restricts existing accounts: with
+   * it off, verification runs and is recorded but never blocks anything, so
+   * an operator can turn verification on, watch real traffic flow through it,
+   * and only then start refusing unverified money movement. Turning
+   * enforcement on is the decision that can lock out live customers, so it is
+   * deliberately separate from turning verification on.
+   */
+  compliance?: { provider: CompliancePort; store: ComplianceStorePort; enforce?: boolean };
   /** Where PayFast checkout should send the customer back, and where the SSO callback redirects with a session. */
   dashboardUrl?: string;
 }
@@ -374,6 +390,21 @@ const disputePurchaseSchema = z.object({
   note: z.string().min(1).max(500),
 });
 
+const complianceOverrideSchema = z.object({
+  status: z.enum(["approved", "declined"]),
+  reason: z.string().min(1).max(500),
+});
+
+const amlScreenSchema = z.object({
+  full_name: z.string().min(1),
+  entity_type: z.enum(["person", "company"]).optional(),
+  date_of_birth: z.string().optional(),
+  /** ISO 3166-1 alpha-2. Alpha-3 is rejected by the provider. */
+  nationality: z.string().length(2).optional(),
+  include_adverse_media: z.boolean().optional(),
+  ongoing_monitoring: z.boolean().optional(),
+});
+
 const searchQuerySchema = z.object({
   text: z.string().optional(),
   merchant_category_codes: z.array(z.string()).optional(),
@@ -416,6 +447,7 @@ export function createApp(config: AppConfig) {
   const merchantAuthKit = config.merchantAuthKit ? asMerchantAuthKitClient(config.merchantAuthKit) : undefined;
   const kybDocuments = config.kybDocuments ? asKybDocumentStore(config.kybDocuments) : undefined;
   const afp = config.afp;
+  const compliance = config.compliance;
   const platform = asService(config.platform);
   const payfast = config.payfast ? asPayFastClient(config.payfast) : undefined;
   const embeddedWallet = config.embeddedWallet ? new EmbeddedWalletClient(config.embeddedWallet) : undefined;
@@ -668,6 +700,46 @@ export function createApp(config: AppConfig) {
       }
       return next();
     };
+
+  /**
+   * The money-movement gate.
+   *
+   * Mounted only when compliance is configured AND enforcement is explicitly
+   * on, so every deployment that does not opt in behaves exactly as it did
+   * before this existed — no route changes shape, no existing account is
+   * locked out by an upgrade.
+   *
+   * It guards the two things FICA actually cares about: putting money into a
+   * wallet, and issuing a card that can spend it. Reads, discovery, approvals
+   * and team management are deliberately not gated — an unverified org can
+   * still look around and finish onboarding, it just cannot move value.
+   *
+   * Placed after the auth guard (so `holder` is resolved) and before the
+   * routes it protects.
+   */
+  if (compliance?.enforce) {
+    const GATED_POSTS = new Set(["/v1/wallet/fund", "/v1/wallet/fund/checkout", "/v1/cards"]);
+    app.use("/v1/*", async (c, next) => {
+      if (c.req.method !== "POST" || !GATED_POSTS.has(c.req.path)) return next();
+      const holder = c.get("holder");
+      if (!holder) return next();
+      const record = await compliance.store.find("account_holder", holder.id);
+      if (canMoveMoney(record)) return next();
+      return c.json(
+        {
+          error: {
+            code: "verification_required",
+            message:
+              record && record.amlRisk === "hit"
+                ? "this organisation is blocked pending a compliance review"
+                : "this organisation must complete identity verification before it can move money",
+          },
+          verification_status: record ? effectiveStatus(record) : "not_started",
+        },
+        403,
+      );
+    });
+  }
 
   app.get("/v1/auth/me", async (c) => {
     const holder = c.get("holder");
@@ -1809,6 +1881,177 @@ export function createApp(config: AppConfig) {
       return c.json({ transactions: await afp.ledger.list(c.get("holder").id) });
     });
   }
+
+  // ---- compliance: KYC, KYB and AML -------------------------------------------------
+  //
+  // A-CARD's own record of what a verification provider decided, who at
+  // A-CARD overrode it and why, and whether a subject may currently move
+  // money. See packages/core/src/compliance.ts for the state model and
+  // apps/api/src/compliance/ for the provider boundary.
+  if (compliance) {
+    const { provider, store } = compliance;
+
+    /** Start (or resume) this org's own KYC. Idempotent — asking twice resumes the same session. */
+    app.post("/v1/compliance/verify", requireRole("admin"), async (c) => {
+      const holder = c.get("holder");
+      const record = await store.open("account_holder", holder.id);
+      if (record.providerSessionId && record.verificationUrl) {
+        return c.json({ verification: record, resumed: true });
+      }
+      const started = await provider.startVerification({
+        subject: "account_holder",
+        subjectId: holder.id,
+        contact: { email: holder.email },
+        callbackUrl: dashboardUrl ? `${dashboardUrl.replace(/\/$/, "")}/?verified=1` : undefined,
+      });
+      return c.json({ verification: await store.attachSession(record.id, started), resumed: false }, 201);
+    });
+
+    /** Where this org stands right now, and what that currently permits. */
+    app.get("/v1/compliance/me", async (c) => {
+      const holder = c.get("holder");
+      const record = await store.find("account_holder", holder.id);
+      return c.json({
+        verification: record ?? null,
+        status: record ? effectiveStatus(record) : "not_started",
+        can_move_money: compliance.enforce ? canMoveMoney(record) : true,
+        enforced: compliance.enforce === true,
+        provider: provider.label,
+      });
+    });
+
+    /** Kick off KYB for a merchant. Operator action — the merchant then completes it. */
+    app.post("/v1/compliance/merchants/:id/verify", requireRole("admin"), async (c) => {
+      if (!merchants) return c.json({ error: { code: "not_found", message: "merchant directory not configured" } }, 404);
+      const merchant = await merchants.get(c.req.param("id"));
+      const record = await store.open("merchant", merchant.id);
+      if (record.providerSessionId && record.verificationUrl) {
+        return c.json({ verification: record, resumed: true });
+      }
+      const started = await provider.startVerification({
+        subject: "merchant",
+        subjectId: merchant.id,
+        contact: { email: merchant.kyb.contactEmail },
+        metadata: { merchant_name: merchant.name },
+      });
+      return c.json({ verification: await store.attachSession(record.id, started), resumed: false }, 201);
+    });
+
+    /** The compliance queue: everything a human still has to decide. */
+    app.get("/v1/compliance/queue", requireRole("admin"), async (c) => {
+      return c.json({ verifications: await store.pendingReview() });
+    });
+
+    app.get("/v1/compliance/verifications", requireRole("admin"), async (c) => {
+      const subject = c.req.query("subject") as "account_holder" | "merchant" | undefined;
+      return c.json({ verifications: await store.list(subject ? { subject } : {}) });
+    });
+
+    /**
+     * A human at A-CARD deciding differently from the provider — clearing a
+     * false-positive sanctions match, or declining someone the automation
+     * passed. Never overwrites what the provider said; it is recorded
+     * alongside it, with a name and a reason, because that is the difference
+     * between an audit trail and a mutable status field.
+     */
+    app.post("/v1/compliance/verifications/:id/override", requireRole("admin"), async (c) => {
+      const body = complianceOverrideSchema.parse(await c.req.json());
+      const decidedBy = c.get("sessionUser")?.email ?? c.get("holder").email;
+      const record = await store.override(c.req.param("id"), {
+        status: body.status,
+        decidedBy,
+        reason: body.reason,
+      });
+      // A merchant cleared by compliance becomes discoverable, and a declined
+      // one is suspended — keeping the directory's own KYB gate in step with
+      // the compliance decision instead of leaving them to drift apart.
+      if (merchants && record.subject === "merchant") {
+        await merchants
+          .setStatus(record.subjectId, body.status === "approved" ? "verified" : "suspended", decidedBy, body.reason)
+          .catch(() => undefined);
+      }
+      return c.json({ verification: record });
+    });
+
+    /** Ad-hoc AML screen — used for a name that has no verification session of its own. */
+    app.post("/v1/compliance/aml/screen", requireRole("admin"), async (c) => {
+      const body = amlScreenSchema.parse(await c.req.json());
+      return c.json({
+        result: await provider.screenAml({
+          fullName: body.full_name,
+          entityType: body.entity_type,
+          dateOfBirth: body.date_of_birth,
+          // ISO 3166-1 alpha-2 — the provider rejects alpha-3 outright.
+          nationality: body.nationality,
+          includeAdverseMedia: body.include_adverse_media,
+          ongoingMonitoring: body.ongoing_monitoring,
+        }),
+      });
+    });
+
+    /** Search official company registries — CIPC for ZA. */
+    app.get("/v1/compliance/registry/search", requireRole("admin"), async (c) => {
+      const q = c.req.query();
+      if (!q.country_code) {
+        return c.json({ error: { code: "country_required", message: "country_code is required" } }, 400);
+      }
+      return c.json({
+        candidates: await provider.searchRegistry({
+          countryCode: q.country_code,
+          name: q.name,
+          registrationNumber: q.registration_number,
+        }),
+      });
+    });
+
+    app.get("/v1/compliance/registry/:candidateId", requireRole("admin"), async (c) => {
+      return c.json({ company: await provider.selectRegistryCandidate(c.req.param("candidateId")) });
+    });
+  }
+
+  /**
+   * The provider's webhook. Mounted outside the `/v1` auth guard (it carries
+   * its own signature, not an API key) and outside the `if (compliance)`
+   * block's route group for the same reason the issuer webhook is: a signed
+   * request from a third party is authenticated by its signature or not at all.
+   */
+  app.post("/webhooks/compliance", async (c) => {
+    if (!compliance) return c.json({ error: { code: "not_found", message: "compliance is not configured" } }, 404);
+    const rawBody = await c.req.text();
+    const headers: Record<string, string | undefined> = {};
+    for (const name of ["x-signature", "x-didit-signature", "x-timestamp", "x-didit-timestamp"]) {
+      headers[name] = c.req.header(name);
+    }
+    const event = compliance.provider.verifyWebhook(rawBody, headers);
+    if (!event) {
+      return c.json({ error: { code: "invalid_signature", message: "webhook signature did not verify" } }, 401);
+    }
+
+    const record = await compliance.store.findByProviderSession(event.providerSessionId);
+    if (!record) {
+      // A session we have no record of is not an error worth retrying —
+      // acknowledge it so the provider stops redelivering.
+      return c.json({ received: true, matched: false });
+    }
+    const updated = await compliance.store.recordProviderDecision(record.id, {
+      status: event.status,
+      amlRisk: event.amlRisk,
+      reasons: event.reasons,
+    });
+
+    // A merchant approved by the provider becomes discoverable automatically;
+    // a declined one is suspended. An operator override can still change it
+    // afterwards — this is the automated default, not the final word.
+    if (merchants && updated.subject === "merchant" && !updated.override) {
+      const next = event.status === "approved" ? "verified" : event.status === "declined" ? "suspended" : undefined;
+      if (next) {
+        await merchants
+          .setStatus(updated.subjectId, next, `didit:${event.providerSessionId}`, "automated KYB decision")
+          .catch(() => undefined);
+      }
+    }
+    return c.json({ received: true, matched: true });
+  });
 
   // ---- error handling ---------------------------------------------------------------
 
