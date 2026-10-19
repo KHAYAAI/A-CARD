@@ -22,9 +22,9 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 ```bash
 npm install
 npm test                 # 459 tests: ledger invariants, auth flow, approvals, billing, webhooks,
-                         # A-MERCHANT discovery + purchase notices, AFP routing/ledger,
+                         # A-MERCHANT discovery + orders + purchase notices, AFP routing/ledger,
                          # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e.
-                         # 73 of them are Postgres integration tests, skipped unless
+                         # 63 of them are Postgres integration tests, skipped unless
                          # ACARD_TEST_DATABASE_URL points at a reachable database.
 npm run dev:api          # sandbox API on :8787 (in-memory unless DATABASE_URL is set)
 ```
@@ -645,8 +645,9 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 - **A KYC/AML *provider* relationship for production.** The integration is built (see the Compliance section above) and runs against Didit; what is not done is the commercial and data-protection groundwork around it — a signed agreement, a POPIA-compliant consent and retention posture for the identity data it collects, and confirmation of which checks the eventual issuing partner will accept as satisfying their own onboarding rather than duplicating.
 - **A-MERCHANT's money-handling write side.** Payment acceptance, settlement, refunds, and adjudicated disputes. Deliberately deferred, and the boundary is precise: the moment the platform accepts payment on a merchant's behalf and pays out later, it is holding other people's money — a licensing and partner-bank question rather than a schema. Purchase notices (above) deliberately stop short of that line: they record *that* a sale happened so a merchant has a reason to keep stock fresh, without any money passing through this platform.
 - **A contracted issuer.** No code gap — the webhook contract is issuer-agnostic and already built. This is a business relationship, not an engineering task; see the external dependencies list for where to start.
-- **AFP's real rail settlement (x402 signing, stablecoin custody).** The routing engine and cross-rail ledger are real and tested, on both the in-memory and Postgres backends; the card rail is fully real (it's A-CARD's own authorization path). x402 and stablecoin are real protocol/interface implementations with sandboxed execution — genuinely useful for proving the ledger's finality and reconciliation logic, not yet safe to carry real value. Turning them real needs the same kind of decision a contracted issuer needs: a signing key with real funds behind it for x402, a custody provider (or self-hosted signer) for stablecoin.
-- **AFP's lifecycle workers.** `dueForSettlement()` is implemented and tested on both backends, but nothing in production calls it — a `posted` transaction never auto-settles. Likewise `reconciling` has no resolution path: the state exists, is entered correctly, and has no exit but direct database access. The ledger's *state model* is complete; the machinery that moves transactions through it over time is not. Both are small (a scheduled job and one operator endpoint) and both should land before AFP carries real value, since a rail that can start a payment it cannot finish is worse than one that is switched off.
+- **AFP's real rail settlement (x402 signing, stablecoin custody).** The routing engine, cross-rail ledger, and lifecycle workers (settlement sweep + reconciliation) are real and tested, on both the in-memory and Postgres backends; the card rail is fully real (it's A-CARD's own authorization path). x402 and stablecoin are real protocol/interface implementations with sandboxed execution — genuinely useful for proving the ledger's finality and reconciliation logic, not yet safe to carry real value. Turning them real needs the same kind of decision a contracted issuer needs: a signing key with real funds behind it for x402, a custody provider (or self-hosted signer) for stablecoin.
+- **Travel Rule and wallet screening going live.** Code and gating are complete (see the Compliance section above) but dormant behind `RailAdapter.carriesRealValue`, which only flips once a real signer or custody client replaces the sandbox ones — so this activates itself the same day AFP's rails do, not before.
+- **A bank/instant-EFT rail for AFP.** `RailId` is `card | x402 | stablecoin` today; there's no rail for a supplier who invoices and expects a bank transfer. Needs a PSP decision (e.g. Ozow, Stitch, or PayFast's instant EFT) before it's built, not an engineering blocker on its own.
 
 ## Scripts
 
