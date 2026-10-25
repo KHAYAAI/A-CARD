@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Seek</title>
+<script src="/brands.js"></script>
+<style>
+  body { margin:0; font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:#1f2937; background:#fff }
+  header { display:flex; align-items:center; gap:22px; padding:18px 28px; border-bottom:1px solid #e5e7eb }
+  .logo { font:800 24px ui-sans-serif,system-ui,sans-serif; letter-spacing:-1px; color:#4f46e5 }
+  .logo span { color:#0ea5e9 }
+  form { flex:1; max-width:620px; display:flex; border:1px solid #d1d5db; border-radius:999px; padding:4px 6px 4px 18px; box-shadow:0 1px 6px rgba(0,0,0,.06) }
+  input { flex:1; border:none; outline:none; font:inherit; font-size:15px; padding:6px 0 }
+  button { border:none; background:#4f46e5; color:#fff; border-radius:999px; padding:7px 16px; font:600 13px ui-sans-serif,system-ui,sans-serif }
+  main { padding:16px 28px 40px 60px; max-width:900px }
+  .meta { color:#6b7280; font-size:13px; margin-bottom:18px }
+  .r { margin-bottom:24px; max-width:640px }
+  .r .site { display:flex; gap:10px; align-items:center; font-size:13px; color:#374151 }
+  .r .fav { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font:800 12px ui-sans-serif,system-ui,sans-serif; color:#fff }
+  .r .url { color:#6b7280; font-size:12.5px }
+  .r a { display:block; font-size:19px; color:#1a0dab; text-decoration:none; margin:4px 0 3px }
+  .r a:hover { text-decoration:underline }
+  .r p { margin:0; color:#4b5563; font-size:14px }
+  .ad { font:700 11px ui-sans-serif,system-ui,sans-serif; color:#111; margin-right:6px }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">se<span>e</span>k</div>
+  <form onsubmit="event.preventDefault(); run(document.getElementById('q').value)">
+    <input id="q" autocomplete="off" placeholder="Search the web">
+    <button>Search</button>
+  </form>
+</header>
+<main id="main"></main>
+<script>
+  // The search engine is fictional. Its top result follows the brand set
+  // (?set=public|private, see brands.js); the other results are fictional.
+  const set = new URLSearchParams(location.search).get("set") === "private" ? "private" : "public";
+  const B = window.BRANDS[set];
+  const qs = "?set=" + set;
+  const lead = (k, href, title, text) => ({ name: B[k].name, color: B[k].primary, url: B[k].domain, href: href + qs, title, text });
+  const INDEX = {
+    groceries: [
+      lead("grocery", "/grocery", `${B.grocery.name}: Groceries delivered in 60 minutes | Johannesburg`,
+        "Order groceries online for fast delivery. Fresh produce, bakery, dairy, coffee and household essentials. Business accounts welcome."),
+      { name: "PantryPro", color: "#ea580c", url: "pantrypro.demo", title: "PantryPro: Bulk pantry supplies for offices",
+        text: "Bulk coffee, tea and snacks for workplaces. Next-day delivery, minimum order R2,000." },
+      { name: "Veld & Co", color: "#0f766e", url: "veldandco.demo › fresh", title: "Veld & Co Fresh Market | Weekly fruit and veg boxes",
+        text: "Seasonal produce from local farms. Weekly boxes delivered on Tuesdays and Fridays." },
+    ],
+    peripherals: [
+      lead("market", "/market", `Wireless keyboard and mouse combos | ${B.market.name}`,
+        "Shop keyboard and mouse combos, laptop stands and USB-C hubs. Free delivery on orders over R500."),
+      { name: "DeskGear", color: "#0891b2", url: "deskgear.demo", title: "DeskGear: Office peripherals, delivered nationwide",
+        text: "Keyboards, mice, monitors and docks for teams. Business invoicing available." },
+      { name: "TechReview ZA", color: "#7c3aed", url: "techreview.demo › best-keyboards", title: "The best wireless keyboard and mouse combos in South Africa (2026)",
+        text: "We tested twelve combos under R1,000 for battery life, comfort and range." },
+    ],
+    flights: [
+      lead("airline", "/airline", `${B.airline.name}: Cheap flights Johannesburg to Cape Town`,
+        "Fly JNB → CPT many times a day. Fares include taxes and a 7kg carry-on. Book online in under a minute."),
+      { name: "Fynbos Air", color: "#7c3aed", url: "fynbosair.demo", title: "Fynbos Air | Johannesburg – Cape Town flights",
+        text: "Business and economy fares between Johannesburg, Cape Town and George." },
+      { name: "TripCompare", color: "#2563eb", url: "tripcompare.demo › za", title: "Compare JNB to CPT flights this weekend",
+        text: "Compare fares across South African airlines and book direct." },
+    ],
+  };
+  function run(q) {
+    document.getElementById("q").value = q;
+    const results = /flight|fly|cape town/i.test(q) ? INDEX.flights : /keyboard|mouse|hub/i.test(q) ? INDEX.peripherals : INDEX.groceries;
+    document.getElementById("main").innerHTML = `<div class="meta">About ${(results.length * 412_000).toLocaleString()} results (0.31 seconds)</div>` +
+      results.map((r, i) => `<div class="r"><div class="site"><div class="fav" style="background:${r.color}">${r.name[0]}</div><div><div>${i === 1 ? '<span class="ad">Sponsored</span>' : ""}${r.name}</div><div class="url">${r.url}</div></div></div>
+        <a href="${r.href ?? "#"}" ${r.href ? "" : 'onclick="return false"'}>${r.title}</a><p>${r.text}</p></div>`).join("");
+  }
+  window.seek = { run };
+</script>
+</body>
+</html>

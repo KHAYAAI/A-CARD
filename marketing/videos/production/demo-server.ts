@@ -57,6 +57,14 @@ const issued = (await keyRes.json()) as { api_key?: string; secret?: string; key
 const agentKey = issued.api_key ?? issued.secret ?? issued.key?.secret;
 if (!agentKey) throw new Error(`could not issue an agent key: ${JSON.stringify(issued)}`);
 
+// Khaya Logistics is an enterprise customer: put it on the enterprise plan, as a
+// settled PayFast subscription would, so the agent scenes aren't capped at the
+// free tier's 5 cards a month.
+const anyCard = (await (await fetch(`${BASE}/v1/cards`, { headers: { authorization: `Bearer ${registered.session_token}` } })).json()) as {
+  cards: { accountHolderId: string }[];
+};
+platform.setSubscriptionTier(anyCard.cards[0].accountHolderId, "enterprise");
+
 const { secret: merchantKey } = platform.merchantAuth.createApiKey(world.merchants.randBuild, {
   name: "Till 1",
   scope: "read_write",

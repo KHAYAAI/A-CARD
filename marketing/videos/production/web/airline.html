@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flights</title>
+<link rel="stylesheet" href="/store.css">
+<script src="/brands.js"></script>
+<style>
+  body { background: #eef2f7 }
+  .top { border-bottom: 3px solid var(--accent) }
+  .mark { font-size: 24px; letter-spacing: -.8px } .mark::first-letter { color: var(--accent) }
+  .nav { display: flex; gap: 18px; font-weight: 600; font-size: 13px; margin-left: auto }
+  .search { background: var(--primary); color: #fff; padding: 14px 22px; display: flex; gap: 10px; align-items: flex-end }
+  .search label { display: flex; flex-direction: column; font-size: 11px; color: #c7d2e3; gap: 4px }
+  .search .v { background: #fff; color: #111; border-radius: 8px; padding: 8px 12px; font-weight: 700; font-size: 13.5px; min-width: 120px }
+  .search button { border: none; background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 18px; font-weight: 800 }
+  h3 { margin: 4px 0 8px; font-size: 15px }
+  .flights { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px }
+  .f { background: #fff; border: 1.5px solid #e5e7eb; border-radius: 12px; padding: 10px 14px; display: grid; grid-template-columns: 120px 1fr 120px 130px; align-items: center; gap: 12px }
+  .f.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent) }
+  .f .t { font: 800 17px ui-sans-serif, system-ui, sans-serif } .f .no { font-size: 11.5px; color: #6b7280 }
+  .f .bar { display: flex; align-items: center; gap: 8px; color: #6b7280; font-size: 12px } .f .bar i { flex: 1; height: 1px; background: #cbd5e1 }
+  .f .fare { font-weight: 800; font-size: 17px; text-align: right } .f .fare small { display: block; font-size: 10.5px; color: #6b7280; font-weight: 500 }
+  .f button { border: none; background: var(--primary); color: #fff; border-radius: 8px; padding: 8px; font-weight: 700 }
+  .f.sel button { background: var(--accent) }
+  .ref { font: 800 22px ui-monospace, Menlo, monospace; letter-spacing: 3px }
+</style>
+</head>
+<body>
+<div id="strip" style="position:sticky;top:0;z-index:50"></div>
+<div class="top"><div class="mark" id="mark"></div><div class="nav"><span>Book</span><span>Manage booking</span><span>Check in</span><span>Flight status</span></div></div>
+<div class="search">
+  <label>From<span class="v">Johannesburg (JNB)</span></label>
+  <label>To<span class="v">Cape Town (CPT)</span></label>
+  <label>Depart<span class="v">Fri 30 Oct</span></label>
+  <label>Return<span class="v">Sun 1 Nov</span></label>
+  <label>Passengers<span class="v">1 adult</span></label>
+  <button>Search flights</button>
+</div>
+<div class="wrap">
+  <section class="view on" id="v-shop">
+    <h3>Outbound · Fri 30 Oct · JNB → CPT</h3><div class="flights" id="out"></div>
+    <h3>Return · Sun 1 Nov · CPT → JNB</h3><div class="flights" id="ret"></div>
+    <div class="panel" style="max-width:none;display:flex;align-items:center;gap:16px">
+      <div style="flex:1"><b>Trip total</b> <span class="muted">1 adult · fares include taxes and a 7kg carry-on</span></div>
+      <div style="font-size:20px;font-weight:800" id="total">R 0.00</div>
+      <button class="cta" style="width:auto;margin:0;padding:10px 20px;background:var(--accent)" id="tocheckout" onclick="show('checkout')">Continue</button>
+    </div>
+  </section>
+  <section class="view" id="v-checkout">
+    <div class="panel"><h2>Passenger &amp; payment</h2>
+      <div class="muted" style="margin-bottom:8px">Passenger: Thandi Mokoena · thandi@khaya.example</div>
+      <div id="summary" style="font-size:13.5px;margin-bottom:6px"></div>
+      <div class="tot big"><span>Total</span><span id="paytotal"></span></div>
+      <div class="fields">
+        <label>Card number<input id="pan" autocomplete="off"></label>
+        <label>Expiry<input id="exp" autocomplete="off" placeholder="MM/YY"></label>
+      </div>
+      <button class="cta" id="pay" onclick="pay()" style="background:var(--accent)">Pay and book</button>
+      <div class="result" id="result"></div></div>
+  </section>
+</div>
+<script>
+  const { b, note } = brandFor("airline");
+  for (const [k, v] of Object.entries({ primary: b.primary, accent: b.accent, header: b.header, headerInk: b.headerInk })) document.documentElement.style.setProperty("--" + k, v);
+  document.getElementById("strip").innerHTML = affiliationStrip(b, note);
+  document.getElementById("mark").innerHTML = b.mark;
+  document.title = b.name;
+
+  // One-way fares incl. taxes (cents). Early and late flights are cheapest, as they are in reality.
+  const OUT = [
+    { id: "o1", dep: "06:00", arr: "08:10", no: 101, c: 134500 },
+    { id: "o2", dep: "08:30", arr: "10:40", no: 105, c: 168900 },
+    { id: "o3", dep: "11:15", arr: "13:25", no: 111, c: 159900 },
+  ];
+  const RET = [
+    { id: "r1", dep: "15:40", arr: "17:45", no: 132, c: 189900 },
+    { id: "r2", dep: "18:10", arr: "20:15", no: 136, c: 154500 },
+    { id: "r3", dep: "20:30", arr: "22:35", no: 140, c: 162900 },
+  ];
+  const pick = { out: null, ret: null };
+  const row = (f, leg) => `<div class="f" id="f-${f.id}"><div><div class="t">${f.dep}</div><div class="no">${b.code} ${f.no}</div></div>
+    <div class="bar">${leg === "out" ? "JNB" : "CPT"}<i></i>2h 10m · direct<i></i>${leg === "out" ? "CPT" : "JNB"}</div>
+    <div class="fare">${R(f.c)}<small>arrive ${f.arr}</small></div><button data-flight="${f.id}" data-leg="${leg}">Select</button></div>`;
+  document.getElementById("out").innerHTML = OUT.map((f) => row(f, "out")).join("");
+  document.getElementById("ret").innerHTML = RET.map((f) => row(f, "ret")).join("");
+  document.querySelectorAll("[data-flight]").forEach((btn) => btn.addEventListener("click", () => select(btn.dataset.leg, btn.dataset.flight)));
+
+  const total = () => (pick.out?.c ?? 0) + (pick.ret?.c ?? 0);
+  function select(leg, id) {
+    const list = leg === "out" ? OUT : RET;
+    pick[leg] = list.find((f) => f.id === id);
+    list.forEach((f) => { const el = document.getElementById("f-" + f.id); el.classList.toggle("sel", f.id === id); el.querySelector("button").textContent = f.id === id ? "Selected" : "Select"; });
+    render();
+  }
+  function render() {
+    document.getElementById("total").textContent = R(total());
+    document.getElementById("paytotal").textContent = R(total());
+    document.getElementById("summary").innerHTML = [pick.out && `${b.code} ${pick.out.no} · Fri 30 Oct · JNB ${pick.out.dep} → CPT ${pick.out.arr} · ${R(pick.out.c)}`, pick.ret && `${b.code} ${pick.ret.no} · Sun 1 Nov · CPT ${pick.ret.dep} → JNB ${pick.ret.arr} · ${R(pick.ret.c)}`].filter(Boolean).join("<br>");
+  }
+  function show(v) { document.querySelectorAll(".view").forEach((x) => x.classList.toggle("on", x.id === "v-" + v)); }
+  async function pay() {
+    const box = document.getElementById("result");
+    box.className = "result"; document.getElementById("pay").textContent = "Processing…";
+    const res = await payWithCard({ pan: document.getElementById("pan").value, amount: total(), merchant: b.name, category: "4511" });
+    document.getElementById("pay").textContent = "Pay and book";
+    window.lastPayment = res;
+    const ref = (res.authorization_id ?? "").replace(/[^A-Z0-9]/gi, "").slice(4, 10).toUpperCase();
+    paymentResult(box, res, `<b>You're booked.</b> Booking reference <span class="ref">${ref}</span><br>E-ticket sent to thandi@khaya.example`);
+  }
+  window.store = { select, show, total };
+  render();
+</script>
+</body>
+</html>

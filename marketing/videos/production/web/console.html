@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent console</title>
+<style>
+  :root { --panel:#0b1117; --line:#1c2733; --muted:#7f92a6; --text:#e6edf5; --ok:#4ade80; --bad:#f87171; --held:#facc15; }
+  * { box-sizing:border-box }
+  html, body { margin:0; height:100%; background:#05080d; color:var(--text);
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif }
+  .wrap { position:fixed; inset:0; display:grid; grid-template-columns:400px 1fr }
+  /* agent */
+  .agent { background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0 }
+  .agent header { padding:16px 18px 14px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px }
+  .avatar { width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#22c55e,#0ea5e9);
+    display:flex; align-items:center; justify-content:center; font-weight:800; color:#04120a }
+  .agent h1 { font-size:14.5px; margin:0; font-weight:700 }
+  .agent .sub { font-size:12px; color:var(--muted) }
+  .status { margin-left:auto; flex:none; white-space:nowrap; font:600 11px/1 ui-monospace,Menlo,monospace; padding:6px 9px; border-radius:999px;
+    border:1px solid #234; color:var(--muted) }
+  .status.on { color:var(--ok); border-color:rgba(74,222,128,.4); background:rgba(74,222,128,.07) }
+  #log { flex:1; overflow:hidden; padding:16px 16px 90px; display:flex; flex-direction:column; gap:11px; justify-content:flex-end }
+  .msg { flex:none; animation:in .35s ease-out both }
+  @keyframes in { from { opacity:0; transform:translateY(6px) } }
+  .restoring .msg { animation:none }
+  .user { align-self:flex-end; background:#16324a; border:1px solid #1f4566; padding:10px 13px; border-radius:13px 13px 3px 13px; max-width:92% }
+  .user .who { font-size:11px; color:#8fb3d1; margin-bottom:3px; font-weight:600 }
+  .say { color:#d6e1ec; padding:0 2px }
+  .say b { color:#fff }
+  .tool { border:1px solid var(--line); background:#0e1620; border-radius:10px; overflow:hidden }
+  .tool .head { display:flex; gap:8px; align-items:center; padding:7px 11px; font:600 12px ui-monospace,Menlo,monospace; color:#a8bccf;
+    border-bottom:1px solid var(--line) }
+  .tool .head .k { color:#7dd3fc } .tool .head .dot { width:7px; height:7px; border-radius:50%; background:#7dd3fc }
+  .tool pre { margin:0; padding:8px 11px; font:12px/1.55 ui-monospace,Menlo,monospace; color:#9fb3c8; white-space:pre-wrap; word-break:break-word }
+  .tool .res { border-top:1px dashed var(--line); color:#cfe0ee }
+  .tool.ok .res { color:var(--ok) } .tool.bad .res { color:var(--bad) } .tool.held .res { color:var(--held) }
+  .tool.acard .head .k { color:#4ade80 } .tool.acard .head .dot { background:#22c55e }
+  /* browser */
+  .browser { display:flex; flex-direction:column; min-width:0; background:#dfe4ea; padding:40px 10px 0 }
+  .chrome { background:#f4f6f8; border-radius:10px 10px 0 0; border:1px solid #c9d1d9; border-bottom:none;
+    padding:9px 12px; display:flex; align-items:center; gap:12px }
+  .chrome .dots span { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:6px }
+  .addr { flex:1; background:#fff; border:1px solid #d3dae2; border-radius:999px; padding:6px 14px; color:#334155;
+    font:13px ui-sans-serif,system-ui,sans-serif; display:flex; gap:8px; align-items:center }
+  .addr .lock { color:#16a34a; flex:none }
+  .agentbadge { font:600 11px/1 ui-sans-serif,system-ui,sans-serif; color:#0f172a; background:#e2e8f0; border-radius:999px; padding:6px 10px }
+  iframe { flex:1; width:100%; border:1px solid #c9d1d9; border-top:none; background:#fff; display:block }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="agent">
+    <header>
+      <div class="avatar">A</div>
+      <div><h1>ops-assistant</h1><div class="sub">Khaya Logistics · browsing agent</div></div>
+      <div class="status" id="status">idle</div>
+    </header>
+    <div id="log"></div>
+  </section>
+  <section class="browser">
+    <div class="chrome">
+      <div class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div>
+      <div class="addr"><svg class="lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span id="addr">about:blank</span></div>
+      <div class="agentbadge">controlled by agent</div>
+    </div>
+    <iframe id="web" src="about:blank"></iframe>
+  </section>
+</div>
+<script>
+  const log = document.getElementById("log");
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  // Every entry is kept so the transcript can be rebuilt after the recording
+  // steps away (to the dashboard) and comes back: agent.restore(agent.history).
+  const history = [];
+  function add(el) {
+    log.appendChild(el);
+    // Keep the newest entries in view; drop the oldest once the panel is full.
+    while (log.scrollHeight > log.clientHeight + 4 && log.children.length > 1) log.removeChild(log.firstChild);
+  }
+  window.agent = {
+    status(text, on = true) { const s = document.getElementById("status"); s.textContent = text; s.classList.toggle("on", on); },
+    history,
+    restore(entries) {
+      document.body.classList.add("restoring");
+      for (const [fn, args] of entries) window.agent[fn](...args);
+      document.body.classList.remove("restoring");
+    },
+    user(text) {
+      history.push(["user", [text]]);
+      const d = document.createElement("div"); d.className = "msg user";
+      d.innerHTML = `<div class="who">Thandi (Ops lead)</div>${esc(text)}`; add(d);
+    },
+    say(html) { history.push(["say", [html]]); const d = document.createElement("div"); d.className = "msg say"; d.innerHTML = html; add(d); },
+    tool(name, args, result, kind = "", acard = false) {
+      history.push(["tool", [name, args, result, kind, acard]]);
+      const d = document.createElement("div"); d.className = `msg tool ${kind} ${acard ? "acard" : ""}`;
+      d.innerHTML = `<div class="head"><span class="dot"></span><span class="k">${esc(name)}</span></div>` +
+        (args ? `<pre>${esc(args)}</pre>` : "") + (result ? `<pre class="res">${esc(result)}</pre>` : "");
+      add(d); return d;
+    },
+    go(path, shown) {
+      document.getElementById("addr").textContent = shown;
+      document.getElementById("web").src = path;
+    },
+    addr(shown) { document.getElementById("addr").textContent = shown; },
+  };
+</script>
+</body>
+</html>

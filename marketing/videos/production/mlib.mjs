@@ -27,7 +27,7 @@ export const FORMATS = {
   square: { width: 1080, height: 1080, zoom: 1.35 },
 };
 
-export async function studio(name, format = FORMATS.wide) {
+export async function studio(name, format = FORMATS.wide, { note } = {}) {
   const browser = await chromium.launch({
     executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
     args: ["--no-sandbox", "--force-color-profile=srgb", "--font-render-hinting=none"],
@@ -38,14 +38,21 @@ export async function studio(name, format = FORMATS.wide) {
     recordVideo: { dir: `${RAW}/${name}`, size: viewport },
     colorScheme: "dark",
   });
-  await ctx.addInitScript(chromeScript, { zoom: format.zoom });
+  await ctx.addInitScript(chromeScript, { zoom: format.zoom, note });
   const page = await ctx.newPage();
   page.__zoom = format.zoom;
+  page.__note = note;
   return { browser, ctx, page };
 }
 
-/** Injected into every page: zoom, caption bar, cursor, SANDBOX badge. Runs before the DOM exists, so it waits for it. */
-function chromeScript({ zoom }) {
+/**
+ * Injected into every page: zoom, caption bar, cursor, SANDBOX badge, and an
+ * optional second badge (`note`, e.g. a private-demo marker). Runs before the
+ * DOM exists, so it waits for it. Frames are skipped: the zoom on the top
+ * document already scales them, and the overlays belong to the top page.
+ */
+function chromeScript({ zoom, note }) {
+  if (window !== window.top) return;
   const boot = () => {
     if (!document.head || !document.body || document.getElementById("__mstyle")) return;
     const style = document.createElement("style");
@@ -68,6 +75,10 @@ function chromeScript({ zoom }) {
         font:700 10.5px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:1.6px;text-transform:uppercase;
         color:#facc15;background:rgba(20,16,4,.82);border:1px solid rgba(250,204,21,.45);
         padding:6px 11px;border-radius:999px;pointer-events:none}
+      #__note{position:fixed;top:12px;right:14px;z-index:2147483647;
+        font:700 10.5px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:1.2px;text-transform:uppercase;
+        color:#fecaca;background:rgba(40,6,6,.86);border:1px solid rgba(248,113,113,.55);
+        padding:6px 11px;border-radius:999px;pointer-events:none}
       #__cur{position:fixed;z-index:2147483646;width:22px;height:22px;margin:-11px 0 0 -11px;
         border-radius:50%;border:2.5px solid #22c55e;background:rgba(34,197,94,.28);
         pointer-events:none;opacity:0;transition:opacity .25s;
@@ -85,6 +96,12 @@ function chromeScript({ zoom }) {
     sbx.id = "__sbx";
     sbx.textContent = "Sandbox · demo data";
     document.body.appendChild(sbx);
+    if (note) {
+      const n = document.createElement("div");
+      n.id = "__note";
+      n.textContent = note;
+      document.body.appendChild(n);
+    }
     const cur = document.createElement("div");
     cur.id = "__cur";
     document.body.appendChild(cur);
@@ -203,7 +220,7 @@ export async function slide(page, inner, hold = 4000, { bg = SLIDE_BG } = {}) {
     <style>@keyframes a{to{opacity:1;transform:none}} .in{opacity:0;transform:translateY(12px);animation:a .6s forwards}
     .d1{animation-delay:.15s}.d2{animation-delay:.35s}.d3{animation-delay:.55s}.d4{animation-delay:.75s}.d5{animation-delay:.95s}.d6{animation-delay:1.15s}</style>
     </body>`);
-  await page.evaluate(chromeScript, { zoom: page.__zoom ?? 1 });
+  await page.evaluate(chromeScript, { zoom: page.__zoom ?? 1, note: page.__note });
   await wait(hold);
 }
 
@@ -234,7 +251,7 @@ export async function terminal(page, blocks, { title = "bash", hold = 1400, type
       </div>
       <div id="t" style="flex:1;overflow:hidden;padding:18px 22px;font-size:14px;line-height:1.66;color:#d7e2ef;white-space:pre-wrap;word-break:break-word"></div>
     </div></div></body>`);
-  await page.evaluate(chromeScript, { zoom: page.__zoom ?? 1 });
+  await page.evaluate(chromeScript, { zoom: page.__zoom ?? 1, note: page.__note });
   for (const b of blocks) {
     if (b.comment) {
       await page.evaluate((c) => {

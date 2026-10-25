@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Groceries</title>
+<link rel="stylesheet" href="/store.css">
+<script src="/brands.js"></script>
+<style>
+  .hero { background: var(--primary); color: #fff; padding: 14px 22px; display: flex; gap: 16px; align-items: center }
+  .hero b { font-size: 18px } .hero .eta { margin-left: auto; background: var(--accent); border-radius: 999px; padding: 6px 12px; font-weight: 800; font-size: 12.5px }
+  .chips { display: flex; gap: 8px; margin: 2px 0 14px } .chips span { background: #fff; border: 1px solid #e5e7eb; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; font-weight: 600 }
+  .chips span.on { background: var(--primary); color: #fff; border-color: var(--primary) }
+</style>
+</head>
+<body>
+<div id="strip" style="position:sticky;top:0;z-index:50"></div>
+<div class="top">
+  <div class="mark" id="mark"></div>
+  <div class="searchbar"><input placeholder="Search groceries" value=""><span>Search</span></div>
+  <button class="cartbtn" id="cartbtn" onclick="show('cart')">Trolley<i id="count">0</i></button>
+</div>
+<div class="hero"><b>Delivered to the office</b><span class="muted" style="color:#dbe4f3">Rosebank, Johannesburg · Business account</span><span class="eta" id="eta">60-min delivery</span></div>
+<div class="wrap">
+  <section class="view on" id="v-shop">
+    <div class="chips"><span class="on">Office pantry</span><span>Fresh produce</span><span>Bakery</span><span>Cleaning</span><span>Specials</span></div>
+    <div class="grid" id="grid"></div>
+  </section>
+  <section class="view" id="v-cart">
+    <div class="panel"><h2>Your trolley</h2><div id="lines"></div>
+      <div class="tot"><span>Delivery</span><span id="fee"></span></div>
+      <div class="tot big"><span>Total</span><span id="total"></span></div>
+      <button class="cta" id="tocheckout" onclick="show('checkout')">Checkout</button></div>
+  </section>
+  <section class="view" id="v-checkout">
+    <div class="panel"><h2>Pay with card</h2>
+      <div class="muted" style="margin-bottom:6px">Delivery to 12 Cradock Ave, Rosebank · slot: within 60 minutes</div>
+      <div class="tot big"><span>Order total</span><span id="paytotal"></span></div>
+      <div class="fields">
+        <label>Card number<input id="pan" autocomplete="off"></label>
+        <label>Expiry<input id="exp" autocomplete="off" placeholder="MM/YY"></label>
+      </div>
+      <button class="cta" id="pay" onclick="pay()">Place order</button>
+      <div class="result" id="result"></div></div>
+  </section>
+</div>
+<script>
+  const { b, note } = brandFor("grocery");
+  for (const [k, v] of Object.entries({ primary: b.primary, accent: b.accent, header: b.header, headerInk: b.headerInk })) document.documentElement.style.setProperty("--" + k, v);
+  document.getElementById("strip").innerHTML = affiliationStrip(b, note);
+  document.getElementById("mark").innerHTML = b.mark;
+  document.title = b.name;
+
+  // Shelf prices (cents), realistic for Johannesburg in 2026.
+  const ITEMS = [
+    { sku: "milk", n: "Full cream fresh milk 2L", s: "Dairy", c: 3699, e: "🥛" },
+    { sku: "bread", n: "Brown bread 700g", s: "Bakery", c: 1999, e: "🍞" },
+    { sku: "coffee", n: "Filter coffee, medium roast 1kg", s: "Coffee & tea", c: 18999, e: "☕" },
+    { sku: "rooibos", n: "Rooibos tea 80 bags", s: "Coffee & tea", c: 5499, e: "🫖" },
+    { sku: "bananas", n: "Bananas per kg", s: "Fresh produce", c: 2699, e: "🍌" },
+    { sku: "apples", n: "Granny Smith apples 1.5kg", s: "Fresh produce", c: 3999, e: "🍏" },
+    { sku: "sugar", n: "White sugar 2.5kg", s: "Pantry", c: 5299, e: "🧂" },
+    { sku: "rusks", n: "Buttermilk rusks 500g", s: "Pantry", c: 4999, e: "🍪" },
+  ];
+  const FEE = 3500;
+  const cart = new Map();
+  const total = () => [...cart].reduce((s, [sku, q]) => s + ITEMS.find((i) => i.sku === sku).c * q, 0) + (cart.size ? FEE : 0);
+
+  document.getElementById("grid").innerHTML = ITEMS.map((i) => `<div class="p" id="p-${i.sku}"><div class="img">${i.e}</div><div class="n">${i.n}</div><div class="s">${i.s}</div><div class="pr">${R(i.c)}</div><button class="add" data-sku="${i.sku}">Add</button></div>`).join("");
+  document.querySelectorAll(".add").forEach((btn) => btn.addEventListener("click", () => add(btn.dataset.sku)));
+
+  function add(sku) {
+    cart.set(sku, (cart.get(sku) ?? 0) + 1);
+    document.getElementById("p-" + sku).classList.add("added");
+    document.querySelector(`[data-sku="${sku}"]`).textContent = `In trolley · ${cart.get(sku)}`;
+    render();
+  }
+  function render() {
+    document.getElementById("count").textContent = [...cart.values()].reduce((a, b) => a + b, 0);
+    document.getElementById("lines").innerHTML = [...cart].map(([sku, q]) => { const i = ITEMS.find((x) => x.sku === sku); return `<div class="line"><span class="q">${q}×</span><span class="nm">${i.n}</span><span class="am">${R(i.c * q)}</span></div>`; }).join("");
+    document.getElementById("fee").textContent = R(FEE);
+    document.getElementById("total").textContent = R(total());
+    document.getElementById("paytotal").textContent = R(total());
+  }
+  function show(v) { document.querySelectorAll(".view").forEach((x) => x.classList.toggle("on", x.id === "v-" + v)); }
+  async function pay() {
+    const box = document.getElementById("result");
+    box.className = "result"; document.getElementById("pay").textContent = "Processing…";
+    const res = await payWithCard({ pan: document.getElementById("pan").value, amount: total(), merchant: b.name, category: "5411" });
+    document.getElementById("pay").textContent = "Place order";
+    window.lastPayment = res;
+    paymentResult(box, res, `<b>Order confirmed.</b> Your shopper is picking it now. Order #${(res.authorization_id ?? "").slice(5, 13).toUpperCase()}`);
+  }
+  window.store = { add, show, total };
+  render();
+</script>
+</body>
+</html>

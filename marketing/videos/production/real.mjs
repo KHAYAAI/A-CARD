@@ -108,3 +108,43 @@ export function startPos() {
 /** Rands from cents, the way the dashboard prints them. */
 export const zar = (c) => `R ${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const pretty = (v) => JSON.stringify(v, null, 2);
+
+let mcpHttpClient;
+/**
+ * Call a tool on the A-CARD MCP server over Streamable HTTP (apps/mcp's
+ * index-http.ts on :8788), the transport `claude mcp add --transport http`
+ * connects with. Pass no name to get the tool list the agent sees.
+ */
+export async function mcpHttp(name, args) {
+  if (!mcpHttpClient) {
+    const { Client } = await import(`${REPO}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js`);
+    const { StreamableHTTPClientTransport } = await import(`${REPO}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js`);
+    mcpHttpClient = new Client({ name: "demo-recorder", version: "1.0.0" });
+    await mcpHttpClient.connect(
+      new StreamableHTTPClientTransport(new URL(process.env.MCP_HTTP_URL ?? "http://localhost:8788/mcp"), {
+        requestInit: { headers: { authorization: `Bearer ${world().agentKey}` } },
+      }),
+    );
+  }
+  if (!name) return (await mcpHttpClient.listTools()).tools;
+  const result = await mcpHttpClient.callTool({ name, arguments: args });
+  const text = result.content.map((c) => c.text ?? "").join("");
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+export async function closeMcpHttp() {
+  await mcpHttpClient?.close().catch(() => {});
+  mcpHttpClient = undefined;
+}
+
+/** Run the real `claude` CLI in a scratch HOME (so the recording never touches a real config). Secrets are masked. */
+export async function claudeCli(args) {
+  const home = "/tmp/acard-mcp-home";
+  mkdirSync(home, { recursive: true });
+  const { stdout, stderr } = await run("claude", args, { cwd: home, env: { ...process.env, HOME: home, NO_COLOR: "1" }, timeout: 90000 }).catch((e) => e);
+  return `${stdout ?? ""}${stderr ?? ""}`.replaceAll(world().agentKey, "ak_…").replace(ANSI, "").trim();
+}

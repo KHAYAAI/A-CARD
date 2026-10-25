@@ -11,7 +11,12 @@ declare -A NAMES=(
   [clip-approval]="A-CARD-clip-approval"
   [clip-blocked]="A-CARD-clip-blocked"
   [clip-search]="A-CARD-clip-search"
+  [agent-shopping-public]="A-CARD-agent-shopping"
+  # Private client-demo cut (recreated real-retailer pages). Lands in the
+  # git-ignored private/ folder and must never be published.
+  [agent-shopping-private]="private/A-CARD-agent-shopping-PRIVATE-client-demo"
 )
+mkdir -p "$OUT/private"
 
 for take in "${!NAMES[@]}"; do
   src=$(ls -t "$OUT/.raw/$take"/*.webm 2>/dev/null | head -1)
