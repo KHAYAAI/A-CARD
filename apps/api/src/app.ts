@@ -40,6 +40,55 @@ import type { AfpLedgerPort } from "./afp/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
 import { deliverMerchantWebhook, type MerchantWebhookEvent } from "./merchant/webhooks.js";
 import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
+import {
+  currencySchema,
+  registerSchema,
+  loginSchema,
+  mfaVerifySchema,
+  mfaCodeSchema,
+  mfaDisableSchema,
+  ssoSetupSchema,
+  ssoAuthorizeSchema,
+  issueKeySchema,
+  addMemberSchema,
+  signupSchema,
+  departmentSchema,
+  policySchema,
+  linkWalletSchema,
+  fundSchema,
+  payfastCheckoutSchema,
+  createCardSchema,
+  simulateAuthSchema,
+  issuerEventSchema,
+  registerMerchantSchema,
+  kybDecisionSchema,
+  updateMerchantSchema,
+  upsertItemSchema,
+  restateSchema,
+  reportPurchaseSchema,
+  acknowledgePurchaseSchema,
+  disputePurchaseSchema,
+  screenWalletSchema,
+  inboundTransferSchema,
+  placeOrderSchema,
+  advanceOrderSchema,
+  merchantWebhookSchema,
+  operatingHoursSchema,
+  merchantApiKeySchema,
+  catalogSyncSchema,
+  bulkRestateSchema,
+  blocklistEntrySchema,
+  monitorTransactionSchema,
+  complianceOverrideSchema,
+  amlScreenSchema,
+  searchQuerySchema,
+  portalInviteSchema,
+  createIntentSchema,
+  executeIntentSchema,
+  requestUploadSchema,
+  confirmUploadSchema,
+} from "./schemas.js";
+import { buildOpenApi } from "./openapi.js";
 
 /**
  * A-CARD REST API.
@@ -220,361 +269,6 @@ type Env = {
 };
 
 const SESSION_COOKIE = "acard_session";
-const currencySchema = z.enum(["ZAR", "USD", "NGN", "KES"]);
-
-const accountTypeSchema = z.enum(["personal", "enterprise"]);
-
-const registerSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1),
-  password: z.string().min(8),
-  currency: currencySchema.optional(),
-  account_type: accountTypeSchema.optional(),
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-  account_holder_id: z.string().optional(),
-});
-
-const mfaVerifySchema = z.object({
-  challenge_token: z.string().min(1),
-  code: z.string().min(1),
-});
-
-const mfaCodeSchema = z.object({ code: z.string().min(1) });
-
-const mfaDisableSchema = z.object({ password: z.string().min(1), code: z.string().min(1) });
-
-const ssoSetupSchema = z.object({
-  /** Override the domain routed to this org's SSO connection; defaults to the caller's own email domain. */
-  domain: z.string().min(1).optional(),
-});
-
-const ssoAuthorizeSchema = z.object({ email: z.string().email() });
-
-const issueKeySchema = z.object({
-  name: z.string().default("api key"),
-  scope: z.enum(["full", "read_only"]).default("full"),
-  /** Cumulative card budget this key may provision, in minor units. */
-  spend_cap_cents: z.number().int().positive().optional(),
-});
-
-const addMemberSchema = z.object({
-  email: z.string().email(),
-  name: z.string().optional(),
-  password: z.string().min(8).optional(),
-  role: z.enum(["owner", "admin", "member", "viewer"]),
-});
-
-const signupSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1),
-  currency: currencySchema.optional(),
-  account_type: accountTypeSchema.optional(),
-});
-
-const departmentSchema = z.object({
-  name: z.string().min(1),
-  monthly_budget: z.number().int().positive(),
-  lead: z.string().optional(),
-});
-
-const policySchema = z.object({
-  blocked_merchant_categories: z.array(z.string()).default([]),
-  approval_threshold: z.number().int().positive().optional(),
-});
-
-const chainSchema = z.enum(["ethereum", "polygon", "solana"]);
-
-const linkWalletSchema = z.object({
-  chain: chainSchema,
-  address: z.string().min(1),
-  connector: z.enum(["metamask", "walletconnect", "coinbase", "other"]),
-  label: z.string().optional(),
-});
-
-const fundSchema = z.object({
-  amount: z.number().int().positive(),
-  currency: currencySchema.optional(),
-  reference: z.string().optional(),
-});
-
-const payfastCheckoutSchema = z.object({
-  amount: z.number().int().positive(),
-});
-
-const createCardSchema = z.object({
-  label: z.string().optional(),
-  currency: currencySchema.optional(),
-  department_id: z.string().optional(),
-  single_use: z.boolean().optional(),
-  limits: z
-    .object({
-      per_transaction: z.number().int().positive().optional(),
-      total: z.number().int().positive().optional(),
-      velocity: z
-        .object({ amount: z.number().int().positive(), window_seconds: z.number().int().positive() })
-        .optional(),
-    })
-    .optional(),
-  allowed_merchant_categories: z.array(z.string()).optional(),
-  approval_threshold: z.number().int().positive().optional(),
-});
-
-const simulateAuthSchema = z.object({
-  card_id: z.string(),
-  amount: z.number().int().positive(),
-  // Defaults to the card's own currency once the card is loaded.
-  currency: currencySchema.optional(),
-  merchant: z.object({
-    name: z.string(),
-    category: z.string().default("5999"),
-    country: z.string().optional(),
-  }),
-});
-
-const issuerEventSchema = z.object({
-  id: z.string(),
-  type: z.enum(["authorization.request", "transaction.capture", "authorization.reversal"]),
-  data: z.record(z.unknown()),
-});
-
-
-// ---- A-MERCHANT ------------------------------------------------------------
-
-const addressSchema = z.object({
-  addressLine: z.string().min(1),
-  city: z.string().min(1),
-  province: z.string().min(1),
-  country: z.string().min(1).default("ZA"),
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-});
-
-const agentAccessSchema = z.enum(["open", "allowlist"]);
-const availabilitySchema = z.enum(["in_stock", "low_stock", "out_of_stock", "made_to_order"]);
-
-const registerMerchantSchema = z.object({
-  name: z.string().min(1),
-  trading_name: z.string().optional(),
-  merchant_category_code: z.string().min(3),
-  address: addressSchema,
-  service_radius_km: z.number().min(0).optional(),
-  currency: currencySchema.optional(),
-  agent_access: agentAccessSchema.optional(),
-  allowed_account_holder_ids: z.array(z.string()).optional(),
-  kyb: z.object({
-    registration_number: z.string().min(1),
-    vat_number: z.string().optional(),
-    contact_email: z.string().email(),
-    contact_phone: z.string().optional(),
-  }),
-});
-
-const kybDecisionSchema = z.object({
-  status: z.enum(["pending_kyb", "verified", "suspended"]),
-  note: z.string().optional(),
-});
-
-const updateMerchantSchema = z.object({
-  name: z.string().min(1).optional(),
-  trading_name: z.string().optional(),
-  address: addressSchema.optional(),
-  service_radius_km: z.number().min(0).optional(),
-  agent_access: agentAccessSchema.optional(),
-  allowed_account_holder_ids: z.array(z.string()).optional(),
-  merchant_category_code: z.string().min(3).optional(),
-});
-
-const upsertItemSchema = z.object({
-  sku: z.string().min(1),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  unit: z.string().optional(),
-  unit_price_cents: z.number().int().nonnegative(),
-  currency: currencySchema.optional(),
-  availability: availabilitySchema.optional(),
-  quantity_available: z.number().int().nonnegative().optional(),
-  lead_time_days: z.number().int().nonnegative().optional(),
-});
-
-const restateSchema = z.object({
-  availability: availabilitySchema,
-  quantity_available: z.number().int().nonnegative().optional(),
-});
-
-const reportPurchaseSchema = z.object({
-  item_id: z.string(),
-  quantity: z.number().int().positive(),
-  /** Evidence the merchant can reconcile against their own statement — not a payment this platform settles. */
-  card_transaction_id: z.string().optional(),
-});
-
-const acknowledgePurchaseSchema = z.object({
-  note: z.string().max(500).optional(),
-  /** Optional, and the whole point — see the route comment. */
-  restate: restateSchema.optional(),
-});
-
-const disputePurchaseSchema = z.object({
-  note: z.string().min(1).max(500),
-});
-
-const screenWalletSchema = z.object({
-  address: z.string().min(1),
-  chain: z.enum(["BTC", "ETH", "LTC", "XRP", "BCH", "DOGE", "TRX", "SOL", "MATIC", "BNB", "USDT", "USDC"]),
-  direction: z.enum(["inbound", "outbound"]).optional(),
-});
-
-const inboundTransferSchema = z.object({
-  txid: z.string().min(1),
-  wallet_address: z.string().min(1),
-  chain: z.string().optional(),
-  currency: z.string().optional(),
-  amount: z.string().optional(),
-  originating_vasp: z.object({ name: z.string().optional(), lei: z.string().optional(), travel_address: z.string().optional() }).optional(),
-});
-
-const placeOrderSchema = z.object({
-  lines: z.array(z.object({ item_id: z.string(), quantity: z.number().int().positive() })).min(1).max(100),
-  fulfilment: z.object({
-    method: z.enum(["collection", "delivery"]),
-    address: z.string().optional(),
-    needed_by: z.string().optional(),
-  }),
-  card_transaction_id: z.string().optional(),
-  note: z.string().max(500).optional(),
-});
-
-const advanceOrderSchema = z.object({
-  status: z.enum(["accepted", "rejected", "preparing", "ready", "dispatched", "delivered"]),
-  note: z.string().max(500).optional(),
-  promised_at: z.string().optional(),
-  tracking_reference: z.string().max(120).optional(),
-});
-
-const merchantWebhookSchema = z.object({
-  url: z.string().url(),
-  events: z.array(z.string()).max(20).optional(),
-});
-
-const operatingHoursSchema = z.record(
-  z.enum(["0", "1", "2", "3", "4", "5", "6"]),
-  z.union([z.object({ open: z.string(), close: z.string() }), z.null()]),
-);
-
-const merchantApiKeySchema = z.object({
-  name: z.string().min(1).max(80),
-  scope: z.enum(["read_only", "read_write"]).optional(),
-});
-
-/**
- * A POS sync speaks in the merchant's OWN SKUs, never A-CARD's internal item
- * ids — the integrating system has no reason to learn a second identifier for
- * something it already names.
- */
-const catalogSyncSchema = z.object({
-  items: z
-    .array(
-      z.object({
-        sku: z.string().min(1),
-        name: z.string().min(1),
-        description: z.string().optional(),
-        unit: z.string().optional(),
-        unit_price_cents: z.number().int().nonnegative(),
-        currency: currencySchema.optional(),
-        availability: availabilitySchema.optional(),
-        quantity_available: z.number().int().nonnegative().optional(),
-        lead_time_days: z.number().int().nonnegative().optional(),
-      }),
-    )
-    .min(1)
-    .max(500),
-});
-
-const bulkRestateSchema = z.object({
-  items: z
-    .array(
-      z.object({
-        sku: z.string().min(1),
-        availability: availabilitySchema,
-        quantity_available: z.number().int().nonnegative().optional(),
-      }),
-    )
-    .min(1)
-    .max(500),
-});
-
-const blocklistEntrySchema = z.object({
-  entry_type: z.enum(["user", "business", "email", "phone", "document", "ip_address"]),
-  value: z.string().min(1),
-  reason: z.string().max(500).optional(),
-});
-
-const monitorTransactionSchema = z.object({
-  transaction_id: z.string().min(1),
-  card_id: z.string().min(1),
-  amount: z.number().int().positive(),
-  currency: currencySchema,
-  merchant_name: z.string().min(1),
-  merchant_category: z.string().min(1),
-  merchant_country: z.string().optional(),
-  occurred_at: z.string().optional(),
-});
-
-const complianceOverrideSchema = z.object({
-  status: z.enum(["approved", "declined"]),
-  reason: z.string().min(1).max(500),
-});
-
-const amlScreenSchema = z.object({
-  full_name: z.string().min(1),
-  entity_type: z.enum(["person", "company"]).optional(),
-  date_of_birth: z.string().optional(),
-  /** ISO 3166-1 alpha-2. Alpha-3 is rejected by the provider. */
-  nationality: z.string().length(2).optional(),
-  include_adverse_media: z.boolean().optional(),
-  ongoing_monitoring: z.boolean().optional(),
-});
-
-const searchQuerySchema = z.object({
-  text: z.string().optional(),
-  merchant_category_codes: z.array(z.string()).optional(),
-  lat: z.number().min(-90).max(90).optional(),
-  lng: z.number().min(-180).max(180).optional(),
-  radius_km: z.number().positive().optional(),
-  quantity: z.number().int().positive().optional(),
-  max_total_cents: z.number().int().positive().optional(),
-  max_lead_time_days: z.number().int().nonnegative().optional(),
-  max_inventory_age_hours: z.number().positive().optional(),
-  currency: currencySchema.optional(),
-  limit: z.number().int().positive().max(100).optional(),
-});
-
-const portalInviteSchema = z.object({ role: z.enum(["owner", "staff"]).optional() });
-
-const railIdSchema = z.enum(["card", "x402", "stablecoin"]);
-const createIntentSchema = z.object({
-  amount: z.number().int().positive(),
-  currency: currencySchema,
-  purpose: z.string().min(1),
-  counterparty: z.string().min(1),
-  allowed_rails: z.array(railIdSchema).optional(),
-});
-const executeIntentSchema = z.object({ rail: railIdSchema.optional() });
-
-const KYB_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
-const requestUploadSchema = z.object({
-  filename: z.string().min(1).max(200),
-  content_type: z.enum(KYB_DOCUMENT_TYPES),
-});
-const confirmUploadSchema = z.object({
-  key: z.string().min(1),
-  filename: z.string().min(1).max(200),
-  content_type: z.enum(KYB_DOCUMENT_TYPES),
-});
 
 export function createApp(config: AppConfig) {
   const { issuerWebhookSecret, onMutation, dashboardUrl, merchants, merchantAuth } = config;
@@ -595,11 +289,13 @@ export function createApp(config: AppConfig) {
     try {
       const merchant = await merchants.get(merchantId);
       if (!merchant.webhook) return;
-      // The stored hash is the lookup key, not the signing key. The plaintext
-      // secret was handed over once at registration; we sign with the hash so
-      // nothing reversible is kept, and the merchant verifies with what they
-      // were given. (See the webhook docs in README — this is the one place
-      // the scheme differs from the issuer webhook's shared secret.)
+      // The plaintext `mwh_` secret is handed over once at registration and
+      // never stored; only its SHA-256 hex digest is. That digest is what
+      // signs, so the HMAC key a merchant must verify with is
+      // sha256(secret) as lowercase hex — NOT the secret itself. This is the
+      // one place the scheme differs from the issuer webhook's shared secret;
+      // it is documented in docs/reference/webhooks.md, handled by the SDK's
+      // verifyMerchantWebhook(), and pinned by an end-to-end test.
       const result = await deliverMerchantWebhook(merchant, event, merchant.webhook.hashedSecret, {
         fetchImpl: config.merchantWebhookFetch,
       });
@@ -714,6 +410,11 @@ export function createApp(config: AppConfig) {
   }
 
   app.get("/health", (c) => c.json({ ok: true, service: "acard-api" }));
+
+  // The machine-readable API reference. Built once, lazily — it is derived
+  // from the same zod schemas the routes validate with (see openapi.ts).
+  let openApiDocument: Record<string, unknown> | undefined;
+  app.get("/openapi.json", (c) => c.json((openApiDocument ??= buildOpenApi())));
 
   // ---- public: signup -------------------------------------------------------
 

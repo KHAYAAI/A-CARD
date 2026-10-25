@@ -24,6 +24,20 @@ episode covers, and the points worth pausing on.
 
 **Total runtime: 20 minutes 10 seconds.** Watch in order — each one assumes the previous.
 
+### Written series: building on A-CARD
+
+The videos show the platform. These pick up where episode 9 leaves off and are about building on it from code. Every output shown was captured from a real run, and every snippet is backed by a runnable example that `npm test` exercises against a live API.
+
+| # | Tutorial | You'll build |
+|---|---|---|
+| 10 | [Your first agent with the SDK](written/10-your-first-agent-with-the-sdk.md) | A fuel card, a purchase, two correct declines, the audit trail |
+| 11 | [Finding supply with A-MERCHANT](written/11-finding-supply-with-a-merchant.md) | Search → one defensible supplier → a card that can buy exactly that |
+| 12 | [Handling approvals in an agent](written/12-handling-approvals-in-an-agent.md) | Wait for a human, retry once, stop cleanly when denied |
+| 13 | [Connecting a merchant's till](written/13-connecting-a-merchant-pos.md) | Stock sync by SKU, verified order webhooks, accept and promise |
+| 14 | [From sandbox to production](written/14-from-sandbox-to-production.md) | What changes, what doesn't, and what isn't live yet |
+
+Reference material lives in [`docs/`](../docs/README.md): the quickstart, API reference, errors, webhooks and framework integrations.
+
 ---
 
 ## Episode 1 — What A-CARD actually is

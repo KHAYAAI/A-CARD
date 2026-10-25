@@ -1,0 +1,19 @@
+{
+  "name": "@acard/examples",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable example agents and integrations for the A-CARD API.",
+  "scripts": {
+    "seed": "tsx seed-demo-world.ts",
+    "claude-fuel-agent": "tsx 02-claude-fuel-agent.ts",
+    "procurement-agent": "tsx 03-procurement-agent.ts",
+    "approval-aware-agent": "tsx 04-approval-aware-agent.ts",
+    "merchant-pos-sync": "tsx 05-merchant-pos-sync.ts"
+  },
+  "dependencies": {
+    "@acard/sdk": "*",
+    "@anthropic-ai/sdk": "^1.3.0",
+    "zod": "^3.23.0"
+  }
+}

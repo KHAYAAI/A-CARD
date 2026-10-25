@@ -20,7 +20,8 @@
     "@workos-inc/node": "^10.10.0",
     "hono": "^4.6.0",
     "pg": "^8.13.0",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

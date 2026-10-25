@@ -6,15 +6,17 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "examples"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
-    "typecheck": "tsc -p packages/core && tsc -p apps/api && tsc -p apps/mcp && tsc -p apps/cli",
+    "typecheck": "tsc -p packages/core && tsc -p apps/api && tsc -p apps/mcp && tsc -p apps/cli && tsc -p packages/sdk && tsc -p examples",
     "dev:api": "npm run dev -w @acard/api",
     "dev:mcp": "npm run dev -w @acard/mcp",
-    "dev:dashboard": "npm run dev -w @acard/dashboard"
+    "dev:dashboard": "npm run dev -w @acard/dashboard",
+    "openapi": "tsx apps/api/scripts/write-openapi.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

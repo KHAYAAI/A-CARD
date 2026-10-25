@@ -11,10 +11,17 @@ export interface CliConfig {
 const dir = join(homedir(), ".acard");
 const file = join(dir, "config.json");
 
+/**
+ * ~/.acard/config.json, with ACARD_API_URL and ACARD_API_KEY taking precedence
+ * — the same variables the MCP server reads, so one environment drives both.
+ */
 export function loadConfig(): CliConfig {
-  if (!existsSync(file)) return { apiUrl: process.env.ACARD_API_URL ?? "http://localhost:8787" };
-  const parsed = JSON.parse(readFileSync(file, "utf8")) as CliConfig;
-  return { ...parsed, apiUrl: process.env.ACARD_API_URL ?? parsed.apiUrl };
+  const parsed: Partial<CliConfig> = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as CliConfig) : {};
+  return {
+    ...parsed,
+    apiUrl: process.env.ACARD_API_URL ?? parsed.apiUrl ?? "http://localhost:8787",
+    apiKey: process.env.ACARD_API_KEY ?? parsed.apiKey,
+  };
 }
 
 export function saveConfig(config: CliConfig): void {

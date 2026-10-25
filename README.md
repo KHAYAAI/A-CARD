@@ -4,6 +4,8 @@ Virtual cards for AI agents, over MCP — an Agentcard.sh-style platform targeti
 
 Agents get scoped, budget-capped, single-use virtual cards funded from a prepaid wallet — each org holds **ZAR and USD wallets side by side** (and any other supported currency), fully independent, with cards drawing from their own currency. Every charge runs through a real-time authorization path: rules engine → human-in-the-loop approval → double-entry ledger hold. The sandbox ships with a mock issuer (deterministic `4242…` PANs) so the whole system runs locally with zero external dependencies; the issuer integration point is a single signed webhook, designed to be swapped for a real BIN-sponsored partner (Ukheshe/EFT Eclipse, Paymentology, Sudo Africa, Bridgecard, Stripe Issuing).
 
+**Building on A-CARD?** Start with the [developer docs](docs/README.md): [quickstart](docs/quickstart.md), [API reference](docs/api/reference.md) ([OpenAPI](docs/api/openapi.json)), [TypeScript SDK](packages/sdk/README.md), [examples](examples/README.md), [errors and declines](docs/reference/errors.md), [webhooks](docs/reference/webhooks.md), [integrations](docs/integrations/README.md), [versioning](docs/versioning.md) and the [changelog](CHANGELOG.md).
+
 State is durable and **multi-writer** (a Postgres row-level ledger with per-wallet locks, so several API instances can share one database), access is guarded by both a programmatic API key and human **login with role-based access control**, it's billable (PayFast USD subscriptions), and it's deployable to a hardened AWS stack today (private subnets, WAF, optional TLS) — see `infra/cdk`.
 
 ## Layout
@@ -13,6 +15,9 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 | `packages/core` | Domain logic: compliance records and money-movement gating (`compliance.ts`), AFP routing engine + cross-rail ledger (`afp.ts`), A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
 | `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), AFP's routing/execution routes and rail adapters (`src/rails/` — card, x402, stablecoin), KYC/KYB/AML through Didit with a deterministic offline fallback (`src/compliance/`), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
 | `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
+| `packages/sdk` | `@acard/sdk`, the TypeScript client: automatic idempotency and safe retries, typed declines and errors, approval waiting, a merchant POS client, webhook verification. Tested over real HTTP. |
+| `examples` | Runnable agents: curl, Claude (tool runner), procurement, approval-aware Python, merchant POS sync, and `seed-demo-world.ts`. All run by `npm test`. |
+| `docs/api` | OpenAPI 3.1 spec generated from the route validators (`npm run openapi`), its markdown reference, and a Redoc page. Served live at `GET /openapi.json`. |
 | `apps/cli` | `acard` CLI (commander + clack): signup, fund, create-card, approvals console, purchase simulation |
 | `apps/dashboard` | Next.js console: login/register, role-aware wallet stats, card management, transaction history, approve/deny queue, team management, A-MERCHANT operator console (onboarding, KYB, discovery preview) — plus a separate `/merchant` route: the merchant's own portal (WorkOS AuthKit login, catalog, one-tap restate) |
 | `infra/cdk` | AWS CDK stack: VPC, RDS Postgres, ALB, three Fargate services — `npx cdk deploy` and you have a live URL |
@@ -21,9 +26,10 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 459 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 483 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + orders + purchase notices, AFP routing/ledger,
-                         # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e.
+                         # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e,
+                         # OpenAPI drift + response-shape checks, the SDK and every example over real HTTP.
                          # 63 of them are Postgres integration tests, skipped unless
                          # ACARD_TEST_DATABASE_URL points at a reachable database.
 npm run dev:api          # sandbox API on :8787 (in-memory unless DATABASE_URL is set)
@@ -653,7 +659,8 @@ The sandbox's `POST /v1/simulate/purchase` plays the issuer: it signs a webhook 
 
 ```bash
 npm test              # vitest across all workspaces
-npm run typecheck     # tsc over core, api, mcp, cli
+npm run typecheck     # tsc over core, api, mcp, cli, sdk, examples
+npm run openapi       # regenerate docs/api/openapi.json and docs/api/reference.md
 npm run dev:api       # API on :8787
 npm run dev:mcp       # MCP server, stdio (needs ACARD_API_KEY)
 npm run dev:dashboard # Next.js on :3000

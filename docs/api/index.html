@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A-CARD API Reference</title>
+    <style>
+      body { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Interactive reference for openapi.json in this folder. Serve the folder
+      over HTTP (a browser will not fetch a sibling file from file://):
+
+        npx serve docs/api        # or any static host: S3, Netlify, GitHub Pages
+
+      Or point it at a running API, which serves the same document live:
+      <redoc spec-url="http://localhost:8787/openapi.json">
+    -->
+    <redoc spec-url="./openapi.json" hide-download-button="false" expand-responses="200,201"></redoc>
+    <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"></script>
+  </body>
+</html>
