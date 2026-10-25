@@ -19,3 +19,8 @@ tutorials/production/scenes.json
 # Personal Claude Code settings (permissions etc). Shared settings belong in
 # .claude/settings.json, which stays tracked.
 .claude/settings.local.json
+
+# Marketing video raw takes and recording state
+marketing/videos/.raw/
+marketing/videos/production/node_modules/
+marketing/videos/production/world.json
