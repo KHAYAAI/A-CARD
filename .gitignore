@@ -25,3 +25,5 @@ marketing/videos/.raw/
 marketing/videos/production/node_modules/
 marketing/videos/production/world.json
 marketing/videos/private/
+marketing/recording-kit/.kit/
+marketing/recording-kit/edit/.edit-work/

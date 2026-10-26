@@ -39,6 +39,10 @@ What's live in the agent-shopping video: `claude mcp add` and `claude mcp list` 
 
 **Not made yet:** 9:16 vertical recuts. The square clips work on LinkedIn and X; vertical versions need their own layout rather than a crop.
 
+## Real Claude Desktop recordings
+
+The videos above drive the agent with a script. To record a real Claude Desktop session, with Claude choosing every step against the sandbox, use the kit in [`../recording-kit/`](../recording-kit/). It covers setup, prompts, a shot list, recording settings, a consent form, and the editing pipeline that adds the badges and end card.
+
 ## How they're made
 
 `production/` holds everything:

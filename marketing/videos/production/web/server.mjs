@@ -50,6 +50,22 @@ async function issuerEvent(type, data) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
+/**
+ * With ACARD_LOOKUP_KEY set (the recording kit does this), a PAN nobody
+ * registered is matched to the org's active card with the same last four
+ * digits, so an agent that types the card in on its own (Claude in Chrome)
+ * can pay. Sandbox only: a real issuer resolves the full PAN on its books.
+ */
+async function lookupCard(pan) {
+  const key = process.env.ACARD_LOOKUP_KEY;
+  const digits = String(pan ?? "").replace(/\D/g, "");
+  if (!key || digits.length < 12) return undefined;
+  const res = await fetch(`${ACARD}/v1/cards`, { headers: { authorization: `Bearer ${key}` } });
+  const { cards = [] } = await res.json().catch(() => ({}));
+  const match = cards.filter((c) => c.status === "active" && c.last4 === digits.slice(-4));
+  return match.length === 1 ? match[0].id : undefined;
+}
+
 const json = (res, status, value) => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(value));
@@ -73,7 +89,7 @@ createServer(async (req, res) => {
 
   if (req.method === "POST" && url.pathname === "/api/pay") {
     const { pan, amount, merchant, category } = await readBody(req);
-    const cardId = cardsByPan.get(String(pan ?? "").replace(/\s+/g, ""));
+    const cardId = cardsByPan.get(String(pan ?? "").replace(/\s+/g, "")) ?? (await lookupCard(pan));
     if (!cardId) return json(res, 200, { approved: false, decline_reason: "card_not_found" });
     const authorizationId = `auth_${randomUUID()}`;
     const decision = await issuerEvent("authorization.request", {

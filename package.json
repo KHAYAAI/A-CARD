@@ -16,7 +16,9 @@
     "dev:api": "npm run dev -w @acard/api",
     "dev:mcp": "npm run dev -w @acard/mcp",
     "dev:dashboard": "npm run dev -w @acard/dashboard",
-    "openapi": "tsx apps/api/scripts/write-openapi.ts"
+    "openapi": "tsx apps/api/scripts/write-openapi.ts",
+    "recording-kit": "tsx marketing/recording-kit/kit.ts",
+    "recording-kit:check": "tsx marketing/recording-kit/rehearse.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

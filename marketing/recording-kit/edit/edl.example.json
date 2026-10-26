@@ -1,0 +1,43 @@
+{
+  "output": "A-CARD-claude-desktop.mp4",
+  "privacy": "public",
+  "badgePosition": "top-right",
+  "audio": false,
+  "title": {
+    "kicker": "Real Claude Desktop session · sandbox",
+    "title": "Claude buys the cement.<br>A person approves it.",
+    "sub": "Nothing scripted: Claude chose every step, and A-CARD answered live.",
+    "seconds": 4.5
+  },
+  "clips": [
+    {
+      "file": "S1-01.mov",
+      "in": "0:02",
+      "out": "0:10",
+      "captions": [{ "at": 0.4, "dur": 5, "text": "A-CARD connects to Claude Desktop as an MCP server. <b>Nine tools, one agent key.</b>" }]
+    },
+    {
+      "file": "S2-01.mov",
+      "in": "0:03",
+      "out": "1:40",
+      "speed": 2,
+      "captions": [
+        { "at": 0.5, "text": "Claude searches A-MERCHANT for verified suppliers near Germiston." },
+        { "at": 9, "text": "It makes a single-use card for exactly R57 500, building suppliers only." },
+        { "at": 20, "text": "Over R25 000, so A-CARD <b>holds it for a person</b>. Claude says so and waits." }
+      ],
+      "blur": [{ "x": 640, "y": 610, "w": 420, "h": 44, "from": 9, "to": 20 }]
+    },
+    {
+      "file": "S2-02.mov",
+      "in": "0:01",
+      "out": "0:13",
+      "captions": [{ "at": 0.5, "text": "Thandi sees the supplier, the amount and the card, and <b>approves</b>." }]
+    }
+  ],
+  "end": {
+    "line": "Let agents buy. Keep the say.",
+    "note": "Recorded in Claude Desktop against the A-CARD sandbox.",
+    "seconds": 5
+  }
+}
