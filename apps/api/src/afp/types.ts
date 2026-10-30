@@ -13,7 +13,13 @@ import type { AfpIntent, AfpTransaction, RailExecutionResult, RailFinality, Rail
 export interface AfpLedgerPort {
   recordIntent(intent: AfpIntent): Promise<void>;
   getIntent(id: string): Promise<AfpIntent>;
-  beginExecution(intent: AfpIntent, rail: RailId, finality: RailFinality, idempotencyKey: string): Promise<AfpTransaction>;
+  beginExecution(
+    intent: AfpIntent,
+    rail: RailId,
+    finality: RailFinality,
+    idempotencyKey: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AfpTransaction>;
   completeExecution(transactionId: string, result: RailExecutionResult): Promise<AfpTransaction>;
   markReconciling(transactionId: string, note: string): Promise<AfpTransaction>;
   markFailed(transactionId: string, note: string): Promise<AfpTransaction>;

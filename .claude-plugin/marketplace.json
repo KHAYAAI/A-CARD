@@ -1,0 +1,14 @@
+{
+  "name": "a-card",
+  "description": "A-CARD plugins: scoped virtual cards, x402 payments and A-MERCHANT supply search for AI agents.",
+  "owner": { "name": "A-CARD", "url": "https://github.com/khayaai/a-card" },
+  "plugins": [
+    {
+      "name": "acard",
+      "displayName": "A-CARD",
+      "description": "Give your agent a card it can't run away with: per-task cards, limits, human approvals, x402 API payments.",
+      "category": "productivity",
+      "source": "./plugins/acard"
+    }
+  ]
+}

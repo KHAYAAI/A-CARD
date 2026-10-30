@@ -54,6 +54,16 @@ suite("PostgresAfpLedger (multi-writer)", () => {
     expect(fetched).toEqual(i);
   });
 
+  it("keeps a transaction's metadata (x402's exact price and card) across the round trip", async () => {
+    const i = intent({ amount: 1, counterparty: "https://api.example.com/report" });
+    await ledger.recordIntent(i);
+    const metadata = { cardId: "card_1", host: "api.example.com", priceAtomic: "1000", chargedCents: 1, network: "eip155:84532" };
+    const tx = await ledger.beginExecution(i, "x402", { kind: "instant" }, "meta-key", metadata);
+    expect(tx.metadata).toEqual(metadata);
+    expect((await ledger.get(tx.id)).metadata).toEqual(metadata);
+    expect((await ledger.list("ah_1")).find((t) => t.id === tx.id)?.metadata).toEqual(metadata);
+  });
+
   it("an unknown intent 404s", async () => {
     await expect(ledger.getIntent("afpi_nope")).rejects.toThrow();
   });

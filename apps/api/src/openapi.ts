@@ -297,6 +297,39 @@ export const ROUTES: RouteDoc[] = [
     response: { schema: z.object({ transaction: z.unknown() }) },
   }),
   r("get", "/v1/afp/transactions", "AFP", "Your AFP ledger", { auth: "tenant", requires: "afp", response: { schema: z.object({ transactions: z.array(z.unknown()) }) } }),
+  r("post", "/v1/afp/x402/pay", "AFP", "Pay for a resource over x402, governed by a card", {
+    auth: "tenant",
+    role: "member",
+    requires: "afp",
+    body: S.x402PaySchema,
+    description:
+      "Mounted when AFP's x402 rail is configured. Fetches `url`; on HTTP 402 it reads the price (x402 v2 `PAYMENT-REQUIRED` header or a v1 body), and pays only if the card allows it: categories empty or including `x402`, the host in `x402AllowedHosts` (if set), the exact price within `max_usd` and the card's per-transaction limit, and the cents it adds to the card's x402 tab through the normal authorization (limits, approval thresholds, org policy, department budget, balance). Prices below a cent are charged as they add up to whole cents. Requires an `Idempotency-Key`. A decline or a hold is a `200` with `status` `declined` or `held`; an outcome the server left unknown is a `202` with `status` `reconciling`, and its hold stays until it is reconciled. URLs must be HTTPS on a public host.",
+    response: {
+      schema: z.object({
+        status: z.enum(["paid", "free", "held", "declined", "failed", "reconciling"]),
+        decline_reason: str.optional(),
+        approval_id: str.optional(),
+        message: str.optional(),
+        price: z.object({ amount_atomic: str, usd: str, network: str, asset: str, pay_to: str }).optional(),
+        charged_cents: z.number().int().optional(),
+        tab: z.object({ card_id: str, payments: z.number().int(), paid_atomic: str, paid_usd: str, charged_cents: z.number().int(), credit_atomic: str }).optional(),
+        settlement: z.object({ success: z.boolean(), transaction: str.optional(), network: str.optional(), payer: str.optional(), errorReason: str.optional() }).optional(),
+        transaction: z.unknown().optional(),
+        resource: z.object({ status: z.number().int(), content_type: str.optional(), bytes: z.number().int(), body: str.optional(), truncated: z.boolean().optional() }).optional(),
+        replayed: z.boolean().optional(),
+      }),
+    },
+  }),
+  r("get", "/v1/afp/x402/tabs/{cardId}", "AFP", "A card's x402 tab", {
+    auth: "tenant",
+    requires: "afp",
+    description: "Exact USDC a card has paid over x402 (atomic units, millionths of a dollar), the whole cents charged to it, and the unused credit.",
+    response: {
+      schema: z.object({
+        tab: z.object({ card_id: str, payments: z.number().int(), paid_atomic: str, paid_usd: str, charged_cents: z.number().int(), credit_atomic: str }),
+      }),
+    },
+  }),
 
   // ---- compliance -----------------------------------------------------------------------------------------------
   r("post", "/v1/compliance/verify", "Compliance", "Start identity or business verification", { auth: "tenant", role: "admin", idempotent: true, requires: "compliance", response: { schema: z.object({ verification: z.unknown() }).passthrough() } }),

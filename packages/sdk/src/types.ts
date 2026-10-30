@@ -64,6 +64,8 @@ export interface Card {
   /** MCC allow-list. Empty means every category. */
   allowedMerchantCategories: string[];
   approvalThreshold?: number;
+  /** Hosts this card may pay over x402. Unset = any host. */
+  x402AllowedHosts?: string[];
   last4: string;
   expiryMonth: number;
   expiryYear: number;
@@ -222,6 +224,44 @@ export interface CreateCardInput {
   };
   allowed_merchant_categories?: string[];
   approval_threshold?: number;
+  /** Hosts this card may pay over x402, e.g. `["api.example.com", ".example.org"]`. Unset = any host. */
+  x402_allowed_hosts?: string[];
+}
+
+export interface X402PayInput {
+  card_id: string;
+  /** The resource to fetch. Must be https:// on a public host. */
+  url: string;
+  /** The most this one call may cost, in dollars as a decimal string (USDC has 6 decimals), e.g. "0.05". */
+  max_usd: string;
+  method?: "GET" | "POST";
+  body?: unknown;
+}
+
+export interface X402Tab {
+  card_id: string;
+  payments: number;
+  /** Exact USDC paid over x402, in atomic units (millionths of a dollar). */
+  paid_atomic: string;
+  paid_usd: string;
+  /** Whole cents charged to the card for it. */
+  charged_cents: number;
+  /** Charged but not yet used, atomic units — what the next payment draws on first. */
+  credit_atomic: string;
+}
+
+export interface X402PayResult {
+  status: "paid" | "free" | "held" | "declined" | "failed" | "reconciling";
+  decline_reason?: string;
+  approval_id?: string;
+  message?: string;
+  price?: { amount_atomic: string; usd: string; network: string; asset: string; pay_to: string };
+  charged_cents?: number;
+  tab?: X402Tab;
+  settlement?: { success: boolean; transaction?: string; network?: string; payer?: string; errorReason?: string };
+  transaction?: Record<string, unknown>;
+  resource?: { status: number; content_type?: string; bytes: number; body?: string; truncated?: boolean };
+  replayed?: boolean;
 }
 
 export interface SimulatePurchaseInput {

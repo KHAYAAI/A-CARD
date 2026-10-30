@@ -12,11 +12,13 @@
 - **[Errors and decline reasons](reference/errors.md)**: every code, what it means, what to do
 - **[Webhooks and events](reference/webhooks.md)**: issuer, merchant, Slack, verification and PayFast
 - **[TypeScript SDK](../packages/sdk/README.md)**: `@acard/sdk`
+- **[x402](x402.md)**: paying for API calls per request, under a card's limits and approvals
 
 ## Integrations
 
 - **[Claude](integrations/claude.md)**: Desktop, Code, the API tool runner, the MCP connector
 - **[OpenAI Agents SDK](integrations/openai-agents-sdk.md)** · **[LangChain](integrations/langchain.md)** · **[Vercel AI SDK](integrations/vercel-ai-sdk.md)**
+- **[Plugins for Claude Code, Codex and OpenClaw](../plugins/acard/README.md)**: install the A-CARD MCP server in one step
 
 ## Policy
 

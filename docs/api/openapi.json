@@ -2131,6 +2131,15 @@
                   "approval_threshold": {
                     "type": "integer",
                     "exclusiveMinimum": 0
+                  },
+                  "x402_allowed_hosts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "maxItems": 50
                   }
                 },
                 "additionalProperties": false
@@ -7774,6 +7783,322 @@
         "x-acard-requires": "afp"
       }
     },
+    "/v1/afp/x402/pay": {
+      "post": {
+        "operationId": "post_afp_x402_pay",
+        "tags": [
+          "AFP"
+        ],
+        "summary": "Pay for a resource over x402, governed by a card",
+        "description": "Mounted when AFP's x402 rail is configured. Fetches `url`; on HTTP 402 it reads the price (x402 v2 `PAYMENT-REQUIRED` header or a v1 body), and pays only if the card allows it: categories empty or including `x402`, the host in `x402AllowedHosts` (if set), the exact price within `max_usd` and the card's per-transaction limit, and the cents it adds to the card's x402 tab through the normal authorization (limits, approval thresholds, org policy, department budget, balance). Prices below a cent are charged as they add up to whole cents. Requires an `Idempotency-Key`. A decline or a hold is a `200` with `status` `declined` or `held`; an outcome the server left unknown is a `202` with `status` `reconciling`, and its hold stays until it is reconciled. URLs must be HTTPS on a public host.\n\nRequires the `member` role or higher. Read-only API keys act as `viewer`.\n\nMounted only when AFP is explicitly enabled (ACARD_ENABLE_AFP=true).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "paid",
+                        "free",
+                        "held",
+                        "declined",
+                        "failed",
+                        "reconciling"
+                      ]
+                    },
+                    "decline_reason": {
+                      "type": "string"
+                    },
+                    "approval_id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "object",
+                      "properties": {
+                        "amount_atomic": {
+                          "type": "string"
+                        },
+                        "usd": {
+                          "type": "string"
+                        },
+                        "network": {
+                          "type": "string"
+                        },
+                        "asset": {
+                          "type": "string"
+                        },
+                        "pay_to": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "amount_atomic",
+                        "usd",
+                        "network",
+                        "asset",
+                        "pay_to"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "charged_cents": {
+                      "type": "integer"
+                    },
+                    "tab": {
+                      "type": "object",
+                      "properties": {
+                        "card_id": {
+                          "type": "string"
+                        },
+                        "payments": {
+                          "type": "integer"
+                        },
+                        "paid_atomic": {
+                          "type": "string"
+                        },
+                        "paid_usd": {
+                          "type": "string"
+                        },
+                        "charged_cents": {
+                          "type": "integer"
+                        },
+                        "credit_atomic": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "card_id",
+                        "payments",
+                        "paid_atomic",
+                        "paid_usd",
+                        "charged_cents",
+                        "credit_atomic"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "settlement": {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean"
+                        },
+                        "transaction": {
+                          "type": "string"
+                        },
+                        "network": {
+                          "type": "string"
+                        },
+                        "payer": {
+                          "type": "string"
+                        },
+                        "errorReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "success"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "transaction": {},
+                    "resource": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer"
+                        },
+                        "content_type": {
+                          "type": "string"
+                        },
+                        "bytes": {
+                          "type": "integer"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "bytes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "card_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2048
+                  },
+                  "max_usd": {
+                    "type": "string",
+                    "pattern": "^\\d+(\\.\\d{1,6})?$"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "GET",
+                      "POST"
+                    ]
+                  },
+                  "body": {}
+                },
+                "required": [
+                  "card_id",
+                  "url",
+                  "max_usd"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-min-role": "member",
+        "x-acard-requires": "afp"
+      }
+    },
+    "/v1/afp/x402/tabs/{cardId}": {
+      "get": {
+        "operationId": "get_afp_x402_tabs_by_cardId",
+        "tags": [
+          "AFP"
+        ],
+        "summary": "A card's x402 tab",
+        "description": "Exact USDC a card has paid over x402 (atomic units, millionths of a dollar), the whole cents charged to it, and the unused credit.\n\nMounted only when AFP is explicitly enabled (ACARD_ENABLE_AFP=true).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cardId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tab": {
+                      "type": "object",
+                      "properties": {
+                        "card_id": {
+                          "type": "string"
+                        },
+                        "payments": {
+                          "type": "integer"
+                        },
+                        "paid_atomic": {
+                          "type": "string"
+                        },
+                        "paid_usd": {
+                          "type": "string"
+                        },
+                        "charged_cents": {
+                          "type": "integer"
+                        },
+                        "credit_atomic": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "card_id",
+                        "payments",
+                        "paid_atomic",
+                        "paid_usd",
+                        "charged_cents",
+                        "credit_atomic"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "tab"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "afp"
+      }
+    },
     "/v1/compliance/verify": {
       "post": {
         "operationId": "post_compliance_verify",
@@ -9345,6 +9670,13 @@
             "type": "integer",
             "description": "Integer minor units (cents)"
           },
+          "x402AllowedHosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hosts this card may pay over x402. Unset means any host."
+          },
           "last4": {
             "type": "string"
           },
@@ -9463,6 +9795,13 @@
           "approvalThreshold": {
             "type": "integer",
             "description": "Integer minor units (cents)"
+          },
+          "x402AllowedHosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hosts this card may pay over x402. Unset means any host."
           },
           "last4": {
             "type": "string"

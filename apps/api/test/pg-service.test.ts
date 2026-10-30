@@ -185,6 +185,27 @@ suite("PostgresPlatformService (multi-writer ledger)", () => {
     expect((await service.getCard(single.id))!.status).toBe("closed");
   });
 
+  it("persists a card's x402 allowed hosts and authorizes an x402 charge like any other", async () => {
+    const holder = await service.signup({ email: "x402@example.co.za", name: "X402", currency: "USD" });
+    await service.fundWallet(holder.id, 10_000, "USD");
+    const card = await service.createCard({
+      accountHolderId: holder.id,
+      currency: "USD",
+      singleUse: false,
+      allowedMerchantCategories: ["x402"],
+      x402AllowedHosts: ["API.Example.com", ".data.example"],
+    });
+    expect(card.x402AllowedHosts).toEqual(["api.example.com", ".data.example"]);
+    expect((await service.getCard(card.id))?.x402AllowedHosts).toEqual(["api.example.com", ".data.example"]);
+
+    const ok = await service.authorize({ authorizationId: "x402auth_pg_1", cardId: card.id, amount: 3, currency: "USD", merchant: { name: "x402 · api.example.com", category: "x402" } });
+    expect(ok.approved).toBe(true);
+    await service.capture("x402auth_pg_1");
+    const fuel = await service.authorize({ authorizationId: "x402auth_pg_2", cardId: card.id, amount: 3, currency: "USD", merchant: { name: "Fuel", category: "5541" } });
+    expect(fuel.declineReason).toBe("merchant_category_not_allowed");
+    expect((await service.walletBalance(holder.id, "USD")).available).toBe(10_000 - 3);
+  });
+
   it("holds independent ZAR and USD wallets against the row-level ledger", async () => {
     const holder = await service.signup({ email: `mc${Date.now()}${Math.random()}@x.co.za`, name: "MC", currency: "ZAR" });
     await service.fundWallet(holder.id, 100_000, "ZAR");

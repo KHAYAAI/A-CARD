@@ -10,7 +10,7 @@ Amounts are in rand. A-CARD works in cents, so you'll see Claude pass `5750000` 
 
 > What can you do with A-CARD? Three short bullet points.
 
-**Claude should** answer from the 9 tools it now has: create and close cards with limits, pay at merchants, find suppliers on A-MERCHANT, read the wallet and transactions. It probably calls nothing yet.
+**Claude should** answer from the 10 tools it now has: create and close cards with limits, pay at merchants, find suppliers on A-MERCHANT, read the wallet and transactions. It probably calls nothing yet.
 
 > What's in our wallet?
 

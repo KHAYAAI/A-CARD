@@ -40,4 +40,4 @@ Things to know:
 - **Stdio is for servers you run.** In a serverless deployment (e.g. Vercel functions), you can't spawn a child process per request. Point the MCP client at a deployed A-CARD's `/mcp` over HTTP instead, with the API key as a bearer header, or call [`@acard/sdk`](../../packages/sdk/README.md) from your own `tool()` definitions.
 - Close the client in `finally`. Each stdio client is a child process.
 
-**Verified** with `ai` 7.0.153, `@ai-sdk/mcp` 2.0.84 and `@ai-sdk/anthropic` 4.0.88: the code above typechecks, and the client connected to the real A-CARD MCP server, listed all nine tools and executed `get_wallet`. The `generateText` call needs a model provider key and wasn't executed.
+**Verified** with `ai` 7.0.153, `@ai-sdk/mcp` 2.0.84 and `@ai-sdk/anthropic` 4.0.88: the code above typechecks, and the client connected to the real A-CARD MCP server, listed all nine tools then available and executed `get_wallet`. The `generateText` call needs a model provider key and wasn't executed.

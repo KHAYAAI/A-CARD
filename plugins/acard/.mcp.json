@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "acard": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/acard-mcp.mjs"],
+      "env": {
+        "ACARD_API_KEY": "${user_config.api_key}",
+        "ACARD_API_URL": "${user_config.api_url}"
+      }
+    }
+  }
+}

@@ -243,3 +243,69 @@ describe("A-MERCHANT: search, order, and the merchant's own integration", () => 
     expect((await shop.orders.list({ status: "accepted" })).map((o) => o.id)).toContain(order.id);
   });
 });
+
+describe("x402", () => {
+  it("pays for a resource over x402 through a card, and reports the card's tab", async () => {
+    const { AfpLedger } = await import("@acard/core");
+    const { InMemoryAfpLedger } = await import("../../../apps/api/src/afp/index.js");
+    const { InMemoryPlatformService } = await import("../../../apps/api/src/service/index.js");
+    const { createX402Payer, SANDBOX_SIGNER, USDC_BY_NETWORK } = await import("../../../apps/api/src/x402/index.js");
+
+    // A v2 x402 server: 402 with PAYMENT-REQUIRED, then 200 with PAYMENT-RESPONSE.
+    const requirement = {
+      scheme: "exact",
+      network: "eip155:84532",
+      amount: "2500",
+      asset: USDC_BY_NETWORK["eip155:84532"]!.address,
+      payTo: "0x1111111111111111111111111111111111111111",
+      maxTimeoutSeconds: 60,
+    };
+    const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64");
+    const resource: Server = createServer((req, res) => {
+      if (!req.headers["payment-signature"]) {
+        res.writeHead(402, { "payment-required": b64({ x402Version: 2, accepts: [requirement] }) });
+        return res.end("{}");
+      }
+      res.writeHead(200, { "content-type": "application/json", "payment-response": b64({ success: true, transaction: "0xfeed", network: requirement.network }) });
+      res.end(JSON.stringify({ answer: 42 }));
+    });
+    await new Promise<void>((r) => resource.listen(0, "127.0.0.1", r));
+    const resourceUrl = `http://127.0.0.1:${(resource.address() as AddressInfo).port}/answer`;
+
+    const x402Platform = new Platform();
+    const service = new InMemoryPlatformService(x402Platform);
+    const ledger = new InMemoryAfpLedger(new AfpLedger());
+    const x402Config = { signer: SANDBOX_SIGNER, payerAddress: "0x2222222222222222222222222222222222222222", networks: ["eip155:84532"], allowPrivateNetworks: true };
+    const app = createApp({ platform: service, issuerWebhookSecret: "whsec_sdk_x402", afp: { ledger, rails: [], x402: createX402Payer(service, ledger, x402Config) } });
+    let server!: ReturnType<typeof serve>;
+    const url = await new Promise<string>((resolve) => {
+      server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, (info) => resolve(`http://127.0.0.1:${info.port}`));
+    });
+    try {
+      const { api_key } = await Acard.signup({ email: "x402@sdk.example", name: "x402 SDK", currency: "USD" }, { baseUrl: url });
+      const client = new Acard({ apiKey: api_key, baseUrl: url });
+      await client.wallet.fund(1_000, "USD");
+      const card = await client.cards.create({ currency: "USD", single_use: false, x402_allowed_hosts: ["127.0.0.1"] });
+      expect(card.x402AllowedHosts).toEqual(["127.0.0.1"]);
+
+      const result = await client.x402.pay({ card_id: card.id, url: resourceUrl, max_usd: "0.01" });
+      expect(result).toMatchObject({ status: "paid", charged_cents: 1, price: { usd: "0.002500" }, settlement: { transaction: "0xfeed" } });
+      expect(JSON.parse(result.resource!.body!)).toEqual({ answer: 42 });
+
+      const tooMuch = await client.x402.pay({ card_id: card.id, url: resourceUrl, max_usd: "0.001" });
+      expect(tooMuch).toMatchObject({ status: "declined", decline_reason: "x402_price_above_max" });
+
+      expect(await client.x402.tab(card.id)).toEqual({
+        card_id: card.id,
+        payments: 1,
+        paid_atomic: "2500",
+        paid_usd: "0.002500",
+        charged_cents: 1,
+        credit_atomic: "7500",
+      });
+    } finally {
+      server.close();
+      resource.close();
+    }
+  });
+});

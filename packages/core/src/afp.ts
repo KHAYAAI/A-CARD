@@ -247,6 +247,13 @@ export interface AfpTransaction {
   reversalReason?: string;
   /** History of every status transition, for audit — same discipline as A-CARD's own transaction/event log. */
   history: Array<{ status: AfpTransactionStatus; at: string; note?: string }>;
+  /**
+   * Rail-specific facts recorded when execution begins, never changed after.
+   * x402 keeps the exact on-chain price here (atomic units), the card that
+   * authorized it and the cents actually charged to that card — the facts a
+   * minor-units `amount` can't carry for a payment smaller than a cent.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface RailExecutionResult {
@@ -286,7 +293,13 @@ export class AfpLedger {
    * ledger write never happened" failure mode impossible: the pending
    * record exists first, and everything downstream only ever transitions it.
    */
-  beginExecution(intent: AfpIntent, rail: RailId, finality: RailFinality, idempotencyKey: string): AfpTransaction {
+  beginExecution(
+    intent: AfpIntent,
+    rail: RailId,
+    finality: RailFinality,
+    idempotencyKey: string,
+    metadata?: Record<string, unknown>,
+  ): AfpTransaction {
     const existingId = this.byIdempotencyKey.get(idempotencyKey);
     if (existingId) return this.get(existingId);
 
@@ -304,6 +317,7 @@ export class AfpLedger {
       createdAt: now,
       updatedAt: now,
       history: [{ status: "pending", at: now }],
+      metadata,
     };
     this.transactions.set(tx.id, tx);
     this.byIdempotencyKey.set(idempotencyKey, tx.id);

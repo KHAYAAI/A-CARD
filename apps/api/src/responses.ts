@@ -63,6 +63,7 @@ const cardFields = {
   limits: cardLimits,
   allowedMerchantCategories: z.array(z.string()).describe("MCC allow-list. Empty means all categories."),
   approvalThreshold: cents.optional(),
+  x402AllowedHosts: z.array(z.string()).optional().describe("Hosts this card may pay over x402. Unset means any host."),
   last4: z.string(),
   expiryMonth: z.number().int(),
   expiryYear: z.number().int(),

@@ -20,6 +20,9 @@ import type {
   SignupResult,
   SimulatePurchaseInput,
   WalletBalance,
+  X402PayInput,
+  X402PayResult,
+  X402Tab,
 } from "./types.js";
 
 export interface AcardOptions extends Omit<HttpOptions, "token" | "baseUrl"> {
@@ -51,6 +54,7 @@ export class Acard {
   readonly sandbox: SandboxResource;
   readonly merchants: MerchantsResource;
   readonly orders: OrdersResource;
+  readonly x402: X402Resource;
 
   constructor(options: AcardOptions) {
     if (!options?.apiKey) throw new Error("Acard: apiKey is required");
@@ -62,6 +66,7 @@ export class Acard {
     this.sandbox = new SandboxResource(this.http);
     this.merchants = new MerchantsResource(this.http);
     this.orders = new OrdersResource(this.http);
+    this.x402 = new X402Resource(this.http);
   }
 
   /**
@@ -191,6 +196,25 @@ class SandboxResource {
    */
   async purchase(input: SimulatePurchaseInput, options: RequestOptions = {}): Promise<PurchaseResult> {
     return this.http.request<PurchaseResult>("POST", "/v1/simulate/purchase", { body: input, ...options });
+  }
+}
+
+class X402Resource {
+  constructor(private readonly http: Http) {}
+
+  /**
+   * Fetch a URL that charges over x402, paying from the card's budget. The
+   * card's limits, categories (must allow `x402`), allowed hosts and approval
+   * threshold all apply. A decline or a hold is a normal result, not an error.
+   * Requires AFP with x402 enabled on the API.
+   */
+  async pay(input: X402PayInput, options: RequestOptions = {}): Promise<X402PayResult> {
+    return this.http.request<X402PayResult>("POST", "/v1/afp/x402/pay", { body: input, ...options });
+  }
+
+  /** What a card has paid over x402 and been charged for it. */
+  async tab(cardId: string): Promise<X402Tab> {
+    return (await this.http.request<{ tab: X402Tab }>("GET", `/v1/afp/x402/tabs/${encodeURIComponent(cardId)}`)).tab;
   }
 }
 

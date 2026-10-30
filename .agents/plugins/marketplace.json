@@ -1,0 +1,20 @@
+{
+  "name": "a-card",
+  "interface": {
+    "displayName": "A-CARD"
+  },
+  "plugins": [
+    {
+      "name": "acard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/acard"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

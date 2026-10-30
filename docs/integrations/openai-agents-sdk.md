@@ -42,4 +42,4 @@ Things to know:
 - `env` is passed to the child process. Set `ACARD_API_KEY` there rather than baking a key into code.
 - To restrict which A-CARD tools the agent can see (for example, a reporting agent that should never pay), use the server's `toolFilter` option and allow only `get_wallet`, `list_cards` and `list_transactions`. Better still, give that agent a **`read_only` API key**. Then even if a payment tool were exposed, A-CARD would refuse it with `forbidden`.
 
-**Verified** with `@openai/agents` 0.21.0: the code above typechecks, and `MCPServerStdio` connected to the real A-CARD MCP server and listed all nine tools. The agent run itself needs an OpenAI API key and wasn't executed.
+**Verified** with `@openai/agents` 0.21.0: the code above typechecks, and `MCPServerStdio` connected to the real A-CARD MCP server and listed all nine tools then available. The agent run itself needs an OpenAI API key and wasn't executed.

@@ -49,4 +49,4 @@ Things to know:
 - Any LangChain chat model works. Swap the model string for your provider (e.g. `"openai:gpt-4.1"`) and install its integration package.
 - Each tool returns MCP content blocks. A decline is a successful tool call whose text contains `"approved": false` and a `decline_reason`, so the model sees it and can explain it.
 
-**Verified** with `langchain-mcp-adapters` 0.3.2 and `langchain` 1.4.7: `MultiServerMCPClient` connected to the real A-CARD MCP server over stdio, `get_tools()` returned all nine tools, `get_wallet` executed and returned the live balance, and `create_agent` is exported from `langchain.agents`. The agent run itself needs a model provider key and wasn't executed.
+**Verified** with `langchain-mcp-adapters` 0.3.2 and `langchain` 1.4.7: `MultiServerMCPClient` connected to the real A-CARD MCP server over stdio, `get_tools()` returned all nine tools then available, `get_wallet` executed and returned the live balance, and `create_agent` is exported from `langchain.agents`. The agent run itself needs a model provider key and wasn't executed.

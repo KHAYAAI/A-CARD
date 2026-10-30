@@ -102,6 +102,19 @@ export class AcardClient {
     return this.request<{ merchant: any; items: any[] }>(`/v1/merchants/${id}`);
   }
 
+  /** Pay for a URL over x402, governed by a card. A fresh Idempotency-Key per call, so a retry after approval is a new attempt. */
+  payX402(input: { card_id: string; url: string; max_usd: string; method?: "GET" | "POST"; body?: unknown }) {
+    return this.request<Record<string, any>>("/v1/afp/x402/pay", {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: { "idempotency-key": `mcp_${crypto.randomUUID()}` },
+    });
+  }
+
+  x402Tab(cardId: string) {
+    return this.request<{ tab: Record<string, unknown> }>(`/v1/afp/x402/tabs/${encodeURIComponent(cardId)}`);
+  }
+
   simulatePurchase(input: Record<string, unknown>) {
     return this.request<{
       authorization_id: string;

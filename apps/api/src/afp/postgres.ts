@@ -56,6 +56,7 @@ const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+  ALTER TABLE acard_afp_transactions ADD COLUMN IF NOT EXISTS metadata JSONB;
   CREATE UNIQUE INDEX IF NOT EXISTS acard_afp_tx_idem_idx ON acard_afp_transactions(idempotency_key);
   CREATE INDEX IF NOT EXISTS acard_afp_tx_holder_idx ON acard_afp_transactions(account_holder_id);
 `;
@@ -90,6 +91,7 @@ function rowToTransaction(row: any): AfpTransaction {
     settledAt: row.settled_at?.toISOString(),
     reversalReason: row.reversal_reason ?? undefined,
     history: row.history,
+    metadata: row.metadata ?? undefined,
   };
 }
 
@@ -147,7 +149,13 @@ export class PostgresAfpLedger implements AfpLedgerPort {
     return rowToIntent(rows[0]);
   }
 
-  async beginExecution(intent: AfpIntent, rail: RailId, finality: RailFinality, idempotencyKey: string): Promise<AfpTransaction> {
+  async beginExecution(
+    intent: AfpIntent,
+    rail: RailId,
+    finality: RailFinality,
+    idempotencyKey: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AfpTransaction> {
     // A plain SELECT-then-INSERT has a real race here: two concurrent
     // requests carrying the same key can both see "not found" before either
     // commits. The UNIQUE index on idempotency_key is the actual guarantee
@@ -158,11 +166,14 @@ export class PostgresAfpLedger implements AfpLedgerPort {
     const history = [{ status: "pending", at: now.toISOString() }];
     const inserted = await this.pool.query(
       `INSERT INTO acard_afp_transactions
-         (id, intent_id, account_holder_id, rail, amount, currency, status, finality, idempotency_key, history, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$10)
+         (id, intent_id, account_holder_id, rail, amount, currency, status, finality, idempotency_key, history, created_at, updated_at, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$10,$11)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING *`,
-      [id, intent.id, intent.accountHolderId, rail, intent.amount, intent.currency, JSON.stringify(finality), idempotencyKey, JSON.stringify(history), now],
+      [
+        id, intent.id, intent.accountHolderId, rail, intent.amount, intent.currency, JSON.stringify(finality), idempotencyKey,
+        JSON.stringify(history), now, metadata ? JSON.stringify(metadata) : null,
+      ],
     );
     if (inserted.rows[0]) return rowToTransaction(inserted.rows[0]);
 

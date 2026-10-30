@@ -1,0 +1,12 @@
+{
+  "id": "acard",
+  "name": "A-CARD",
+  "description": "Scoped virtual cards for AI agents: pay at merchants and x402 APIs under limits and human approvals, and find verified suppliers on A-MERCHANT.",
+  "version": "0.1.0",
+  "skills": ["skills/acard"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

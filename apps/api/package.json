@@ -17,6 +17,7 @@
     "@aws-sdk/client-s3": "^3.1123.0",
     "@aws-sdk/s3-request-presigner": "^3.1123.0",
     "@hono/node-server": "^1.13.0",
+    "@noble/curves": "^2.4.0",
     "@workos-inc/node": "^10.10.0",
     "hono": "^4.6.0",
     "pg": "^8.13.0",
@@ -24,6 +25,7 @@
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "viem": "^2.57.5"
   }
 }

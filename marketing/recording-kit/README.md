@@ -54,7 +54,7 @@ The supplier names and department leads are fictional.
 ## 3. Connect Claude Desktop
 
 1. **Quit Claude Desktop completely and reopen it.** Closing the window isn't enough: on macOS press ⌘Q, and on Windows use Quit from the tray icon. **Do this after every kit restart**, because each take has a new key.
-2. Check that A-CARD is connected. In Claude Desktop's settings, the Developer section lists `acard` as running, and the tools menu in the chat box lists its 9 tools.
+2. Check that A-CARD is connected. In Claude Desktop's settings, the Developer section lists `acard` as running, and the tools menu in the chat box lists its 10 tools.
 3. Run the pre-flight check in a second terminal:
 
 ```bash

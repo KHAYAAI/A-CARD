@@ -711,6 +711,7 @@ Accepts an `Idempotency-Key` header: a repeat with the same body replays the ori
 | `limits.velocity.window_seconds` | integer | yes |  |
 | `allowed_merchant_categories` | string[] |  |  |
 | `approval_threshold` | integer |  |  |
+| `x402_allowed_hosts` | string[] |  |  |
 
 **Response `201`**
 
@@ -2584,6 +2585,96 @@ Mounted only when AFP is explicitly enabled (ACARD_ENABLE_AFP=true).
 
 Errors: `401`, `403` — see [errors.md](../reference/errors.md).
 
+### `POST /v1/afp/x402/pay`
+
+**Pay for a resource over x402, governed by a card**
+
+Mounted when AFP's x402 rail is configured. Fetches `url`; on HTTP 402 it reads the price (x402 v2 `PAYMENT-REQUIRED` header or a v1 body), and pays only if the card allows it: categories empty or including `x402`, the host in `x402AllowedHosts` (if set), the exact price within `max_usd` and the card's per-transaction limit, and the cents it adds to the card's x402 tab through the normal authorization (limits, approval thresholds, org policy, department budget, balance). Prices below a cent are charged as they add up to whole cents. Requires an `Idempotency-Key`. A decline or a hold is a `200` with `status` `declined` or `held`; an outcome the server left unknown is a `202` with `status` `reconciling`, and its hold stays until it is reconciled. URLs must be HTTPS on a public host.
+
+Requires the `member` role or higher. Read-only API keys act as `viewer`.
+
+Mounted only when AFP is explicitly enabled (ACARD_ENABLE_AFP=true).
+
+- **Auth:** `apiKey` or `session`
+- **Minimum role:** `member`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `card_id` | string | yes |  |
+| `url` | string | yes |  |
+| `max_usd` | string | yes |  |
+| `method` | `GET` \| `POST` |  |  |
+| `body` | object |  |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `status` | `paid` \| `free` \| `held` \| `declined` \| `failed` \| `reconciling` | yes |  |
+| `decline_reason` | string |  |  |
+| `approval_id` | string |  |  |
+| `message` | string |  |  |
+| `price` | object |  |  |
+| `price.amount_atomic` | string | yes |  |
+| `price.usd` | string | yes |  |
+| `price.network` | string | yes |  |
+| `price.asset` | string | yes |  |
+| `price.pay_to` | string | yes |  |
+| `charged_cents` | integer |  |  |
+| `tab` | object |  |  |
+| `tab.card_id` | string | yes |  |
+| `tab.payments` | integer | yes |  |
+| `tab.paid_atomic` | string | yes |  |
+| `tab.paid_usd` | string | yes |  |
+| `tab.charged_cents` | integer | yes |  |
+| `tab.credit_atomic` | string | yes |  |
+| `settlement` | object |  |  |
+| `settlement.success` | boolean | yes |  |
+| `settlement.transaction` | string |  |  |
+| `settlement.network` | string |  |  |
+| `settlement.payer` | string |  |  |
+| `settlement.errorReason` | string |  |  |
+| `transaction` | object |  |  |
+| `resource` | object |  |  |
+| `resource.status` | integer | yes |  |
+| `resource.content_type` | string |  |  |
+| `resource.bytes` | integer | yes |  |
+| `resource.body` | string |  |  |
+| `resource.truncated` | boolean |  |  |
+| `replayed` | boolean |  |  |
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/afp/x402/tabs/{cardId}`
+
+**A card's x402 tab**
+
+Exact USDC a card has paid over x402 (atomic units, millionths of a dollar), the whole cents charged to it, and the unused credit.
+
+Mounted only when AFP is explicitly enabled (ACARD_ENABLE_AFP=true).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `cardId` | path | string | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `tab` | object | yes |  |
+| `tab.card_id` | string | yes |  |
+| `tab.payments` | integer | yes |  |
+| `tab.paid_atomic` | string | yes |  |
+| `tab.paid_usd` | string | yes |  |
+| `tab.charged_cents` | integer | yes |  |
+| `tab.credit_atomic` | string | yes |  |
+
+Errors: `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
 ## Compliance
 
 KYC, KYB, AML screening, cases, blocklists and transaction monitoring.
@@ -3106,6 +3197,7 @@ Errors: `400`, `401`, `403`, `409` — see [errors.md](../reference/errors.md).
 | `limits.velocity.windowSeconds` | integer | yes |  |
 | `allowedMerchantCategories` | string[] | yes | MCC allow-list. Empty means all categories. |
 | `approvalThreshold` | integer |  | Integer minor units (cents) |
+| `x402AllowedHosts` | string[] |  | Hosts this card may pay over x402. Unset means any host. |
 | `last4` | string | yes |  |
 | `expiryMonth` | integer | yes |  |
 | `expiryYear` | integer | yes |  |
@@ -3134,6 +3226,7 @@ Errors: `400`, `401`, `403`, `409` — see [errors.md](../reference/errors.md).
 | `limits.velocity.windowSeconds` | integer | yes |  |
 | `allowedMerchantCategories` | string[] | yes | MCC allow-list. Empty means all categories. |
 | `approvalThreshold` | integer |  | Integer minor units (cents) |
+| `x402AllowedHosts` | string[] |  | Hosts this card may pay over x402. Unset means any host. |
 | `last4` | string | yes |  |
 | `expiryMonth` | integer | yes |  |
 | `expiryYear` | integer | yes |  |

@@ -28,6 +28,13 @@ export interface Card {
   /** Authorizations above this amount require human approval. */
   approvalThreshold?: number;
   /**
+   * Hosts this card may pay over x402 (AFP's machine-payment rail), e.g.
+   * `api.example.com`. Unset or empty = any host, same convention as
+   * `allowedMerchantCategories`. A card only reaches x402 at all when its
+   * category allow-list is empty or includes `x402`.
+   */
+  x402AllowedHosts?: string[];
+  /**
    * Sandbox PAN. Real deployments never see a PAN — the issuing partner hosts
    * card credentials so the platform stays out of PCI scope. Sandbox uses the
    * deterministic 4242 test PAN, mirroring issuer sandboxes.
@@ -59,6 +66,7 @@ export interface CreateCardInput {
   limits?: CardLimits;
   allowedMerchantCategories?: string[];
   approvalThreshold?: number;
+  x402AllowedHosts?: string[];
   label?: string;
   issuerCardId?: string;
 }
@@ -77,6 +85,7 @@ export function createCard(input: CreateCardInput): Card {
     limits: input.limits ?? {},
     allowedMerchantCategories: input.allowedMerchantCategories ?? [],
     approvalThreshold: input.approvalThreshold,
+    x402AllowedHosts: input.x402AllowedHosts?.length ? input.x402AllowedHosts.map((h) => h.toLowerCase()) : undefined,
     sandboxPan: `424242424242${suffix}`,
     last4: suffix,
     expiryMonth: now.getUTCMonth() + 1,

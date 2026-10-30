@@ -47,6 +47,10 @@ export function createMcpServer(client: AcardClient): McpServer {
           .positive()
           .optional()
           .describe("Charges at or above this many cents require human approval"),
+        x402_allowed_hosts: z
+          .array(z.string())
+          .optional()
+          .describe("Hosts this card may pay over x402, e.g. ['api.example.com'] or ['.example.com'] for subdomains. Empty = any host"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
@@ -62,6 +66,7 @@ export function createMcpServer(client: AcardClient): McpServer {
           },
           allowed_merchant_categories: args.allowed_merchant_categories,
           approval_threshold: args.approval_threshold,
+          x402_allowed_hosts: args.x402_allowed_hosts,
         });
         return ok(result.card);
       } catch (error) {
@@ -127,6 +132,36 @@ export function createMcpServer(client: AcardClient): McpServer {
           currency: args.currency,
           merchant: { name: args.merchant_name, category: args.merchant_category },
         });
+        return ok(result);
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "pay_x402",
+    {
+      title: "Pay for an API call (x402)",
+      description:
+        "Fetch a URL that charges per request over x402 (HTTP 402), paying in USDC from the org's float. A-CARD first checks the card: its categories must allow 'x402' (or be empty), the host must be in its x402 allowed hosts (if set), and the price goes through its limits, approval threshold and the org's policy. Prices below a cent are fine — the card is charged in whole cents as they add up. Use a USD card. Always pass max_usd: the most you expect this one call to cost; a higher quote is refused. If the result is 'held', tell the user to approve it in A-CARD, then call again.",
+      inputSchema: {
+        card_id: z.string(),
+        url: z.string().url().describe("The resource to fetch, https://…"),
+        max_usd: z.string().describe("Most you'll pay for this one call, in dollars, e.g. '0.05'"),
+        method: z.enum(["GET", "POST"]).optional(),
+        body: z.unknown().optional().describe("JSON body, for POST"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    },
+    async (args) => {
+      try {
+        const result = await client.payX402(args);
+        // The resource can be large; keep the tool result readable.
+        const body = result.resource?.body;
+        if (typeof body === "string" && body.length > 20_000) {
+          result.resource.body = `${body.slice(0, 20_000)}… [truncated, ${result.resource.bytes} bytes total]`;
+        }
         return ok(result);
       } catch (error) {
         return fail(error);

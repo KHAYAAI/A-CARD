@@ -168,6 +168,19 @@ Ordering a non-verified merchant, or moving an order backwards (e.g. `delivered`
 | `execution_failed` | 402 | The rail definitively refused the payment. The transaction is recorded as failed. An *ambiguous* outcome never returns this: it parks the transaction as `reconciling` instead. |
 | `not_reversible` | 400 | The rail settles instantly. The ledger won't pretend to reverse it; record a new offsetting transfer. |
 
+#### x402 (`POST /v1/afp/x402/pay`)
+
+These are request errors: nothing was charged and nothing was signed. A payment the card refuses is not an error; it's a `200` with `status: "declined"` and one of the decline reasons below.
+
+| Code | Status | What it means |
+|---|---|---|
+| `idempotency_key_required` | 400 | Send an `Idempotency-Key` header. |
+| `not_found` | 404 | No such card in this organization. |
+| `x402_url_not_allowed` | 422 | The URL isn't HTTPS, resolves to a private or reserved address, or carries credentials. A-CARD won't fetch it. |
+| `x402_resource_unreachable` | 502 | The first, unpaid request never got an answer. No payment was attempted. |
+| `x402_unexpected_status` | 502 | The server answered something other than 2xx or 402 before any payment. |
+| `x402_invalid_payment_required` | 502 | A 402 that isn't an x402 payment description (no `PAYMENT-REQUIRED` header, no v1 body). |
+
 ### Compliance
 
 | Code | Status | What it means |
@@ -232,6 +245,18 @@ Checks run in a fixed order and **the first failure wins**. A charge that would 
 | `pending_human_approval` | At or above an approval threshold. **A review is now open.** | Wait. When a human approves, **retry the same charge once**. It consumes a single-use grant for this card and merchant, up to the approved amount. If it's denied, stop. |
 | `department_budget_exceeded` | The department's monthly budget is spent | Ask. Resets next month. |
 | `insufficient_funds` | The wallet's available balance can't cover the hold | Ask the human to fund the wallet |
+
+Paying over x402 (`POST /v1/afp/x402/pay`) adds five reasons of its own. The other reasons above apply to x402 too: the payment runs through the same authorization, with merchant category `x402`.
+
+| Decline reason | Meaning | What the agent should do |
+|---|---|---|
+| `x402_host_not_allowed` | The URL's host isn't in this card's `x402AllowedHosts`. Checked before the host is contacted. | Stop. Use a card meant for this API, or ask. |
+| `x402_price_above_max` | The server quoted more than the `max_usd` you passed. Nothing was signed. | Don't just raise `max_usd`: tell the human the price (`price.usd`) and ask. |
+| `x402_no_supported_payment_option` | None of the server's payment options is USDC on a network this deployment pays on, in the `exact` scheme | Stop. This resource can't be paid from A-CARD. |
+| `x402_payment_rejected` | The server refused the signed payment (`message` carries its reason). The hold was released; nothing was charged. | Don't retry blindly. Report `message`. |
+| `x402_signing_failed` | A-CARD couldn't sign the payment. The hold was released. | Retry later; if it repeats, tell the human. |
+
+A `status` of `reconciling` (HTTP `202`) isn't a decline. The server got a signed payment but its answer left the outcome unknown, so the card's hold stays until the payment is reconciled. Don't retry it as a new payment.
 
 `pending_human_approval` is the only decline that expects a retry, and only after a decision. The `approval_id` returned with it points at the open review: poll `GET /v1/approvals?status=pending`, or watch for the human to act.
 

@@ -33,4 +33,4 @@ What *does* change between frameworks is how well the agent **understands** a re
 
 ## How these guides were verified
 
-Each guide's code was compiled against the framework's published package, and the framework's MCP client was connected to the real A-CARD MCP server, listing all nine tools and executing a call. Package versions are in each guide. **The LLM calls themselves weren't run**, because that needs each provider's API key. If a framework has moved on since, its MCP-client setup is the only part likely to need changing; the A-CARD side is plain MCP.
+Each guide's code was compiled against the framework's published package, and the framework's MCP client was connected to the real A-CARD MCP server, listing all its tools (nine at the time; `pay_x402` came later) and executing a call. Package versions are in each guide. **The LLM calls themselves weren't run**, because that needs each provider's API key. If a framework has moved on since, its MCP-client setup is the only part likely to need changing; the A-CARD side is plain MCP.

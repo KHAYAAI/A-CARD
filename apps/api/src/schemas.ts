@@ -107,6 +107,7 @@ export const createCardSchema = z.object({
     .optional(),
   allowed_merchant_categories: z.array(z.string()).optional(),
   approval_threshold: z.number().int().positive().optional(),
+  x402_allowed_hosts: z.array(z.string().min(1).max(253)).max(50).optional(),
 });
 
 export const simulateAuthSchema = z.object({
@@ -350,6 +351,15 @@ export const createIntentSchema = z.object({
   allowed_rails: z.array(railIdSchema).optional(),
 });
 export const executeIntentSchema = z.object({ rail: railIdSchema.optional() });
+
+export const x402PaySchema = z.object({
+  card_id: z.string().min(1),
+  url: z.string().url().max(2048),
+  /** The most the agent agrees to pay, in US dollars as a decimal string (USDC has 6 decimals). */
+  max_usd: z.string().regex(/^\d+(\.\d{1,6})?$/, "a dollar amount such as \"0.05\""),
+  method: z.enum(["GET", "POST"]).optional(),
+  body: z.unknown().optional(),
+});
 
 export const KYB_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
 export const requestUploadSchema = z.object({

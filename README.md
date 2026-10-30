@@ -14,7 +14,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 |---|---|
 | `packages/core` | Domain logic: compliance records and money-movement gating (`compliance.ts`), AFP routing engine + cross-rail ledger (`afp.ts`), A-MERCHANT supply-side directory (merchant profiles, KYB gating, catalogs, inventory freshness, agent discovery), double-entry ledger (holds/captures/releases, overspend guard), card lifecycle, freemium tier limits, hot-path rules engine, human approvals with consumable grants, API keys, users/roles/sessions (auth + RBAC), idempotency, HMAC webhook signing, whole-platform snapshot serialization |
 | `apps/api` | Hono REST API: signup, login/RBAC, wallet funding + billing (both PayFast), cards, transactions, approvals, the A-MERCHANT directory and merchant portal (`src/merchant/`, its own async port with in-memory and Postgres multi-writer adapters), AFP's routing/execution routes and rail adapters (`src/rails/` — card, x402, stablecoin), KYC/KYB/AML through Didit with a deterministic offline fallback (`src/compliance/`), the signed issuer webhook (real-time authorization), a sandbox purchase simulator, behind an async `PlatformService` port with two backends — in-memory (+ snapshot) and a Postgres multi-writer row-level ledger (`src/service/`) |
-| `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
+| `apps/mcp` | MCP server — stdio (`index.ts`, for local desktop clients) and Streamable HTTP (`index-http.ts`, for hosting as a real service) — exposing `create_card`, `get_card`, `list_cards`, `pay_checkout`, `pay_x402`, `close_card`, `list_transactions`, `get_wallet`, plus A-MERCHANT's `find_offers` and `get_merchant` |
 | `packages/sdk` | `@acard/sdk`, the TypeScript client: automatic idempotency and safe retries, typed declines and errors, approval waiting, a merchant POS client, webhook verification. Tested over real HTTP. |
 | `examples` | Runnable agents: curl, Claude (tool runner), procurement, approval-aware Python, merchant POS sync, and `seed-demo-world.ts`. All run by `npm test`. |
 | `docs/api` | OpenAPI 3.1 spec generated from the route validators (`npm run openapi`), its markdown reference, and a Redoc page. Served live at `GET /openapi.json`. |
@@ -26,11 +26,11 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 483 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 515 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + orders + purchase notices, AFP routing/ledger,
                          # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e,
                          # OpenAPI drift + response-shape checks, the SDK and every example over real HTTP.
-                         # 63 of them are Postgres integration tests, skipped unless
+                         # 65 of them are Postgres integration tests, skipped unless
                          # ACARD_TEST_DATABASE_URL points at a reachable database.
 npm run dev:api          # sandbox API on :8787 (in-memory unless DATABASE_URL is set)
 ```
@@ -85,6 +85,16 @@ Four tiers — `free` ($0/mo, 5 cards, up to $50/card), `basic` ($8/mo, 25 cards
 ### Approval notifications (Slack)
 
 Set `SLACK_APPROVALS_WEBHOOK_URL` and every `approval.requested` event posts to that channel with a link back to the dashboard. Omit it and approvals are still fully functional — just check the dashboard or `acard approvals` instead of getting pinged.
+
+### Plugins: Claude Code, Codex, OpenClaw
+
+The A-CARD MCP server ships as a plugin for all three, with a bundled server that needs only Node. See [`plugins/acard`](plugins/acard/README.md).
+
+```
+/plugin install acard --marketplace KHAYAAI/A-CARD        # Claude Code
+codex plugin marketplace add khayaai/a-card && codex plugin add acard@a-card   # Codex
+openclaw plugins install ./plugins/acard                 # OpenClaw, from a clone
+```
 
 ### MCP (Claude Desktop / Claude Code — local, stdio)
 

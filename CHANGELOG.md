@@ -8,6 +8,31 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: x402 under card controls, and agent-app plugins
+
+### Added
+- **x402 payments governed by A-CARD's card controls**: `POST /v1/afp/x402/pay` and `GET /v1/afp/x402/tabs/{cardId}`, mounted when AFP's x402 rail is configured.
+  - An agent names a card, a URL and its own `max_usd`. A-CARD reads the 402, then pays only what the card allows. That covers categories (`x402`), the new per-card `x402_allowed_hosts`, the exact price against `max_usd` and the per-transaction limit, and then the normal authorization: limits, approval thresholds, org policy, department budget and balance.
+  - Prices below a cent are charged through a per-card tab, in whole cents as they add up.
+  - Payments are recorded before they're signed. An unknown outcome is parked as `reconciling` with the hold kept.
+  - Guide: [docs/x402.md](docs/x402.md).
+- **x402 wire format v2 and v1.** v2 uses the `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE` and `PAYMENT-RESPONSE` headers; v1 uses the 402 body, `X-PAYMENT` and `X-PAYMENT-RESPONSE`.
+- **A real EIP-3009 signer** (`createEip3009Signer`), checked byte for byte against viem. It starts only with `ACARD_AFP_X402_SIGNER_KEY` **and** `ACARD_AFP_X402_REAL_VALUE=true`, and defaults to Base Sepolia. Mainnet must be listed in `ACARD_AFP_X402_NETWORKS`.
+- **`x402_allowed_hosts` on cards** (`POST /v1/cards`; `x402AllowedHosts` on the card). Additive and optional.
+- **MCP:** a `pay_x402` tool, and `x402_allowed_hosts` on `create_card`. The stdio server now also reads `~/.acard/config.json`, the CLI's file, when `ACARD_API_KEY` isn't set, and `acard-mcp setup --api-key …` writes it.
+- **SDK:** `acard.x402.pay()` and `acard.x402.tab()`, plus `x402_allowed_hosts` on `cards.create()`.
+- **Plugins for Claude Code, Codex and OpenClaw** in [`plugins/acard`](plugins/acard/README.md), with marketplaces at `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json`. Each was installed through its own CLI. The bundled server (`npm run plugins:build`) runs with plain Node, and a test fails if it's stale.
+
+### Changed
+- **AFP's x402 rail** (`POST /v1/afp/intents/:id/execute`) now refuses a quote above the intent's amount, pays only USDC `exact` on configured networks, and refuses non-HTTPS or private-network URLs unless `ACARD_AFP_X402_ALLOW_PRIVATE_NETWORKS=true` (sandbox only). A 5xx after a signed payment is now `reconciling` rather than `failed`, because the server may already have settled it.
+- AFP transactions carry an optional `metadata` object (Postgres: an additive `metadata` column).
+
+### Security
+- **AFP execute idempotency keys are scoped per organization.** Before, a key was looked up across every org, so one org reusing another's key got that org's transaction back. Keys used before this change won't match on replay.
+- x402 URLs are checked against private and reserved address ranges, and redirects aren't followed, so agents can't use A-CARD to reach its own network.
+
+---
+
 ## [Unreleased]: developer platform
 
 ### Added

@@ -18,7 +18,8 @@
     "dev:dashboard": "npm run dev -w @acard/dashboard",
     "openapi": "tsx apps/api/scripts/write-openapi.ts",
     "recording-kit": "tsx marketing/recording-kit/kit.ts",
-    "recording-kit:check": "tsx marketing/recording-kit/rehearse.ts"
+    "recording-kit:check": "tsx marketing/recording-kit/rehearse.ts",
+    "plugins:build": "node apps/mcp/scripts/bundle.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

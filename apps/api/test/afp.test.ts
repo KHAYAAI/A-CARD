@@ -44,11 +44,13 @@ function startX402Server(opts: { requiredAmount: string; failRetry?: boolean } =
           accepts: [
             {
               scheme: "exact",
-              network: "eip155:8453",
-              amount: opts.requiredAmount,
-              asset: "0xUSDC",
-              payTo: "0xmerchant",
+              network: "base-sepolia",
+              maxAmountRequired: opts.requiredAmount,
+              resource: "http://127.0.0.1/resource",
+              asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+              payTo: "0x1111111111111111111111111111111111111111",
               maxTimeoutSeconds: 60,
+              extra: { name: "USDC", version: "2" },
             },
           ],
         }),
@@ -60,7 +62,9 @@ function startX402Server(opts: { requiredAmount: string; failRetry?: boolean } =
       res.end();
       return;
     }
-    res.writeHead(200, { "x-payment-response": "settled_ref_1" });
+    res.writeHead(200, {
+      "x-payment-response": Buffer.from(JSON.stringify({ success: true, transaction: "settled_ref_1", network: "base-sepolia" })).toString("base64"),
+    });
     res.end(JSON.stringify({ ok: true }));
   });
   return new Promise<{ server: import("node:http").Server; url: string }>((resolve) => {
@@ -79,7 +83,7 @@ beforeEach(async () => {
 
   const rails: RailAdapter[] = [
     createCardRail(service, SECRET),
-    createX402Rail({ payerAddress: "0xpayer", signer: SANDBOX_SIGNER }),
+    createX402Rail({ payerAddress: "0x2222222222222222222222222222222222222222", signer: SANDBOX_SIGNER, allowPrivateNetworks: true }),
     createStablecoinRail({
       client: createSandboxStablecoinClient(),
       fromAddress: "0xorg-wallet",
@@ -238,7 +242,7 @@ describe("POST /v1/afp/intents/:id/execute — x402 rail", () => {
     }
   });
 
-  it("a 500 on the payment retry is a definite failure, not an ambiguous one", async () => {
+  it("a 500 after a signed payment is ambiguous — the server may already have settled it", async () => {
     const { server, url } = await startX402Server({ requiredAmount: "19900", failRetry: true });
     try {
       const created = await json(
@@ -252,8 +256,8 @@ describe("POST /v1/afp/intents/:id/execute — x402 rail", () => {
         headers: { "idempotency-key": "x402-fail-key" },
         body: JSON.stringify({}),
       });
-      expect(res.status).toBe(402);
-      expect((await json(res)).transaction.status).toBe("failed");
+      expect(res.status).toBe(202);
+      expect((await json(res)).transaction.status).toBe("reconciling");
     } finally {
       server.close();
     }

@@ -231,6 +231,7 @@ claude mcp add --transport http acard https://your-api-host/mcp -H "Authorizatio
 | `list_transactions` | History, with reasons |
 | `get_wallet` | Available / held / posted, per currency |
 | `find_offers` | Search A-MERCHANT for verified supply, with freshness and exclusion reasons |
+| `pay_x402` | Fetch a URL that charges per request over x402, paid in USDC under the card's limits, allowed hosts and approvals. Needs AFP's x402 rail; see [x402](x402.md) |
 | `get_merchant` | A merchant's profile and catalogue |
 
 What a session looks like (captured from the real server):

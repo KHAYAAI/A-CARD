@@ -9,6 +9,7 @@ import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.j
 import { AfpLedger } from "@acard/core";
 import { InMemoryAfpLedger, PostgresAfpLedger, startAfpWorkers, type AfpLedgerPort } from "./afp/index.js";
 import { createCardRail, createX402Rail, createStablecoinRail, createSandboxStablecoinClient, SANDBOX_SIGNER, type RailAdapter } from "./rails/index.js";
+import { createEip3009Signer, createX402Payer, type X402Payer, type X402Signer } from "./x402/index.js";
 import { ComplianceService } from "@acard/core";
 import {
   DiditComplianceProvider,
@@ -38,6 +39,10 @@ const kybDocumentsBucket = process.env.KYB_DOCUMENTS_BUCKET;
 const awsRegion = process.env.AWS_REGION ?? "af-south-1";
 const afpEnabled = process.env.ACARD_ENABLE_AFP === "true";
 const afpX402PayerAddress = process.env.ACARD_AFP_X402_PAYER_ADDRESS;
+const afpX402SignerKey = process.env.ACARD_AFP_X402_SIGNER_KEY;
+const afpX402RealValue = process.env.ACARD_AFP_X402_REAL_VALUE === "true";
+const afpX402Networks = (process.env.ACARD_AFP_X402_NETWORKS ?? "eip155:84532").split(",").map((n) => n.trim()).filter(Boolean);
+const afpX402AllowPrivate = process.env.ACARD_AFP_X402_ALLOW_PRIVATE_NETWORKS === "true";
 const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
@@ -139,7 +144,7 @@ if (!workosApiKey) {
  * they only join the rail set when an operator supplies the address that
  * turns them on, and are logged loudly as sandbox-only when they do.
  */
-let afp: { ledger: AfpLedgerPort; rails: RailAdapter[] } | undefined;
+let afp: { ledger: AfpLedgerPort; rails: RailAdapter[]; x402?: X402Payer } | undefined;
 
 if (afpEnabled) {
   let afpLedger: AfpLedgerPort;
@@ -160,9 +165,32 @@ if (afpEnabled) {
 
   const rails: RailAdapter[] = [createCardRail(platform, issuerWebhookSecret)];
 
-  if (afpX402PayerAddress) {
-    rails.push(createX402Rail({ payerAddress: afpX402PayerAddress, signer: SANDBOX_SIGNER }));
-    console.log("A-CARD API: AFP x402 rail enabled — SANDBOX_SIGNER only, produces syntactically valid but cryptographically meaningless signatures");
+  // x402. A real signing key moves real USDC, so it takes two deliberate
+  // settings: the key, and ACARD_AFP_X402_REAL_VALUE=true. A key without the
+  // flag refuses to start rather than quietly falling back to the sandbox.
+  // Networks default to Base Sepolia (testnet); mainnet must be listed.
+  let x402Payer: X402Payer | undefined;
+  if (afpX402SignerKey && !afpX402RealValue) {
+    throw new Error("ACARD_AFP_X402_SIGNER_KEY is set but ACARD_AFP_X402_REAL_VALUE is not 'true' — refusing to start with a real key by accident");
+  }
+  if (afpX402SignerKey && afpX402AllowPrivate) {
+    throw new Error("ACARD_AFP_X402_ALLOW_PRIVATE_NETWORKS is for the sandbox only; it can't be combined with a real x402 signing key");
+  }
+  if (afpX402SignerKey || afpX402PayerAddress) {
+    const realSigner = afpX402SignerKey ? createEip3009Signer(afpX402SignerKey) : undefined;
+    if (realSigner && afpX402PayerAddress && realSigner.address.toLowerCase() !== afpX402PayerAddress.toLowerCase()) {
+      throw new Error(`ACARD_AFP_X402_PAYER_ADDRESS (${afpX402PayerAddress}) doesn't match the signing key's address (${realSigner.address})`);
+    }
+    const signer: X402Signer = realSigner ?? SANDBOX_SIGNER;
+    const payerAddress = realSigner?.address ?? (afpX402PayerAddress as string);
+    const x402Config = { signer, payerAddress, networks: afpX402Networks, allowPrivateNetworks: afpX402AllowPrivate };
+    rails.push(createX402Rail(x402Config));
+    x402Payer = createX402Payer(platform, afpLedger, x402Config);
+    console.log(
+      realSigner
+        ? `A-CARD API: AFP x402 enabled with a REAL signer (${payerAddress}) on ${afpX402Networks.join(", ")} — payments move real USDC`
+        : "A-CARD API: AFP x402 enabled — SANDBOX_SIGNER only, produces syntactically valid but cryptographically meaningless signatures",
+    );
   }
 
   if (afpStablecoinFromAddress) {
@@ -176,7 +204,7 @@ if (afpEnabled) {
     console.log("A-CARD API: AFP stablecoin rail enabled — sandbox client only, no real chain settlement");
   }
 
-  afp = { ledger: afpLedger, rails };
+  afp = { ledger: afpLedger, rails, x402: x402Payer };
 
   // The machinery that moves transactions through the ledger's states over
   // time. Without it a `posted` transaction never settles and a

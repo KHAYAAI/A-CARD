@@ -1,0 +1,19 @@
+{
+  "name": "acard",
+  "version": "0.1.0",
+  "description": "Scoped virtual cards for AI agents: pay at merchants and x402 APIs under limits and human approvals.",
+  "author": { "name": "A-CARD" },
+  "repository": "https://github.com/khayaai/a-card",
+  "keywords": ["payments", "cards", "agents", "x402", "spend-controls", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-mcp.json",
+  "interface": {
+    "displayName": "A-CARD",
+    "shortDescription": "Give your agent a card it can't run away with",
+    "longDescription": "A-CARD gives each agent task its own virtual card: a per-charge cap, a total budget, a merchant-category allow-list and a human-approval threshold. Codex can create cards, pay at merchants, pay per-call APIs over x402, search verified suppliers on A-MERCHANT, and read the wallet and transactions. Every decline comes back with the reason. Run `node ./server/acard-mcp.mjs setup --api-key ak_…` once to connect your A-CARD account.",
+    "developerName": "A-CARD",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": "Create a single-use A-CARD card capped at R500 for this purchase, pay with it, and tell me the decline reason if A-CARD refuses."
+  }
+}

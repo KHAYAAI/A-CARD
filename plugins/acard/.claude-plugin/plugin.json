@@ -1,0 +1,22 @@
+{
+  "name": "acard",
+  "displayName": "A-CARD",
+  "version": "0.1.0",
+  "description": "Scoped virtual cards for AI agents: create a card per task, pay at merchants and x402 APIs under limits and human approvals, find verified suppliers on A-MERCHANT.",
+  "author": { "name": "A-CARD" },
+  "repository": "https://github.com/khayaai/a-card",
+  "keywords": ["payments", "cards", "agents", "x402", "spend-controls", "mcp"],
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "A-CARD API key",
+      "description": "An agent key (ak_…) from the A-CARD console or `acard signup`. Leave empty to use ~/.acard/config.json.",
+      "sensitive": true
+    },
+    "api_url": {
+      "type": "string",
+      "title": "A-CARD API URL",
+      "description": "Your A-CARD API. Leave empty to use ~/.acard/config.json, or the local sandbox at http://localhost:8787."
+    }
+  }
+}

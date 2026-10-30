@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "acard": {
+      "command": "node",
+      "args": ["./server/acard-mcp.mjs"],
+      "cwd": "."
+    }
+  }
+}

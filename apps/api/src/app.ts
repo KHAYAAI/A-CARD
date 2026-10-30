@@ -37,6 +37,7 @@ import { createMerchantAuthKitClient, type MerchantAuthKitClient, type MerchantA
 import { createKybDocumentStore, type KybDocumentStore, type KybDocumentStoreConfig } from "./kybDocuments.js";
 import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
 import type { AfpLedgerPort } from "./afp/index.js";
+import { usdToAtomic, X402RequestError, type X402Outcome, type X402Payer, type X402Tab } from "./x402/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
 import { deliverMerchantWebhook, type MerchantWebhookEvent } from "./merchant/webhooks.js";
 import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
@@ -85,6 +86,7 @@ import {
   portalInviteSchema,
   createIntentSchema,
   executeIntentSchema,
+  x402PaySchema,
   requestUploadSchema,
   confirmUploadSchema,
 } from "./schemas.js";
@@ -181,7 +183,12 @@ export interface AppConfig {
    * itself is required whenever any rails are, since a rail with nowhere
    * to post its outcome isn't safely usable.
    */
-  afp?: { ledger: AfpLedgerPort; rails: RailAdapter[] };
+  afp?: {
+    ledger: AfpLedgerPort;
+    rails: RailAdapter[];
+    /** x402 governed by A-CARD's card controls (`POST /v1/afp/x402/pay`). Present when the x402 rail is configured. */
+    x402?: X402Payer;
+  };
   /** Injectable for tests; defaults to the real global fetch. */
   merchantWebhookFetch?: typeof fetch;
   /**
@@ -913,6 +920,7 @@ export function createApp(config: AppConfig) {
         : undefined,
       allowedMerchantCategories: body.allowed_merchant_categories,
       approvalThreshold: body.approval_threshold,
+      x402AllowedHosts: body.x402_allowed_hosts,
       apiKeyId: c.get("apiKey")?.id,
     });
     // With a real issuer configured, the card just created is a local record
@@ -2095,8 +2103,10 @@ export function createApp(config: AppConfig) {
       }
       // A repeat of a key already executed is a lookup, never a second
       // attempt — this is the actual double-execution guard, ahead of even
-      // routing running again.
-      const existing = await afp.ledger.getByIdempotencyKey(idempotencyKey);
+      // routing running again. Keys are scoped to the caller's org, so one
+      // account reusing another's key can neither see nor block its payment.
+      const scopedKey = `${holder.id}:${idempotencyKey}`;
+      const existing = await afp.ledger.getByIdempotencyKey(scopedKey);
       if (existing) return c.json({ transaction: existing });
 
       const body = executeIntentSchema.parse(await c.req.json().catch(() => ({})));
@@ -2112,7 +2122,7 @@ export function createApp(config: AppConfig) {
         );
       }
 
-      const tx = await afp.ledger.beginExecution(intent, railId, chosen.profile.finality, idempotencyKey);
+      const tx = await afp.ledger.beginExecution(intent, railId, chosen.profile.finality, scopedKey);
       try {
         const result = await chosen.execute(intent);
         const completed = await afp.ledger.completeExecution(tx.id, result);
@@ -2134,6 +2144,78 @@ export function createApp(config: AppConfig) {
     app.get("/v1/afp/transactions", async (c) => {
       return c.json({ transactions: await afp.ledger.list(c.get("holder").id) });
     });
+
+    // ---- x402 under A-CARD's controls --------------------------------------------
+    // The path agents use to pay for an API call: the payment is authorized
+    // against a card (limits, categories, allowed hosts, approvals, org
+    // policy, budgets) before anything is signed. See apps/api/src/x402/payer.ts.
+    const x402 = afp.x402;
+    if (x402) {
+      const tabJson = (t: X402Tab) => ({
+        card_id: t.cardId,
+        payments: t.payments,
+        paid_atomic: t.paidAtomic,
+        paid_usd: t.paidUsd,
+        charged_cents: t.chargedCents,
+        credit_atomic: t.creditAtomic,
+      });
+      const outcomeJson = (o: X402Outcome) => ({
+        status: o.status,
+        decline_reason: o.declineReason,
+        approval_id: o.approvalId,
+        message: o.message,
+        price: o.price && {
+          amount_atomic: o.price.amountAtomic,
+          usd: o.price.usd,
+          network: o.price.network,
+          asset: o.price.asset,
+          pay_to: o.price.payTo,
+        },
+        charged_cents: o.chargedCents,
+        tab: o.tab && tabJson(o.tab),
+        settlement: o.settlement,
+        transaction: o.transaction,
+        resource: o.resource && {
+          status: o.resource.status,
+          content_type: o.resource.contentType,
+          bytes: o.resource.bytes,
+          body: o.resource.body,
+          truncated: o.resource.truncated,
+        },
+        replayed: o.replayed,
+      });
+
+      app.post("/v1/afp/x402/pay", requireRole("member"), async (c) => {
+        const holder = c.get("holder");
+        const idempotencyKey = c.req.header("idempotency-key");
+        if (!idempotencyKey) {
+          return c.json({ error: { code: "idempotency_key_required", message: "an Idempotency-Key header is required to pay over x402" } }, 400);
+        }
+        const body = x402PaySchema.parse(await c.req.json());
+        try {
+          const outcome = await x402.pay({
+            holderId: holder.id,
+            cardId: body.card_id,
+            url: body.url,
+            method: body.method,
+            body: body.body,
+            maxAtomic: usdToAtomic(body.max_usd),
+            idempotencyKey,
+          });
+          return c.json(outcomeJson(outcome), outcome.status === "reconciling" ? 202 : 200);
+        } catch (error) {
+          if (error instanceof X402RequestError) return c.json({ error: { code: error.code, message: error.message } }, error.status);
+          throw error;
+        }
+      });
+
+      app.get("/v1/afp/x402/tabs/:cardId", async (c) => {
+        const holder = c.get("holder");
+        const card = await platform.getCard(c.req.param("cardId"));
+        if (!card || card.accountHolderId !== holder.id) return c.json({ error: { code: "not_found", message: "card not found" } }, 404);
+        return c.json({ tab: tabJson(await x402.tab(holder.id, card.id)) });
+      });
+    }
   }
 
   // ---- compliance: KYC, KYB and AML -------------------------------------------------

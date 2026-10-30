@@ -77,7 +77,7 @@ is contracted.** These are two different bars.
   API, and MCP server on a public AWS URL, let developers sign up, create
   cards, and simulate purchases. This is a legitimate public beta.
 - The authorization engine, ledger, rules, approvals, webhooks, auth/RBAC, and
-  billing are production-quality and tested (483 automated tests, 63 of them
+  billing are production-quality and tested (515 automated tests, 65 of them
   Postgres integration tests run against a real database).
 - The AWS stack is hardened (private networking, WAF, TLS, encrypted DB) and
   deploys with one command.

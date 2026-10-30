@@ -337,7 +337,8 @@ export class PostgresPlatformService implements PlatformService {
        ALTER TABLE acard_users ADD COLUMN IF NOT EXISTS mfa_recovery_code_hashes JSONB NOT NULL DEFAULT '[]';
        ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS workos_organization_id TEXT;
        ALTER TABLE acard_account_holders ADD COLUMN IF NOT EXISTS sso_domain TEXT;
-       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS issuer_card_id TEXT;`,
+       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS issuer_card_id TEXT;
+       ALTER TABLE acard_cards ADD COLUMN IF NOT EXISTS x402_allowed_hosts JSONB;`,
     );
     // These uniqueness constraints must come after their columns exist on an
     // upgraded (pre-SSO / pre-issuer-linking) deployment, so they run here
@@ -862,6 +863,7 @@ export class PostgresPlatformService implements PlatformService {
       limits: row.limits ?? {},
       allowedMerchantCategories: row.allowed_mccs ?? [],
       approvalThreshold: row.approval_threshold === null ? undefined : Number(row.approval_threshold),
+      x402AllowedHosts: row.x402_allowed_hosts ?? undefined,
       sandboxPan: this.decryptSandboxPan(row.sandbox_pan),
       last4: row.last4,
       expiryMonth: row.expiry_month,
@@ -908,13 +910,14 @@ export class PostgresPlatformService implements PlatformService {
         await client.query(
           `INSERT INTO acard_cards
              (id, account_holder_id, wallet_account_id, department_id, currency, status, single_use, limits, allowed_mccs,
-              approval_threshold, sandbox_pan, last4, expiry_month, expiry_year, label, issuer_card_id, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+              approval_threshold, sandbox_pan, last4, expiry_month, expiry_year, label, issuer_card_id, created_at, x402_allowed_hosts)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
           [
             card.id, card.accountHolderId, card.walletAccountId, card.departmentId ?? null, card.currency, card.status, card.singleUse,
             JSON.stringify(card.limits), JSON.stringify(card.allowedMerchantCategories),
             card.approvalThreshold ?? null, encryptField(card.sandboxPan, this.encryptionKey), card.last4, card.expiryMonth, card.expiryYear,
             card.label ?? null, card.issuerCardId ?? null, card.createdAt,
+            card.x402AllowedHosts ? JSON.stringify(card.x402AllowedHosts) : null,
           ],
         );
       } catch (err: any) {
