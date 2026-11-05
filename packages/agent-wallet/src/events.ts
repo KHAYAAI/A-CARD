@@ -7,7 +7,15 @@ export interface ForgePayEvent {
     | "agent_wallet.transfer.previewed"
     | "agent_wallet.transfer.executed"
     | "agent_wallet.transfer.denied"
-    | "agent_wallet.transfer.failed";
+    | "agent_wallet.transfer.failed"
+    | "agent_wallet.x402.previewed"
+    | "agent_wallet.x402.paid"
+    | "agent_wallet.x402.denied"
+    | "agent_wallet.x402.failed"
+    | "agent_wallet.swap.previewed"
+    | "agent_wallet.swap.executed"
+    | "agent_wallet.swap.denied"
+    | "agent_wallet.swap.failed";
   occurredAt: string;
   agentId: string;
   walletId: string;

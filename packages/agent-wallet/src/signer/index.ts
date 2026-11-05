@@ -45,17 +45,4 @@ export class DevSigner implements Signer {
   }
 }
 
-/**
- * Threshold signer backed by FORGE Custody (openfireblocks).
- * Phase 4: implement against the openfireblocks API with ceremony co-signing.
- */
-export class OpenFireblocksSigner implements Signer {
-  readonly id = "openfireblocks";
-  constructor(private readonly baseUrl: string, private readonly vaultId: string) {}
-  async address(_chain: ChainId): Promise<string> {
-    throw new Error(`OpenFireblocksSigner not implemented yet (${this.baseUrl}, vault ${this.vaultId})`);
-  }
-  async sign(_req: SignRequest): Promise<SignedTx> {
-    throw new Error("OpenFireblocksSigner not implemented yet");
-  }
-}
+export { OpenFireblocksSigner, type OpenFireblocksConfig } from "./openfireblocks.js";

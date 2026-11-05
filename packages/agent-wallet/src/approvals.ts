@@ -14,6 +14,8 @@ export interface ApprovalStore {
   status(approvalId: string): ApprovalState | "unknown";
   /** Operator-only. Throws `approval_not_pending` unless the approval is pending. */
   decide(approvalId: string, approve: boolean): void;
+  /** Approvals still waiting for a person. */
+  pending(): string[];
 }
 
 export class MemoryApprovalStore implements ApprovalStore {
@@ -30,5 +32,9 @@ export class MemoryApprovalStore implements ApprovalStore {
   decide(approvalId: string, approve: boolean): void {
     if (this.#states.get(approvalId) !== "pending") throw new Error("approval_not_pending");
     this.#states.set(approvalId, approve ? "approved" : "rejected");
+  }
+
+  pending(): string[] {
+    return [...this.#states].filter(([, s]) => s === "pending").map(([id]) => id);
   }
 }

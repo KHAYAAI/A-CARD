@@ -77,7 +77,7 @@ if (!apiKey) {
 // The on-chain wallet is opt-in, and sandbox only: a mock chain and a dev
 // signer that refuses real networks (packages/agent-wallet). Off by default, so
 // a plugin install never presents invented balances to an agent.
-const wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore() }) : undefined;
+const wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore(), x402AllowPrivateNetworks: env("ACARD_WALLET_X402_ALLOW_PRIVATE_NETWORKS") === "true" }) : undefined;
 
 const server = createMcpServer(new AcardClient({ baseUrl, apiKey }), { wallet });
 await server.connect(new StdioServerTransport());

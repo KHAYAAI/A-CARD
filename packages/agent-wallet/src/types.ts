@@ -33,8 +33,11 @@ export interface SignedTx {
   signerId: string;
 }
 
+export type PreviewKind = "transfer" | "x402" | "swap";
+
 export interface Preview {
   id: string;
+  kind: PreviewKind;
   request: TransferRequest;
   policy: PolicyResult;
   createdAt: number;

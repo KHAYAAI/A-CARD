@@ -155,12 +155,12 @@ describe("plugins/acard", () => {
       const res = (await client.callTool({ name, arguments: args })) as { content: Array<{ text?: string }>; isError?: boolean };
       return { text: res.content.map((c) => c.text ?? "").join(""), isError: res.isError === true };
     };
-    const client = await connect({ cwd: home, args: [BUNDLE], env: { ...env, ACARD_ENABLE_WALLET: "true" } });
+    const client = await connect({ cwd: home, args: [BUNDLE], env: { ...env, ACARD_ENABLE_WALLET: "true", ACARD_WALLET_X402_ALLOW_PRIVATE_NETWORKS: "true" } });
     try {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
-      expect(names).toHaveLength(16);
-      for (const t of ["wallet_status", "get_balances", "receive_info", "send_preview", "send_execute", "approval_status"]) expect(names).toContain(t);
+      expect(names).toHaveLength(21);
+      for (const t of ["wallet_status", "get_balances", "receive_info", "send_preview", "send_execute", "approval_status", "x402_preview", "x402_pay", "swap_quote", "swap_execute", "defi_positions"]) expect(names).toContain(t);
       // Approving is an operator action, never an agent tool.
       expect(names.filter((n) => /approve|decide/i.test(n))).toEqual([]);
 
@@ -181,6 +181,20 @@ describe("plugins/acard", () => {
       expect((await raw(client, "send_execute", { preview_id: large.preview_id })).isError).toBe(false);
       const balances = JSON.parse((await raw(client, "get_balances", { chain: "mock" })).text);
       expect(balances.balances.USDC).toBe("475000000"); // 500 − 5 − 20
+
+      // x402 from the wallet: preview the price, pay, get the resource.
+      const x = JSON.parse((await raw(client, "x402_preview", { wallet_id: "default", url: resourceUrl, max_amount: "10000" })).text);
+      expect(x).toMatchObject({ decision: "allow", price: { amount: "3000", asset: "USDC" } });
+      const paid = JSON.parse((await raw(client, "x402_pay", { preview_id: x.preview_id })).text);
+      expect(paid).toMatchObject({ status: 200, body: "weather: 24C, clear" });
+      // A price above the agent's own max is refused.
+      expect(JSON.parse((await raw(client, "x402_preview", { wallet_id: "default", url: resourceUrl, max_amount: "1000" })).text)).toMatchObject({ decision: "deny", reasons: ["x402_price_above_max"] });
+
+      // Swap USDC to ZARP at the sandbox rate (18.5).
+      const q = JSON.parse((await raw(client, "swap_quote", { wallet_id: "default", chain: "mock", asset_in: "USDC", asset_out: "ZARP", amount_in: "2000000" })).text);
+      expect(q).toMatchObject({ decision: "allow", quote: { amount_out: "37000000" } });
+      expect(JSON.parse((await raw(client, "swap_execute", { preview_id: q.preview_id })).text)).toMatchObject({ amount_out: "37000000" });
+      expect(JSON.parse((await raw(client, "defi_positions", { chain: "mock" })).text)).toEqual({ chain: "mock", positions: [] });
 
       const refused = JSON.parse((await raw(client, "send_preview", { ...transfer, amount: "90000000" })).text);
       expect(refused).toMatchObject({ decision: "deny", reasons: ["exceeds_per_tx_limit"] });

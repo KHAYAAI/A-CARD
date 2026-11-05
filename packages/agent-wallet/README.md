@@ -9,8 +9,16 @@ Clean-room implementation — see [CLEANROOM.md](CLEANROOM.md). Spec: [SPEC.md](
 
 ## Status
 
-v0.1 scaffold: MCP server (stdio), policy engine, dev signer, mock chain, events,
-9 tests. Next: Base Sepolia adapter, x402, openfireblocks signer, A-CARD cards.
+Built, sandbox only: MCP tools (transfers, x402, swaps, DeFi reads), policy engine,
+approvals, dev signer, mock chain, events, an `openfireblocks` threshold-signer
+client, and the mainnet gate. 30 tests.
+
+Not built: a real chain adapter (Base, Solana), a real swap aggregator, and real
+DeFi reads. Each needs network access and a funded account this project doesn't
+have yet. The card tools in the spec aren't duplicated: A-CARD's own `create_card`,
+`list_cards` and `close_card` are the card tools. The `openfireblocks` signer was
+written against a contract of our own (see `src/signer/openfireblocks.ts`) and
+must be checked against the real service. **Nothing here is audited or live.**
 
 ## In A-CARD's MCP server
 

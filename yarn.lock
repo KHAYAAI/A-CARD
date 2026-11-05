@@ -2,7 +2,7 @@
 # yarn lockfile v1
 
 
-"@acard/agent-wallet@file:/home/user/A-CARD/packages/agent-wallet":
+"@acard/agent-wallet@*", "@acard/agent-wallet@file:/home/user/A-CARD/packages/agent-wallet":
   version "0.1.0"
   resolved "file:packages/agent-wallet"
   dependencies:

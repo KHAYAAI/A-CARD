@@ -32,6 +32,8 @@ If `wallet_status` is among your tools, the operator has switched on the sandbox
 - Transfers are two steps. `send_preview` returns a `preview_id` and a decision (`allow`, `require_approval` or `deny`); nothing moves. `send_execute` with that `preview_id` moves the funds only if the decision was `allow`, or a person has approved it.
 - On `require_approval`, tell the human the `approval_id`. They approve in a separate terminal (`acard-mcp wallet-approve <id>`). You can't approve your own transfers, so don't try. After they do, call `send_execute` again with the same `preview_id`; check `approval_status` if unsure.
 - On `deny`, read `reasons` and stop. Don't split a transfer to get under a limit.
+- **x402 from the wallet:** `x402_preview` with `wallet_id`, the `url` and `max_amount` (the most you'll pay, in USDC smallest units; set it from what the human expects, not from the quoted price), then `x402_pay` with the `preview_id`. This pays from the on-chain wallet. To pay from a card instead, use `pay_x402`.
+- **Swaps:** `swap_quote` returns a quote and a decision; `swap_execute` with its `preview_id` performs it. Slippage and pairs are bounded by policy. `defi_positions` only reads.
 - Amounts are integer strings in the asset's smallest unit (USDC has 6 decimals: 5 USDC is `"5000000"`).
 - A-CARD's fiat wallet is `get_wallet`; the on-chain one is `wallet_status` and `get_balances`.
 

@@ -32,6 +32,8 @@ Business 1.0.0) or any other non-permissively licensed project.
 
 | 2026-11-05 | Claude (Claude Code session, steered by Tebogo Mvelase) | Tools mounted on A-CARD's MCP server: `registerWalletTools`, a pluggable `ApprovalStore` (in-memory default, file-backed in `apps/mcp`), `devWallet`, package entry point. Fixed: an execute attempt before approval no longer consumes the preview | Own code only |
 
+| 2026-11-05 | Claude (Claude Code session, steered by Tebogo Mvelase) | Phases 2–4: x402 tools (wire format and URL guard moved in from `apps/api/src/x402`, A-CARD's own code from the public x402 spec), swap and DeFi-read providers, `OpenFireblocksSigner`, mainnet gate, hosted-wallet host in `apps/mcp` | Own code only. x402 public spec (coinbase/x402 `specs/`) |
+
 ## Exceptions approved
 
 None.

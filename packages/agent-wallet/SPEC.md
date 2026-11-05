@@ -1,6 +1,6 @@
 # FORGE Agent Wallet — Specification
 
-Status: v0.1, 2026-11-05. Written from public material only (see `CLEANROOM.md`).
+Status: v0.2, 2026-11-05. Phases 1–4 are built in the sandbox (see README); chain adapters, a real swap aggregator, the real signer contract and the audit are not. Written from public material only (see `CLEANROOM.md`).
 
 ## 1. Goal
 

@@ -1,6 +1,6 @@
 # A-CARD plugin for Claude Code, Codex and OpenClaw
 
-One plugin folder serves all three apps. It gives your agent the A-CARD MCP server, with its 10 tools: per-task cards, merchant payments, x402 API payments, A-MERCHANT supply search, the fiat wallet and transactions. Six more tools, an on-chain agent wallet, are available when you opt in (below). It also adds a skill that teaches the agent to scope cards and respect declines.
+One plugin folder serves all three apps. It gives your agent the A-CARD MCP server, with its 10 tools: per-task cards, merchant payments, x402 API payments, A-MERCHANT supply search, the fiat wallet and transactions. Eleven more tools, an on-chain agent wallet, are available when you opt in (below). It also adds a skill that teaches the agent to scope cards and respect declines.
 
 The server is a single bundled file (`server/acard-mcp.mjs`) that needs only **Node.js 20 or later**: no npm install, and no clone of this repository.
 
@@ -18,7 +18,13 @@ In Claude Code you can skip this step and enter the key when you enable the plug
 
 ### Optional: the sandbox agent wallet
 
-Set `ACARD_ENABLE_WALLET=true` in the environment the server starts with to add six tools: `wallet_status`, `get_balances`, `receive_info`, `send_preview`, `send_execute`, `approval_status`. It's **sandbox only**: a mock chain with test funds and a dev signer that refuses real networks. It starts with 500 USDC; 10 USDC and under goes through, anything above needs a person's approval, and above 50 USDC is refused.
+Set `ACARD_ENABLE_WALLET=true` in the environment the server starts with to add eleven tools:
+
+- **Transfers:** `wallet_status`, `get_balances`, `receive_info`, `send_preview`, `send_execute`, `approval_status`.
+- **x402:** `x402_preview`, `x402_pay`. Pays a 402 service from the wallet, within a per-request cap and an optional domain allow-list.
+- **Swaps and reads:** `swap_quote`, `swap_execute`, `defi_positions`.
+
+It's **sandbox only**: a mock chain with test funds, fixed swap rates, no DeFi market, and a dev signer that refuses real networks. In the sandbox the x402 payment signature is a dev one, which a real x402 server would reject, and settlement is simulated. It starts with 500 USDC; 10 USDC and under goes through, anything above needs a person's approval, and above 50 USDC is refused. x402 is capped at 1 USDC a request. Set `ACARD_WALLET_X402_ALLOW_PRIVATE_NETWORKS=true` to let x402 reach a local test server.
 
 Approvals are decided by an operator in a separate terminal, never by the agent:
 
@@ -28,6 +34,17 @@ node <plugin folder>/server/acard-mcp.mjs wallet-approve <id>       # or wallet-
 ```
 
 They live in `~/.acard/wallet-approvals.json`. An agent with a shell on the same machine could run the same commands, so this proves the flow and isn't a security boundary. A real deployment has to send approvals to a channel the agent can't reach. The wallet's state is in memory and resets on restart.
+
+### The hosted server and the wallet
+
+The HTTP server (`apps/mcp`, `start:http`) can offer the same wallet when started with `ACARD_MCP_HTTP_WALLET=true` and `ACARD_WALLET_OPERATOR_TOKEN` (at least 24 characters; it refuses to start without it). Each A-CARD API key gets its own wallet, held in memory. **Run a single instance** while it's on, because two would hold different wallets for the same key, and a restart resets them.
+
+Approvals are decided over HTTP with the operator token, which the agent never has (it only holds its A-CARD key):
+
+```bash
+curl -H "authorization: Bearer $ACARD_WALLET_OPERATOR_TOKEN" $HOST/wallet/approvals
+curl -X POST -H "authorization: Bearer $ACARD_WALLET_OPERATOR_TOKEN" $HOST/wallet/approvals/<id>/approve   # or /reject
+```
 
 ## 2. Install
 

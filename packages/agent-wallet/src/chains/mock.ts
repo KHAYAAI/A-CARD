@@ -1,13 +1,20 @@
 import { createHash } from "node:crypto";
 import type { SignedTx } from "../types.js";
+import type { Chain } from "./types.js";
 
 /** In-memory chain for development and tests. Real adapters (Base, Solana) follow the same shape. */
-export class MockChain {
+export class MockChain implements Chain {
   #balances = new Map<string, bigint>(); // key: address|asset
 
   credit(address: string, asset: string, amount: bigint): void {
     const k = `${address}|${asset}`;
     this.#balances.set(k, (this.#balances.get(k) ?? 0n) + amount);
+  }
+
+  /** Sandbox only: remove funds, e.g. the input side of a mock swap. */
+  debit(address: string, asset: string, amount: bigint): void {
+    if (this.balance(address, asset) < amount) throw new Error("insufficient_funds");
+    this.credit(address, asset, -amount);
   }
 
   balance(address: string, asset: string): bigint {

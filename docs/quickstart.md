@@ -231,7 +231,7 @@ claude mcp add --transport http acard https://your-api-host/mcp -H "Authorizatio
 | `list_transactions` | History, with reasons |
 | `get_wallet` | Available / held / posted, per currency |
 | `find_offers` | Search A-MERCHANT for verified supply, with freshness and exclusion reasons |
-| `wallet_status` · `get_balances` · `receive_info` · `send_preview` · `send_execute` · `approval_status` | The sandbox on-chain wallet. Off unless the server is started with `ACARD_ENABLE_WALLET=true`; two-step transfers, approvals decided by an operator. See the [plugin README](../plugins/acard/README.md) |
+| `wallet_status` · `get_balances` · `receive_info` · `send_preview` · `send_execute` · `approval_status` · `x402_preview` · `x402_pay` · `swap_quote` · `swap_execute` · `defi_positions` | The sandbox on-chain wallet. Off unless the server is started with `ACARD_ENABLE_WALLET=true`; two-step transfers, approvals decided by an operator. See the [plugin README](../plugins/acard/README.md) |
 | `pay_x402` | Fetch a URL that charges per request over x402, paid in USDC under the card's limits, allowed hosts and approvals. Needs AFP's x402 rail; see [x402](x402.md) |
 | `get_merchant` | A merchant's profile and catalogue |
 
