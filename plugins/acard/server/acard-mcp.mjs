@@ -3310,8 +3310,8 @@ var require_utils = __commonJS({
     var HOST_DELIMS = { "@": "%40", "/": "%2F", "?": "%3F", "#": "%23", ":": "%3A" };
     var HOST_DELIM_RE = /[@/?#:]/g;
     var HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
-    function reescapeHostDelimiters(host, isIP) {
-      const re = isIP ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
+    function reescapeHostDelimiters(host, isIP2) {
+      const re = isIP2 ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
       re.lastIndex = 0;
       return host.replace(re, (ch) => HOST_DELIMS[ch]);
     }
@@ -3793,7 +3793,7 @@ var require_fast_uri = __commonJS({
         fragment: void 0
       };
       let malformedAuthorityOrPort = false;
-      let isIP = false;
+      let isIP2 = false;
       if (options.reference === "suffix") {
         if (options.scheme) {
           uri = options.scheme + ":" + uri;
@@ -3823,9 +3823,9 @@ var require_fast_uri = __commonJS({
           if (ipv4result === false) {
             const ipv6result = normalizeIPv6(parsed.host);
             parsed.host = ipv6result.host.toLowerCase();
-            isIP = ipv6result.isIPV6;
+            isIP2 = ipv6result.isIPV6;
           } else {
-            isIP = true;
+            isIP2 = true;
           }
         }
         if (parsed.scheme === void 0 && parsed.userinfo === void 0 && parsed.host === void 0 && parsed.port === void 0 && parsed.query === void 0 && !parsed.path) {
@@ -3842,7 +3842,7 @@ var require_fast_uri = __commonJS({
         }
         const schemeHandler = getSchemeHandler(options.scheme || parsed.scheme);
         if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
-          if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
+          if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP2 === false && nonSimpleDomain(parsed.host)) {
             try {
               parsed.host = new URL("http://" + parsed.host).hostname;
             } catch (e) {
@@ -3856,7 +3856,7 @@ var require_fast_uri = __commonJS({
               parsed.scheme = unescape(parsed.scheme);
             }
             if (parsed.host !== void 0) {
-              parsed.host = reescapeHostDelimiters(unescape(parsed.host), isIP);
+              parsed.host = reescapeHostDelimiters(unescape(parsed.host), isIP2);
             }
           }
           if (parsed.path) {
@@ -6893,9 +6893,9 @@ var require_dist = __commonJS({
 });
 
 // apps/mcp/src/index.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -9988,24 +9988,24 @@ var JSONSchemaGenerator = class {
         const _json = result.schema;
         switch (def.type) {
           case "string": {
-            const json = _json;
-            json.type = "string";
+            const json2 = _json;
+            json2.type = "string";
             const { minimum, maximum, format, patterns, contentEncoding } = schema._zod.bag;
             if (typeof minimum === "number")
-              json.minLength = minimum;
+              json2.minLength = minimum;
             if (typeof maximum === "number")
-              json.maxLength = maximum;
+              json2.maxLength = maximum;
             if (format) {
-              json.format = formatMap[format] ?? format;
-              if (json.format === "")
-                delete json.format;
+              json2.format = formatMap[format] ?? format;
+              if (json2.format === "")
+                delete json2.format;
             }
             if (contentEncoding)
-              json.contentEncoding = contentEncoding;
+              json2.contentEncoding = contentEncoding;
             if (patterns && patterns.size > 0) {
               const regexes = [...patterns];
               if (regexes.length === 1)
-                json.pattern = regexes[0].source;
+                json2.pattern = regexes[0].source;
               else if (regexes.length > 1) {
                 result.schema.allOf = [
                   ...regexes.map((regex) => ({
@@ -10018,41 +10018,41 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "number": {
-            const json = _json;
+            const json2 = _json;
             const { minimum, maximum, format, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema._zod.bag;
             if (typeof format === "string" && format.includes("int"))
-              json.type = "integer";
+              json2.type = "integer";
             else
-              json.type = "number";
+              json2.type = "number";
             if (typeof exclusiveMinimum === "number")
-              json.exclusiveMinimum = exclusiveMinimum;
+              json2.exclusiveMinimum = exclusiveMinimum;
             if (typeof minimum === "number") {
-              json.minimum = minimum;
+              json2.minimum = minimum;
               if (typeof exclusiveMinimum === "number") {
                 if (exclusiveMinimum >= minimum)
-                  delete json.minimum;
+                  delete json2.minimum;
                 else
-                  delete json.exclusiveMinimum;
+                  delete json2.exclusiveMinimum;
               }
             }
             if (typeof exclusiveMaximum === "number")
-              json.exclusiveMaximum = exclusiveMaximum;
+              json2.exclusiveMaximum = exclusiveMaximum;
             if (typeof maximum === "number") {
-              json.maximum = maximum;
+              json2.maximum = maximum;
               if (typeof exclusiveMaximum === "number") {
                 if (exclusiveMaximum <= maximum)
-                  delete json.maximum;
+                  delete json2.maximum;
                 else
-                  delete json.exclusiveMaximum;
+                  delete json2.exclusiveMaximum;
               }
             }
             if (typeof multipleOf === "number")
-              json.multipleOf = multipleOf;
+              json2.multipleOf = multipleOf;
             break;
           }
           case "boolean": {
-            const json = _json;
-            json.type = "boolean";
+            const json2 = _json;
+            json2.type = "boolean";
             break;
           }
           case "bigint": {
@@ -10100,23 +10100,23 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "array": {
-            const json = _json;
+            const json2 = _json;
             const { minimum, maximum } = schema._zod.bag;
             if (typeof minimum === "number")
-              json.minItems = minimum;
+              json2.minItems = minimum;
             if (typeof maximum === "number")
-              json.maxItems = maximum;
-            json.type = "array";
-            json.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
+              json2.maxItems = maximum;
+            json2.type = "array";
+            json2.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
             break;
           }
           case "object": {
-            const json = _json;
-            json.type = "object";
-            json.properties = {};
+            const json2 = _json;
+            json2.type = "object";
+            json2.properties = {};
             const shape = def.shape;
             for (const key in shape) {
-              json.properties[key] = this.process(shape[key], {
+              json2.properties[key] = this.process(shape[key], {
                 ...params,
                 path: [...params.path, "properties", key]
               });
@@ -10131,15 +10131,15 @@ var JSONSchemaGenerator = class {
               }
             }));
             if (requiredKeys.size > 0) {
-              json.required = Array.from(requiredKeys);
+              json2.required = Array.from(requiredKeys);
             }
             if (def.catchall?._zod.def.type === "never") {
-              json.additionalProperties = false;
+              json2.additionalProperties = false;
             } else if (!def.catchall) {
               if (this.io === "output")
-                json.additionalProperties = false;
+                json2.additionalProperties = false;
             } else if (def.catchall) {
-              json.additionalProperties = this.process(def.catchall, {
+              json2.additionalProperties = this.process(def.catchall, {
                 ...params,
                 path: [...params.path, "additionalProperties"]
               });
@@ -10147,15 +10147,15 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "union": {
-            const json = _json;
-            json.anyOf = def.options.map((x, i) => this.process(x, {
+            const json2 = _json;
+            json2.anyOf = def.options.map((x, i) => this.process(x, {
               ...params,
               path: [...params.path, "anyOf", i]
             }));
             break;
           }
           case "intersection": {
-            const json = _json;
+            const json2 = _json;
             const a = this.process(def.left, {
               ...params,
               path: [...params.path, "allOf", 0]
@@ -10169,17 +10169,17 @@ var JSONSchemaGenerator = class {
               ...isSimpleIntersection(a) ? a.allOf : [a],
               ...isSimpleIntersection(b) ? b.allOf : [b]
             ];
-            json.allOf = allOf;
+            json2.allOf = allOf;
             break;
           }
           case "tuple": {
-            const json = _json;
-            json.type = "array";
+            const json2 = _json;
+            json2.type = "array";
             const prefixItems = def.items.map((x, i) => this.process(x, { ...params, path: [...params.path, "prefixItems", i] }));
             if (this.target === "draft-2020-12") {
-              json.prefixItems = prefixItems;
+              json2.prefixItems = prefixItems;
             } else {
-              json.items = prefixItems;
+              json2.items = prefixItems;
             }
             if (def.rest) {
               const rest = this.process(def.rest, {
@@ -10187,29 +10187,29 @@ var JSONSchemaGenerator = class {
                 path: [...params.path, "items"]
               });
               if (this.target === "draft-2020-12") {
-                json.items = rest;
+                json2.items = rest;
               } else {
-                json.additionalItems = rest;
+                json2.additionalItems = rest;
               }
             }
             if (def.rest) {
-              json.items = this.process(def.rest, {
+              json2.items = this.process(def.rest, {
                 ...params,
                 path: [...params.path, "items"]
               });
             }
             const { minimum, maximum } = schema._zod.bag;
             if (typeof minimum === "number")
-              json.minItems = minimum;
+              json2.minItems = minimum;
             if (typeof maximum === "number")
-              json.maxItems = maximum;
+              json2.maxItems = maximum;
             break;
           }
           case "record": {
-            const json = _json;
-            json.type = "object";
-            json.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
-            json.additionalProperties = this.process(def.valueType, {
+            const json2 = _json;
+            json2.type = "object";
+            json2.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
+            json2.additionalProperties = this.process(def.valueType, {
               ...params,
               path: [...params.path, "additionalProperties"]
             });
@@ -10228,17 +10228,17 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "enum": {
-            const json = _json;
+            const json2 = _json;
             const values = getEnumValues(def.entries);
             if (values.every((v) => typeof v === "number"))
-              json.type = "number";
+              json2.type = "number";
             if (values.every((v) => typeof v === "string"))
-              json.type = "string";
-            json.enum = values;
+              json2.type = "string";
+            json2.enum = values;
             break;
           }
           case "literal": {
-            const json = _json;
+            const json2 = _json;
             const vals = [];
             for (const val of def.values) {
               if (val === void 0) {
@@ -10259,23 +10259,23 @@ var JSONSchemaGenerator = class {
             if (vals.length === 0) {
             } else if (vals.length === 1) {
               const val = vals[0];
-              json.type = val === null ? "null" : typeof val;
-              json.const = val;
+              json2.type = val === null ? "null" : typeof val;
+              json2.const = val;
             } else {
               if (vals.every((v) => typeof v === "number"))
-                json.type = "number";
+                json2.type = "number";
               if (vals.every((v) => typeof v === "string"))
-                json.type = "string";
+                json2.type = "string";
               if (vals.every((v) => typeof v === "boolean"))
-                json.type = "string";
+                json2.type = "string";
               if (vals.every((v) => v === null))
-                json.type = "null";
-              json.enum = vals;
+                json2.type = "null";
+              json2.enum = vals;
             }
             break;
           }
           case "file": {
-            const json = _json;
+            const json2 = _json;
             const file = {
               type: "string",
               format: "binary",
@@ -10289,15 +10289,15 @@ var JSONSchemaGenerator = class {
             if (mime) {
               if (mime.length === 1) {
                 file.contentMediaType = mime[0];
-                Object.assign(json, file);
+                Object.assign(json2, file);
               } else {
-                json.anyOf = mime.map((m) => {
+                json2.anyOf = mime.map((m) => {
                   const mFile = { ...file, contentMediaType: m };
                   return mFile;
                 });
               }
             } else {
-              Object.assign(json, file);
+              Object.assign(json2, file);
             }
             break;
           }
@@ -10318,8 +10318,8 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "success": {
-            const json = _json;
-            json.type = "boolean";
+            const json2 = _json;
+            json2.type = "boolean";
             break;
           }
           case "default": {
@@ -10354,12 +10354,12 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "template_literal": {
-            const json = _json;
+            const json2 = _json;
             const pattern = schema._zod.pattern;
             if (!pattern)
               throw new Error("Pattern not found in template literal");
-            json.type = "string";
-            json.pattern = pattern.source;
+            json2.type = "string";
+            json2.pattern = pattern.source;
             break;
           }
           case "pipe": {
@@ -13008,8 +13008,8 @@ var StdioServerTransport = class {
   }
   send(message) {
     return new Promise((resolve) => {
-      const json = serializeMessage(message);
-      if (this._stdout.write(json)) {
+      const json2 = serializeMessage(message);
+      if (this._stdout.write(json2)) {
         resolve();
       } else {
         this._stdout.once("drain", resolve);
@@ -13018,99 +13018,512 @@ var StdioServerTransport = class {
   }
 };
 
-// apps/mcp/src/client.ts
-var AcardApiError = class extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
+// packages/agent-wallet/src/wallet.ts
+import { randomBytes, randomUUID as randomUUID2 } from "node:crypto";
+
+// packages/agent-wallet/src/policy/engine.ts
+function checkX402Host(policy, host) {
+  if (!policy?.x402) return { decision: "deny", reasons: ["x402_not_enabled"] };
+  const allowed = policy.x402.allowedDomains;
+  const h = host.toLowerCase();
+  if (allowed?.length && !allowed.some((d) => d.startsWith(".") ? h.endsWith(d.toLowerCase()) || h === d.slice(1).toLowerCase() : h === d.toLowerCase())) {
+    return { decision: "deny", reasons: [`x402_domain_not_allowed:${host}`] };
   }
-  status;
-  code;
+  return void 0;
+}
+function checkX402Price(policy, price) {
+  if (!policy?.x402) return { decision: "deny", reasons: ["x402_not_enabled"] };
+  return price > policy.x402.maxPricePerRequest ? { decision: "deny", reasons: ["x402_price_above_policy_max"] } : void 0;
+}
+function checkSwap(policy, q) {
+  if (!policy?.swap) return { decision: "deny", reasons: ["swaps_not_enabled"] };
+  const pair = `${q.assetIn}>${q.assetOut}`;
+  if (policy.swap.allowedPairs && !policy.swap.allowedPairs.includes(pair)) return { decision: "deny", reasons: [`pair_not_allowed:${pair}`] };
+  if (q.amountOut <= 0n) return { decision: "deny", reasons: ["quote_returns_nothing"] };
+  const slippageBps = (q.amountOut - q.minAmountOut) * 10000n / q.amountOut;
+  if (slippageBps > BigInt(policy.swap.maxSlippageBps)) return { decision: "deny", reasons: ["slippage_above_policy"] };
+  return void 0;
+}
+var DAY_MS = 24 * 60 * 60 * 1e3;
+async function evaluate(req, policy, ledger, sanctions, now = Date.now()) {
+  try {
+    if (!policy) return deny("no_policy_for_wallet");
+    if (req.amount <= 0n) return deny("amount_must_be_positive");
+    if (!policy.allowedChains.includes(req.chain)) return deny(`chain_not_allowed:${req.chain}`);
+    const limits = policy.assets[req.asset];
+    if (!limits) return deny(`asset_not_allowed:${req.asset}`);
+    const to = req.to.toLowerCase();
+    if (policy.denyList?.some((a) => a.toLowerCase() === to)) return deny("recipient_on_deny_list");
+    if (policy.allowList && !policy.allowList.some((a) => a.toLowerCase() === to)) {
+      return deny("recipient_not_on_allow_list");
+    }
+    if (await sanctions(req.to) !== "clear") return deny("sanctions_hit");
+    if (req.amount > limits.perTx) return deny("exceeds_per_tx_limit");
+    const spent = ledger.spentSince(req.walletId, req.asset, now - DAY_MS);
+    if (spent + req.amount > limits.per24h) return deny("exceeds_24h_limit");
+    if (limits.approvalAbove !== void 0 && req.amount > limits.approvalAbove) {
+      return { decision: "require_approval", reasons: ["above_approval_threshold"] };
+    }
+    return { decision: "allow", reasons: [] };
+  } catch (err) {
+    return deny(`policy_error:${err.message}`);
+  }
+}
+function deny(reason) {
+  return { decision: "deny", reasons: [reason] };
+}
+
+// packages/agent-wallet/src/events.ts
+import { randomUUID } from "node:crypto";
+var stderrSink = (e) => {
+  process.stderr.write(JSON.stringify(e) + "\n");
 };
-var AcardClient = class {
-  constructor(options) {
-    this.options = options;
+function makeEvent(fields) {
+  return { id: randomUUID(), occurredAt: (/* @__PURE__ */ new Date()).toISOString(), ...fields };
+}
+
+// packages/agent-wallet/src/approvals.ts
+var MemoryApprovalStore = class {
+  #states = /* @__PURE__ */ new Map();
+  open(approvalId) {
+    this.#states.set(approvalId, "pending");
   }
-  options;
-  async request(path, init = {}) {
-    const response = await fetch(`${this.options.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${this.options.apiKey}`,
-        "content-type": "application/json",
-        ...init.headers ?? {}
+  status(approvalId) {
+    return this.#states.get(approvalId) ?? "unknown";
+  }
+  decide(approvalId, approve) {
+    if (this.#states.get(approvalId) !== "pending") throw new Error("approval_not_pending");
+    this.#states.set(approvalId, approve ? "approved" : "rejected");
+  }
+  pending() {
+    return [...this.#states].filter(([, s]) => s === "pending").map(([id]) => id);
+  }
+};
+
+// packages/agent-wallet/src/x402/guard.ts
+import { lookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
+var PRIVATE = new BlockList();
+for (const [net, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4]
+]) {
+  PRIVATE.addSubnet(net, prefix, "ipv4");
+}
+for (const [net, prefix] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]]) {
+  PRIVATE.addSubnet(net, prefix, "ipv6");
+}
+function isPrivateAddress(address) {
+  const family = isIP(address);
+  if (family === 4) return PRIVATE.check(address, "ipv4");
+  if (family === 6) {
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+    if (mapped) return PRIVATE.check(mapped[1], "ipv4");
+    return PRIVATE.check(address, "ipv6");
+  }
+  return true;
+}
+var UnsafeUrlError = class extends Error {
+};
+async function assertFetchableUrl(raw, options = {}) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new UnsafeUrlError("not a valid URL");
+  }
+  if (url.username || url.password) throw new UnsafeUrlError("URLs with credentials are not allowed");
+  if (options.allowPrivateNetworks) {
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new UnsafeUrlError("only http(s) URLs can be paid over x402");
+    return url;
+  }
+  if (url.protocol !== "https:") throw new UnsafeUrlError("x402 resources must be HTTPS");
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true }).catch(() => []);
+  if (addresses.length === 0) throw new UnsafeUrlError(`could not resolve ${host}`);
+  if (addresses.some((a) => isPrivateAddress(a.address))) throw new UnsafeUrlError(`${host} resolves to a private or reserved address`);
+  return url;
+}
+
+// packages/agent-wallet/src/x402/protocol.ts
+var USDC_BY_NETWORK = {
+  "eip155:8453": { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", name: "USD Coin", version: "2" },
+  // Base
+  "eip155:84532": { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", name: "USDC", version: "2" }
+  // Base Sepolia
+};
+var V1_NETWORKS = { base: "eip155:8453", "base-sepolia": "eip155:84532" };
+var decodeBase64Json = (value) => JSON.parse(Buffer.from(value, "base64").toString("utf8"));
+var encodeBase64Json = (value) => Buffer.from(JSON.stringify(value)).toString("base64");
+function normaliseRequirement(raw, version2) {
+  const network = String(raw.network ?? "");
+  const amount = version2 === 1 ? raw.maxAmountRequired : raw.amount ?? raw.maxAmountRequired;
+  if (typeof raw.scheme !== "string" || typeof raw.payTo !== "string" || typeof raw.asset !== "string") return void 0;
+  if (typeof amount !== "string" || !/^\d+$/.test(amount)) return void 0;
+  return {
+    scheme: raw.scheme,
+    network: V1_NETWORKS[network] ?? network,
+    amount,
+    asset: raw.asset,
+    payTo: raw.payTo,
+    maxTimeoutSeconds: Number(raw.maxTimeoutSeconds ?? 60),
+    extra: raw.extra ?? void 0,
+    raw
+  };
+}
+async function readPaymentRequired(response) {
+  let doc;
+  const header = response.headers.get("payment-required");
+  if (header) {
+    try {
+      doc = decodeBase64Json(header);
+    } catch {
+      doc = void 0;
+    }
+  }
+  if (!doc) {
+    doc = await response.json().catch(() => void 0);
+  }
+  if (!doc || !Array.isArray(doc.accepts)) return void 0;
+  const version2 = doc.x402Version === 1 ? 1 : 2;
+  const accepts = doc.accepts.map((r) => normaliseRequirement(r, version2)).filter((r) => r !== void 0);
+  return {
+    version: version2,
+    resource: doc.resource ?? void 0,
+    accepts,
+    error: typeof doc.error === "string" ? doc.error : void 0
+  };
+}
+function chooseRequirement(required2, allowedNetworks) {
+  const payable = required2.accepts.filter((r) => {
+    const usdc = USDC_BY_NETWORK[r.network];
+    return r.scheme === "exact" && allowedNetworks.includes(r.network) && usdc !== void 0 && usdc.address.toLowerCase() === r.asset.toLowerCase();
+  });
+  payable.sort((a, b) => BigInt(a.amount) < BigInt(b.amount) ? -1 : BigInt(a.amount) > BigInt(b.amount) ? 1 : 0);
+  return payable[0];
+}
+function paymentHeader(required2, requirement, authorization, signature) {
+  if (required2.version === 1) {
+    return {
+      name: "X-PAYMENT",
+      value: encodeBase64Json({
+        x402Version: 1,
+        scheme: requirement.scheme,
+        network: requirement.raw.network,
+        payload: { signature, authorization }
+      })
+    };
+  }
+  return {
+    name: "PAYMENT-SIGNATURE",
+    value: encodeBase64Json({
+      x402Version: 2,
+      ...required2.resource ? { resource: required2.resource } : {},
+      accepted: requirement.raw,
+      payload: { signature, authorization }
+    })
+  };
+}
+function readSettlement(response) {
+  const header = response.headers.get("payment-response") ?? response.headers.get("x-payment-response");
+  if (!header) return void 0;
+  try {
+    const doc = decodeBase64Json(header);
+    return {
+      success: doc.success === true,
+      transaction: typeof doc.transaction === "string" ? doc.transaction : void 0,
+      network: typeof doc.network === "string" ? doc.network : void 0,
+      payer: typeof doc.payer === "string" ? doc.payer : void 0,
+      errorReason: typeof doc.errorReason === "string" ? doc.errorReason : void 0
+    };
+  } catch {
+    return void 0;
+  }
+}
+
+// packages/agent-wallet/src/types.ts
+var TESTNETS = /* @__PURE__ */ new Set(["mock", "base-sepolia", "solana-devnet"]);
+
+// packages/agent-wallet/src/wallet.ts
+var PREVIEW_TTL_MS = 5 * 60 * 1e3;
+var MAX_BODY_BYTES = 64 * 1024;
+var EVENT_TYPES = {
+  transfer: {
+    previewed: "agent_wallet.transfer.previewed",
+    executed: "agent_wallet.transfer.executed",
+    denied: "agent_wallet.transfer.denied",
+    failed: "agent_wallet.transfer.failed"
+  },
+  x402: {
+    previewed: "agent_wallet.x402.previewed",
+    executed: "agent_wallet.x402.paid",
+    denied: "agent_wallet.x402.denied",
+    failed: "agent_wallet.x402.failed"
+  },
+  swap: {
+    previewed: "agent_wallet.swap.previewed",
+    executed: "agent_wallet.swap.executed",
+    denied: "agent_wallet.swap.denied",
+    failed: "agent_wallet.swap.failed"
+  }
+};
+var WalletService = class {
+  constructor(d) {
+    this.d = d;
+    this.#now = d.now ?? Date.now;
+    this.#approvals = d.approvals ?? new MemoryApprovalStore();
+  }
+  d;
+  #previews = /* @__PURE__ */ new Map();
+  #plans = /* @__PURE__ */ new Map();
+  #approvals;
+  #executed = [];
+  #now;
+  spentSince(walletId, asset, sinceMs) {
+    return this.#executed.filter((e) => e.walletId === walletId && e.asset === asset && e.at >= sinceMs).reduce((s, e) => s + e.amount, 0n);
+  }
+  async address(chain) {
+    return this.d.signer.address(chain);
+  }
+  async status() {
+    return Object.entries(this.d.policies).map(([walletId, p]) => ({
+      walletId,
+      signer: this.d.signer.id,
+      chains: p.allowedChains,
+      assets: Object.fromEntries(
+        Object.entries(p.assets).map(([a, l]) => [
+          a,
+          { perTx: l.perTx.toString(), per24h: l.per24h.toString(), approvalAbove: l.approvalAbove?.toString() ?? null }
+        ])
+      ),
+      x402: p.x402 ? { maxPricePerRequest: p.x402.maxPricePerRequest.toString(), allowedDomains: p.x402.allowedDomains ?? null } : null,
+      swap: p.swap ?? null
+    }));
+  }
+  async balances(chain) {
+    return this.d.chain.balances(await this.d.signer.address(chain));
+  }
+  async defiPositions(chain) {
+    if (!this.d.defi) return [];
+    return this.d.defi.positions(await this.d.signer.address(chain), chain);
+  }
+  // ---- the shared gate -----------------------------------------------------------------------
+  async #evaluate(req, rules) {
+    if (!TESTNETS.has(req.chain) && !(this.d.signer.id === "openfireblocks" && this.d.allowMainnet === true)) {
+      return { decision: "deny", reasons: ["mainnet_disabled"] };
+    }
+    const own = rules?.();
+    if (own) return own;
+    return evaluate(req, this.d.policies[req.walletId], this, this.d.sanctions, this.#now());
+  }
+  async #open(kind, req, plan = {}) {
+    const policy = await this.#evaluate(req, plan.rules);
+    const now = this.#now();
+    const preview = { id: randomUUID2(), kind, request: req, policy, createdAt: now, expiresAt: now + PREVIEW_TTL_MS, used: false };
+    if (policy.decision === "require_approval") {
+      preview.approvalId = randomUUID2();
+      this.#approvals.open(preview.approvalId);
+    }
+    this.#previews.set(preview.id, preview);
+    this.#plans.set(preview.id, plan);
+    await this.#emit(EVENT_TYPES[kind][policy.decision === "deny" ? "denied" : "previewed"], req, { decision: policy.decision, reasons: policy.reasons });
+    return preview;
+  }
+  /** Validates a preview for execution, enforces approval, re-checks policy, and spends it. */
+  async #take(previewId, kind) {
+    const p = this.#previews.get(previewId);
+    if (!p || p.kind !== kind) throw new Error("unknown_preview");
+    if (p.used) throw new Error("preview_already_used");
+    if (this.#now() > p.expiresAt) throw new Error("preview_expired");
+    if (p.policy.decision === "deny") throw new Error(`denied:${p.policy.reasons.join(",")}`);
+    if (p.policy.decision === "require_approval") {
+      const approval = this.approvalStatus(p.approvalId);
+      if (approval === "rejected") throw new Error("approval_rejected");
+      if (approval !== "approved") throw new Error("approval_required");
+    }
+    p.used = true;
+    const recheck = await this.#evaluate(p.request, this.#plans.get(p.id)?.rules);
+    if (recheck.decision === "deny") {
+      await this.#emit(EVENT_TYPES[kind].denied, p.request, { decision: "deny", reasons: recheck.reasons });
+      throw new Error(`denied:${recheck.reasons.join(",")}`);
+    }
+    return p;
+  }
+  /** Operator-only. Never exposed as an agent tool. */
+  decideApproval(approvalId, approve) {
+    this.#approvals.decide(approvalId, approve);
+  }
+  approvalStatus(approvalId) {
+    return this.#approvals.status(approvalId);
+  }
+  // ---- transfers -----------------------------------------------------------------------------
+  async sendPreview(req) {
+    return this.#open("transfer", req);
+  }
+  async sendExecute(previewId) {
+    const p = await this.#take(previewId, "transfer");
+    const r = p.request;
+    try {
+      const txHash = await this.#settleTransfer(r);
+      await this.#emit(EVENT_TYPES.transfer.executed, r, { decision: "allow", txHash });
+      return { txHash };
+    } catch (err) {
+      await this.#emit(EVENT_TYPES.transfer.failed, r, { reasons: [err.message] });
+      throw err;
+    }
+  }
+  async #settleTransfer(r) {
+    const from = await this.d.signer.address(r.chain);
+    const payload = this.d.chain.encodeTransfer(from, r.to, r.asset, r.amount);
+    const signed = await this.d.signer.sign({ chain: r.chain, payload });
+    const txHash = await this.d.chain.broadcast(signed);
+    this.#executed.push({ walletId: r.walletId, asset: r.asset, amount: r.amount, at: this.#now() });
+    return txHash;
+  }
+  // ---- x402 ----------------------------------------------------------------------------------
+  /**
+   * Step 1 of paying an HTTP 402 service. Reads the price the server asks and
+   * checks it against `maxAmount` (the most the agent will pay, USDC smallest
+   * units) and the wallet's x402 policy. Nothing is paid. GET only: a probe of
+   * a POST endpoint could have side effects.
+   */
+  async x402Preview(input) {
+    const cfg = this.d.x402;
+    const policy = this.d.policies[input.walletId];
+    const denied = (reasons, chain2, to, amount = input.maxAmount) => this.#open("x402", { walletId: input.walletId, chain: chain2, asset: "USDC", to, amount }, { rules: () => ({ decision: "deny", reasons }) });
+    const firstChain = Object.values(cfg?.networks ?? {})[0] ?? "mock";
+    if (!cfg) return denied(["x402_not_configured"], firstChain, input.url);
+    let url;
+    try {
+      url = await assertFetchableUrl(input.url, { allowPrivateNetworks: cfg.allowPrivateNetworks });
+    } catch (e) {
+      throw new Error(`x402_url_not_allowed:${e instanceof UnsafeUrlError ? e.message : String(e)}`);
+    }
+    const hostDecision = checkX402Host(policy, url.hostname);
+    if (hostDecision) return denied(hostDecision.reasons, firstChain, url.hostname);
+    const doFetch = cfg.fetchImpl ?? fetch;
+    let first;
+    try {
+      first = await doFetch(url, { redirect: "manual", signal: AbortSignal.timeout(cfg.timeoutMs ?? 3e4), headers: { accept: "application/json, text/plain;q=0.9, */*;q=0.5" } });
+    } catch (e) {
+      throw new Error(`x402_resource_unreachable:${e instanceof Error ? e.message : e}`);
+    }
+    if (first.status !== 402) throw new Error(`x402_not_required:${first.status}`);
+    const required2 = await readPaymentRequired(first);
+    if (!required2) throw new Error("x402_invalid_payment_required");
+    const requirement = chooseRequirement(required2, Object.keys(cfg.networks));
+    if (!requirement) return denied(["x402_no_supported_payment_option"], firstChain, url.hostname);
+    const chain = cfg.networks[requirement.network];
+    const price = BigInt(requirement.amount);
+    const rules = () => checkX402Host(policy, url.hostname) ?? (price > input.maxAmount ? { decision: "deny", reasons: ["x402_price_above_max"] } : void 0) ?? checkX402Price(policy, price);
+    return this.#open("x402", { walletId: input.walletId, chain, asset: "USDC", to: requirement.payTo, amount: price }, {
+      x402: { url: url.toString(), required: required2, requirement, host: url.hostname },
+      rules
+    });
+  }
+  /**
+   * Step 2: sign the payment and retry. In the sandbox the signature is the
+   * dev signer's, which a real x402 server would reject, and settlement is
+   * simulated on the mock chain once the server answers 2xx.
+   */
+  async x402Pay(previewId) {
+    const p = await this.#take(previewId, "x402");
+    const plan = this.#plans.get(p.id).x402;
+    const cfg = this.d.x402;
+    const r = p.request;
+    try {
+      const from = await this.d.signer.address(r.chain);
+      if (this.d.chain.balance(from, "USDC") < r.amount) throw new Error("insufficient_funds");
+      const now = Math.floor(this.#now() / 1e3);
+      const authorization = {
+        from,
+        to: r.to,
+        value: plan.requirement.amount,
+        validAfter: String(now - 60),
+        validBefore: String(now + Math.max(30, plan.requirement.maxTimeoutSeconds)),
+        nonce: `0x${randomBytes(32).toString("hex")}`
+      };
+      const signed = await this.d.signer.sign({ chain: r.chain, payload: new TextEncoder().encode(JSON.stringify(authorization)) });
+      const header = paymentHeader(plan.required, plan.requirement, authorization, `0x${signed.signature}`);
+      let paid;
+      try {
+        paid = await (cfg.fetchImpl ?? fetch)(plan.url, { redirect: "manual", signal: AbortSignal.timeout(cfg.timeoutMs ?? 3e4), headers: { accept: "*/*", [header.name]: header.value } });
+      } catch (e) {
+        throw new Error(`x402_outcome_unknown:${e instanceof Error ? e.message : e}`);
       }
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new AcardApiError(
-        response.status,
-        body?.error?.code ?? "unknown",
-        body?.error?.message ?? `request failed with ${response.status}`
-      );
+      const settlement = readSettlement(paid);
+      if (paid.status >= 500) throw new Error(`x402_outcome_unknown:server answered ${paid.status}`);
+      if (paid.status < 200 || paid.status >= 300) throw new Error(`x402_payment_rejected:${paid.status}${settlement?.errorReason ? `:${settlement.errorReason}` : ""}`);
+      const txHash = await this.#settleTransfer(r);
+      const buf = Buffer.from(await paid.arrayBuffer());
+      const contentType = paid.headers.get("content-type") ?? void 0;
+      const result = {
+        txHash: settlement?.transaction || txHash,
+        status: paid.status,
+        contentType,
+        body: contentType && /^(text\/|application\/(json|xml)|[^;]*\+json)/i.test(contentType) ? buf.subarray(0, MAX_BODY_BYTES).toString("utf8") : void 0,
+        truncated: buf.length > MAX_BODY_BYTES || void 0,
+        settlement
+      };
+      await this.#emit(EVENT_TYPES.x402.executed, r, { decision: "allow", txHash: result.txHash });
+      return result;
+    } catch (err) {
+      await this.#emit(EVENT_TYPES.x402.failed, r, { reasons: [err.message] });
+      throw err;
     }
-    return body;
   }
-  wallet(currency) {
-    const qs = currency ? `?currency=${encodeURIComponent(currency)}` : "";
-    return this.request(`/v1/wallet${qs}`);
-  }
-  fundWallet(amount, currency) {
-    return this.request("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount, currency }) });
-  }
-  createCard(input, idempotencyKey) {
-    return this.request("/v1/cards", {
-      method: "POST",
-      body: JSON.stringify(input),
-      headers: idempotencyKey ? { "idempotency-key": idempotencyKey } : {}
-    });
-  }
-  getCard(id) {
-    return this.request(`/v1/cards/${id}`);
-  }
-  listCards() {
-    return this.request("/v1/cards");
-  }
-  closeCard(id) {
-    return this.request(`/v1/cards/${id}/close`, { method: "POST" });
-  }
-  listTransactions(cardId) {
-    const qs = cardId ? `?card_id=${encodeURIComponent(cardId)}` : "";
-    return this.request(`/v1/transactions${qs}`);
-  }
-  listApprovals(status) {
-    const qs = status ? `?status=${status}` : "";
-    return this.request(`/v1/approvals${qs}`);
-  }
-  decideApproval(id, decision) {
-    return this.request(`/v1/approvals/${id}/${decision}`, { method: "POST" });
-  }
-  searchMerchants(params) {
-    const qs = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== void 0 && value !== "") qs.set(key, String(value));
+  // ---- swaps ---------------------------------------------------------------------------------
+  /** Quote a swap and check it against policy. Nothing moves; this is the preview. */
+  async swapQuote(input) {
+    const provider = this.d.swap;
+    const policy = this.d.policies[input.walletId];
+    if (!provider) {
+      const p2 = await this.#open("swap", { walletId: input.walletId, chain: input.chain, asset: input.assetIn, to: "swap:none", amount: input.amountIn }, { rules: () => ({ decision: "deny", reasons: ["swaps_not_enabled"] }) });
+      throw new Error(`denied:${p2.policy.reasons.join(",")}`);
     }
-    return this.request(
-      `/v1/merchants/search?${qs.toString()}`
+    const quote = await provider.quote(input);
+    const rules = () => checkSwap(policy, quote);
+    const p = await this.#open("swap", { walletId: input.walletId, chain: input.chain, asset: input.assetIn, to: `swap:${provider.id}`, amount: input.amountIn }, { swap: quote, rules });
+    return Object.assign(p, { quote });
+  }
+  async swapExecute(previewId) {
+    const p = await this.#take(previewId, "swap");
+    const quote = this.#plans.get(p.id).swap;
+    const r = p.request;
+    try {
+      const from = await this.d.signer.address(r.chain);
+      const result = await this.d.swap.execute(quote, { from });
+      if (result.amountOut < quote.minAmountOut) throw new Error("slippage_exceeded");
+      this.#executed.push({ walletId: r.walletId, asset: r.asset, amount: r.amount, at: this.#now() });
+      await this.#emit(EVENT_TYPES.swap.executed, r, { decision: "allow", txHash: result.txHash });
+      return result;
+    } catch (err) {
+      await this.#emit(EVENT_TYPES.swap.failed, r, { reasons: [err.message] });
+      throw err;
+    }
+  }
+  async #emit(type, r, extra) {
+    await this.d.sink(
+      makeEvent({
+        type,
+        agentId: this.d.agentId,
+        walletId: r.walletId,
+        chain: r.chain,
+        asset: r.asset,
+        amount: r.amount.toString(),
+        counterparty: r.to,
+        ...extra
+      })
     );
-  }
-  getMerchant(id) {
-    return this.request(`/v1/merchants/${id}`);
-  }
-  /** Pay for a URL over x402, governed by a card. A fresh Idempotency-Key per call, so a retry after approval is a new attempt. */
-  payX402(input) {
-    return this.request("/v1/afp/x402/pay", {
-      method: "POST",
-      body: JSON.stringify(input),
-      headers: { "idempotency-key": `mcp_${crypto.randomUUID()}` }
-    });
-  }
-  x402Tab(cardId) {
-    return this.request(`/v1/afp/x402/tabs/${encodeURIComponent(cardId)}`);
-  }
-  simulatePurchase(input) {
-    return this.request("/v1/simulate/purchase", { method: "POST", body: JSON.stringify(input) });
   }
 };
 
@@ -13380,8 +13793,8 @@ var ZodIssueCode = util.arrayToEnum([
   "not_finite"
 ]);
 var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
+  const json2 = JSON.stringify(obj, null, 2);
+  return json2.replace(/"([^"]+)":/g, "$1:");
 };
 var ZodError2 = class _ZodError extends Error {
   get errors() {
@@ -17154,6 +17567,403 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER2 = INVALID;
+
+// packages/agent-wallet/src/tools/wallet.ts
+var CHAINS = ["mock", "base-sepolia", "solana-devnet"];
+var json = (v) => ({ content: [{ type: "text", text: JSON.stringify(v, null, 2) }] });
+var fail = (e) => ({ isError: true, content: [{ type: "text", text: e.message }] });
+function registerWalletTools(server2, wallet2) {
+  server2.registerTool(
+    "wallet_status",
+    { description: "On-chain agent wallet (sandbox: test chains only, no real funds). Lists wallets, signer, allowed chains and spending limits. For A-CARD's fiat wallet use get_wallet.", annotations: { readOnlyHint: true } },
+    async () => json(await wallet2.status())
+  );
+  server2.registerTool(
+    "get_balances",
+    {
+      description: "On-chain wallet balances (sandbox) for the agent's address on a chain. Amounts are integer strings in the asset's smallest unit.",
+      inputSchema: { chain: external_exports.enum(CHAINS) },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ chain }) => json({ chain, address: await wallet2.address(chain), balances: await wallet2.balances(chain) })
+  );
+  server2.registerTool(
+    "receive_info",
+    { description: "Address to receive funds on a chain.", inputSchema: { chain: external_exports.enum(CHAINS) }, annotations: { readOnlyHint: true } },
+    async ({ chain }) => json({ chain, address: await wallet2.address(chain) })
+  );
+  server2.registerTool(
+    "send_preview",
+    {
+      description: "Step 1 of an on-chain transfer (sandbox). Checks policy and returns a preview_id and decision (allow, require_approval, deny). Nothing moves yet.",
+      inputSchema: {
+        wallet_id: external_exports.string(),
+        chain: external_exports.enum(CHAINS),
+        asset: external_exports.string(),
+        to: external_exports.string(),
+        amount: external_exports.string().regex(/^\d+$/, "integer string in smallest unit"),
+        memo: external_exports.string().max(140).optional()
+      }
+    },
+    async (a) => {
+      try {
+        const p = await wallet2.sendPreview({ walletId: a.wallet_id, chain: a.chain, asset: a.asset, to: a.to, amount: BigInt(a.amount), memo: a.memo });
+        return json({ preview_id: p.id, decision: p.policy.decision, reasons: p.policy.reasons, approval_id: p.approvalId ?? null, expires_at: new Date(p.expiresAt).toISOString() });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "send_execute",
+    {
+      description: "Step 2 of a transfer. Executes a previewed transfer if policy allows (and approval was granted when required). Single use.",
+      inputSchema: { preview_id: external_exports.string().uuid() },
+      annotations: { destructiveHint: true }
+    },
+    async ({ preview_id }) => {
+      try {
+        return json(await wallet2.sendExecute(preview_id));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "approval_status",
+    { description: "Check whether a human has approved a pending transfer.", inputSchema: { approval_id: external_exports.string().uuid() }, annotations: { readOnlyHint: true } },
+    async ({ approval_id }) => json({ approval_id, status: wallet2.approvalStatus(approval_id) })
+  );
+  server2.registerTool(
+    "x402_preview",
+    {
+      description: 'Step 1 of paying an HTTP 402 (x402) service from the on-chain wallet (sandbox: the payment signature is a dev one and settlement is simulated). Reads the price, checks it against max_amount and policy, pays nothing. max_amount is the most you will pay, in USDC smallest units (6 decimals: 1 USDC is "1000000"). Set it from what the human expects, not from the quoted price. GET only.',
+      inputSchema: {
+        wallet_id: external_exports.string(),
+        url: external_exports.string().url(),
+        max_amount: external_exports.string().regex(/^\d+$/, "integer string in smallest unit")
+      }
+    },
+    async (a) => {
+      try {
+        const p = await wallet2.x402Preview({ walletId: a.wallet_id, url: a.url, maxAmount: BigInt(a.max_amount) });
+        return json({
+          preview_id: p.id,
+          decision: p.policy.decision,
+          reasons: p.policy.reasons,
+          price: { amount: p.request.amount.toString(), asset: p.request.asset, pay_to: p.request.to, chain: p.request.chain },
+          approval_id: p.approvalId ?? null,
+          expires_at: new Date(p.expiresAt).toISOString()
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "x402_pay",
+    {
+      description: "Step 2 of an x402 payment. Pays and returns the resource if policy allows (and approval was granted when required). Single use.",
+      inputSchema: { preview_id: external_exports.string().uuid() },
+      annotations: { destructiveHint: true, openWorldHint: true }
+    },
+    async ({ preview_id }) => {
+      try {
+        return json(await wallet2.x402Pay(preview_id));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "swap_quote",
+    {
+      description: "Step 1 of a token swap (sandbox: fixed mock rates). Returns a quote and the policy decision; nothing moves. Amounts are integer strings in the smallest unit.",
+      inputSchema: {
+        wallet_id: external_exports.string(),
+        chain: external_exports.enum(CHAINS),
+        asset_in: external_exports.string(),
+        asset_out: external_exports.string(),
+        amount_in: external_exports.string().regex(/^\d+$/, "integer string in smallest unit")
+      }
+    },
+    async (a) => {
+      try {
+        const p = await wallet2.swapQuote({ walletId: a.wallet_id, chain: a.chain, assetIn: a.asset_in, assetOut: a.asset_out, amountIn: BigInt(a.amount_in) });
+        return json({
+          preview_id: p.id,
+          decision: p.policy.decision,
+          reasons: p.policy.reasons,
+          quote: { provider: p.quote.provider, amount_out: p.quote.amountOut.toString(), min_amount_out: p.quote.minAmountOut.toString(), expires_at: new Date(p.quote.expiresAt).toISOString() },
+          approval_id: p.approvalId ?? null,
+          expires_at: new Date(p.expiresAt).toISOString()
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "swap_execute",
+    {
+      description: "Step 2 of a swap. Executes a quoted swap if policy allows (and approval was granted when required). Single use.",
+      inputSchema: { preview_id: external_exports.string().uuid() },
+      annotations: { destructiveHint: true }
+    },
+    async ({ preview_id }) => {
+      try {
+        const r = await wallet2.swapExecute(preview_id);
+        return json({ tx_hash: r.txHash, amount_out: r.amountOut.toString() });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "defi_positions",
+    {
+      description: "Read-only lending and yield positions for the agent's address (sandbox: there is no market, so none). Moves nothing.",
+      inputSchema: { chain: external_exports.enum(CHAINS) },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ chain }) => json({ chain, positions: await wallet2.defiPositions(chain) })
+  );
+}
+
+// packages/agent-wallet/src/swap.ts
+var MockSwapProvider = class {
+  constructor(chain, rates = { "USDC>ZARP": { num: 185n, den: 10n }, "ZARP>USDC": { num: 10n, den: 185n } }, slippageBps = 50n, now = Date.now) {
+    this.chain = chain;
+    this.rates = rates;
+    this.slippageBps = slippageBps;
+    this.now = now;
+  }
+  chain;
+  rates;
+  slippageBps;
+  now;
+  id = "mock-swap";
+  async quote(req) {
+    const rate = this.rates[`${req.assetIn}>${req.assetOut}`];
+    if (!rate) throw new Error(`no_route:${req.assetIn}>${req.assetOut}`);
+    const amountOut = req.amountIn * rate.num / rate.den;
+    return {
+      provider: this.id,
+      ...req,
+      amountOut,
+      minAmountOut: amountOut * (10000n - this.slippageBps) / 10000n,
+      expiresAt: this.now() + 6e4
+    };
+  }
+  async execute(quote, ctx) {
+    if (this.now() > quote.expiresAt) throw new Error("quote_expired");
+    this.chain.debit(ctx.from, quote.assetIn, quote.amountIn);
+    this.chain.credit(ctx.from, quote.assetOut, quote.amountOut);
+    return { txHash: `0xswap${quote.amountIn}${quote.amountOut}`.slice(0, 66), amountOut: quote.amountOut };
+  }
+};
+
+// packages/agent-wallet/src/defi.ts
+var SandboxDefiProvider = class {
+  id = "sandbox";
+  async positions() {
+    return [];
+  }
+};
+
+// packages/agent-wallet/src/signer/index.ts
+import { generateKeyPairSync, sign as edSign, createHash } from "node:crypto";
+var DevSigner = class {
+  id = "dev";
+  #privateKey;
+  #publicKeyDer;
+  constructor() {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    this.#privateKey = privateKey;
+    this.#publicKeyDer = publicKey.export({ type: "spki", format: "der" });
+  }
+  async address(chain) {
+    this.#assertTestnet(chain);
+    const h = createHash("sha256").update(this.#publicKeyDer).digest("hex");
+    return `${chain}:${h.slice(0, 40)}`;
+  }
+  async sign(req) {
+    this.#assertTestnet(req.chain);
+    const signature = edSign(null, req.payload, this.#privateKey).toString("hex");
+    return { chain: req.chain, payload: req.payload, signature, signerId: this.id };
+  }
+  #assertTestnet(chain) {
+    if (!TESTNETS.has(chain)) throw new Error(`DevSigner refuses non-testnet chain: ${chain}`);
+  }
+  /** Prevent accidental serialisation of the signer (and its key) into logs/output. */
+  toJSON() {
+    return { id: this.id };
+  }
+};
+
+// packages/agent-wallet/src/chains/mock.ts
+import { createHash as createHash2 } from "node:crypto";
+var MockChain = class {
+  #balances = /* @__PURE__ */ new Map();
+  // key: address|asset
+  credit(address, asset, amount) {
+    const k = `${address}|${asset}`;
+    this.#balances.set(k, (this.#balances.get(k) ?? 0n) + amount);
+  }
+  /** Sandbox only: remove funds, e.g. the input side of a mock swap. */
+  debit(address, asset, amount) {
+    if (this.balance(address, asset) < amount) throw new Error("insufficient_funds");
+    this.credit(address, asset, -amount);
+  }
+  balance(address, asset) {
+    return this.#balances.get(`${address}|${asset}`) ?? 0n;
+  }
+  balances(address) {
+    const out = {};
+    for (const [k, v] of this.#balances) {
+      const [addr, asset] = k.split("|");
+      if (addr === address) out[asset] = v.toString();
+    }
+    return out;
+  }
+  encodeTransfer(from, to, asset, amount) {
+    return new TextEncoder().encode(JSON.stringify({ from, to, asset, amount: amount.toString() }));
+  }
+  async broadcast(tx) {
+    const { from, to, asset, amount } = JSON.parse(new TextDecoder().decode(tx.payload));
+    const amt = BigInt(amount);
+    if (this.balance(from, asset) < amt) throw new Error("insufficient_funds");
+    this.credit(from, asset, -amt);
+    this.credit(to, asset, amt);
+    return "0x" + createHash2("sha256").update(tx.signature).digest("hex");
+  }
+};
+
+// packages/agent-wallet/src/dev.ts
+async function devWallet(options = {}) {
+  const policies = {
+    default: {
+      allowedChains: ["mock"],
+      assets: { USDC: { perTx: 50000000n, per24h: 200000000n, approvalAbove: 10000000n } },
+      x402: { maxPricePerRequest: 1000000n },
+      // 1 USDC a request
+      swap: { maxSlippageBps: 100 }
+    }
+  };
+  const chain = new MockChain();
+  const signer = new DevSigner();
+  const wallet2 = new WalletService({
+    agentId: "dev-agent",
+    signer,
+    chain,
+    policies,
+    sanctions: async () => "clear",
+    sink: options.sink ?? stderrSink,
+    approvals: options.approvals,
+    swap: new MockSwapProvider(chain),
+    defi: new SandboxDefiProvider(),
+    // Base Sepolia is stood in for by the mock chain.
+    x402: { networks: { "eip155:84532": "mock" }, allowPrivateNetworks: options.x402AllowPrivateNetworks, fetchImpl: options.fetchImpl }
+  });
+  chain.credit(await signer.address("mock"), "USDC", 500000000n);
+  return wallet2;
+}
+
+// apps/mcp/src/client.ts
+var AcardApiError = class extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+  status;
+  code;
+};
+var AcardClient = class {
+  constructor(options) {
+    this.options = options;
+  }
+  options;
+  async request(path, init = {}) {
+    const response = await fetch(`${this.options.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${this.options.apiKey}`,
+        "content-type": "application/json",
+        ...init.headers ?? {}
+      }
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new AcardApiError(
+        response.status,
+        body?.error?.code ?? "unknown",
+        body?.error?.message ?? `request failed with ${response.status}`
+      );
+    }
+    return body;
+  }
+  wallet(currency) {
+    const qs = currency ? `?currency=${encodeURIComponent(currency)}` : "";
+    return this.request(`/v1/wallet${qs}`);
+  }
+  fundWallet(amount, currency) {
+    return this.request("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount, currency }) });
+  }
+  createCard(input, idempotencyKey) {
+    return this.request("/v1/cards", {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: idempotencyKey ? { "idempotency-key": idempotencyKey } : {}
+    });
+  }
+  getCard(id) {
+    return this.request(`/v1/cards/${id}`);
+  }
+  listCards() {
+    return this.request("/v1/cards");
+  }
+  closeCard(id) {
+    return this.request(`/v1/cards/${id}/close`, { method: "POST" });
+  }
+  listTransactions(cardId) {
+    const qs = cardId ? `?card_id=${encodeURIComponent(cardId)}` : "";
+    return this.request(`/v1/transactions${qs}`);
+  }
+  listApprovals(status) {
+    const qs = status ? `?status=${status}` : "";
+    return this.request(`/v1/approvals${qs}`);
+  }
+  decideApproval(id, decision) {
+    return this.request(`/v1/approvals/${id}/${decision}`, { method: "POST" });
+  }
+  searchMerchants(params) {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== void 0 && value !== "") qs.set(key, String(value));
+    }
+    return this.request(
+      `/v1/merchants/search?${qs.toString()}`
+    );
+  }
+  getMerchant(id) {
+    return this.request(`/v1/merchants/${id}`);
+  }
+  /** Pay for a URL over x402, governed by a card. A fresh Idempotency-Key per call, so a retry after approval is a new attempt. */
+  payX402(input) {
+    return this.request("/v1/afp/x402/pay", {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: { "idempotency-key": `mcp_${crypto.randomUUID()}` }
+    });
+  }
+  x402Tab(cardId) {
+    return this.request(`/v1/afp/x402/tabs/${encodeURIComponent(cardId)}`);
+  }
+  simulatePurchase(input) {
+    return this.request("/v1/simulate/purchase", { method: "POST", body: JSON.stringify(input) });
+  }
+};
 
 // node_modules/zod/v4/mini/schemas.js
 var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
@@ -21209,11 +22019,11 @@ var EMPTY_COMPLETION_RESULT = {
 function ok(payload) {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
 }
-function fail(error2) {
+function fail2(error2) {
   const message = error2 instanceof AcardApiError ? `${error2.code}: ${error2.message}` : error2 instanceof Error ? error2.message : String(error2);
   return { content: [{ type: "text", text: `Error \u2014 ${message}` }], isError: true };
 }
-function createMcpServer(client) {
+function createMcpServer(client, options = {}) {
   const server2 = new McpServer({ name: "acard", version: "0.1.0" });
   server2.registerTool(
     "create_card",
@@ -21248,7 +22058,7 @@ function createMcpServer(client) {
         });
         return ok(result.card);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21264,7 +22074,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.getCard(card_id)).card);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21280,7 +22090,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.listCards()).cards);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21308,7 +22118,7 @@ function createMcpServer(client) {
         });
         return ok(result);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21335,7 +22145,7 @@ function createMcpServer(client) {
         }
         return ok(result);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21351,7 +22161,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.closeCard(card_id)).card);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21367,7 +22177,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.listTransactions(card_id)).transactions);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21375,7 +22185,7 @@ function createMcpServer(client) {
     "get_wallet",
     {
       title: "Get wallet balance",
-      description: "Fetch wallet available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, \u2026); pass a currency to focus on one.",
+      description: "Fetch A-CARD's fiat wallet (cards draw from it): available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, \u2026); pass a currency to focus on one.",
       inputSchema: {
         currency: external_exports.enum(["ZAR", "USD", "NGN", "KES"]).optional().describe("Focus on a single currency wallet")
       },
@@ -21386,7 +22196,7 @@ function createMcpServer(client) {
         const result = await client.wallet(currency);
         return ok(currency ? result.wallet : result.wallets);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21428,7 +22238,7 @@ function createMcpServer(client) {
           })
         );
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21444,17 +22254,56 @@ function createMcpServer(client) {
       try {
         return ok(await client.getMerchant(merchant_id));
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
+  if (options.wallet) registerWalletTools(server2, options.wallet);
   return server2;
 }
 
+// apps/mcp/src/walletApprovals.ts
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+var WALLET_APPROVALS_FILE = join(homedir(), ".acard", "wallet-approvals.json");
+var FileApprovalStore = class {
+  constructor(file = WALLET_APPROVALS_FILE) {
+    this.file = file;
+  }
+  file;
+  #read() {
+    return existsSync(this.file) ? JSON.parse(readFileSync(this.file, "utf8")) : {};
+  }
+  #write(entries) {
+    mkdirSync(dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(entries, null, 2), { mode: 384 });
+    renameSync(tmp, this.file);
+  }
+  open(approvalId) {
+    const entries = this.#read();
+    entries[approvalId] = { state: "pending", at: (/* @__PURE__ */ new Date()).toISOString() };
+    this.#write(entries);
+  }
+  status(approvalId) {
+    return this.#read()[approvalId]?.state ?? "unknown";
+  }
+  decide(approvalId, approve) {
+    const entries = this.#read();
+    if (entries[approvalId]?.state !== "pending") throw new Error("approval_not_pending");
+    entries[approvalId] = { state: approve ? "approved" : "rejected", at: (/* @__PURE__ */ new Date()).toISOString() };
+    this.#write(entries);
+  }
+  pending() {
+    return Object.entries(this.#read()).filter(([, e]) => e.state === "pending").map(([id]) => id);
+  }
+};
+
 // apps/mcp/src/index.ts
-var CONFIG_DIR = join(homedir(), ".acard");
-var CONFIG_FILE = join(CONFIG_DIR, "config.json");
-var fileConfig = existsSync(CONFIG_FILE) ? JSON.parse(readFileSync(CONFIG_FILE, "utf8")) : {};
+var CONFIG_DIR = join2(homedir2(), ".acard");
+var CONFIG_FILE = join2(CONFIG_DIR, "config.json");
+var fileConfig = existsSync2(CONFIG_FILE) ? JSON.parse(readFileSync2(CONFIG_FILE, "utf8")) : {};
 if (process.argv[2] === "setup") {
   const flag = (name) => {
     const i = process.argv.indexOf(`--${name}`);
@@ -21465,8 +22314,8 @@ if (process.argv[2] === "setup") {
     console.error("usage: acard-mcp setup --api-key ak_\u2026 [--api-url https://your-a-card-api]");
     process.exit(1);
   }
-  mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify({ ...fileConfig, apiKey: apiKey2, apiUrl: flag("api-url") ?? fileConfig.apiUrl ?? "http://localhost:8787" }, null, 2), { mode: 384 });
+  mkdirSync2(CONFIG_DIR, { recursive: true });
+  writeFileSync2(CONFIG_FILE, JSON.stringify({ ...fileConfig, apiKey: apiKey2, apiUrl: flag("api-url") ?? fileConfig.apiUrl ?? "http://localhost:8787" }, null, 2), { mode: 384 });
   console.error(`Saved to ${CONFIG_FILE}. Restart your agent app to connect.`);
   process.exit(0);
 }
@@ -21474,12 +22323,34 @@ var env = (name) => {
   const value = process.env[name];
   return value && !value.startsWith("${") ? value : void 0;
 };
+if (["wallet-approvals", "wallet-approve", "wallet-reject"].includes(process.argv[2] ?? "")) {
+  const store = new FileApprovalStore();
+  const [command, id] = [process.argv[2], process.argv[3]];
+  if (command === "wallet-approvals") {
+    const pending = store.pending();
+    console.log(pending.length ? pending.join("\n") : `No pending approvals (${WALLET_APPROVALS_FILE}).`);
+    process.exit(0);
+  }
+  if (!id) {
+    console.error(`usage: acard-mcp ${command} <approval_id>`);
+    process.exit(1);
+  }
+  try {
+    store.decide(id, command === "wallet-approve");
+    console.log(`${command === "wallet-approve" ? "Approved" : "Rejected"} ${id}.`);
+    process.exit(0);
+  } catch (error2) {
+    console.error(`${error2.message}: ${id} is not a pending approval.`);
+    process.exit(1);
+  }
+}
 var baseUrl = env("ACARD_API_URL") ?? fileConfig.apiUrl ?? "http://localhost:8787";
 var apiKey = env("ACARD_API_KEY") ?? fileConfig.apiKey;
 if (!apiKey) {
   console.error(`No A-CARD API key: set ACARD_API_KEY, or run \`acard-mcp setup --api-key ak_\u2026\` (writes ${CONFIG_FILE}).`);
   process.exit(1);
 }
-var server = createMcpServer(new AcardClient({ baseUrl, apiKey }));
+var wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore(), x402AllowPrivateNetworks: env("ACARD_WALLET_X402_ALLOW_PRIVATE_NETWORKS") === "true" }) : void 0;
+var server = createMcpServer(new AcardClient({ baseUrl, apiKey }), { wallet });
 await server.connect(new StdioServerTransport());
-console.error(`acard MCP server connected (API: ${baseUrl})`);
+console.error(`acard MCP server connected (API: ${baseUrl})${wallet ? " \xB7 sandbox wallet on" : ""}`);

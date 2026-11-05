@@ -1,6 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { AcardClient } from "./client.js";
 import { createMcpServer } from "./server.js";
+import type { WalletHost } from "./walletHost.js";
 
 /**
  * Remote (hosted) MCP transport, so `acard-mcp` can run as an AWS service
@@ -14,7 +15,7 @@ import { createMcpServer } from "./server.js";
 
 const ACARD_API_URL = process.env.ACARD_API_URL ?? "http://localhost:8787";
 
-export async function handleMcpRequest(request: Request): Promise<Response> {
+export async function handleMcpRequest(request: Request, options: { wallets?: WalletHost } = {}): Promise<Response> {
   const auth = request.headers.get("authorization") ?? "";
   const apiKey = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!apiKey) {
@@ -25,7 +26,8 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
   }
 
   const client = new AcardClient({ baseUrl: ACARD_API_URL, apiKey });
-  const server = createMcpServer(client);
+  const wallet = options.wallets ? await options.wallets.forKey(apiKey) : undefined;
+  const server = createMcpServer(client, { wallet });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
   return transport.handleRequest(request);

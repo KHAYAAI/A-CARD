@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { registerWalletTools, type WalletService } from "@acard/agent-wallet";
 import { AcardApiError, AcardClient } from "./client.js";
 
 /**
@@ -22,7 +23,16 @@ function fail(error: unknown) {
   return { content: [{ type: "text" as const, text: `Error — ${message}` }], isError: true as const };
 }
 
-export function createMcpServer(client: AcardClient): McpServer {
+export interface McpServerOptions {
+  /**
+   * An on-chain agent wallet to offer alongside the cards (six more tools:
+   * wallet_status, get_balances, receive_info, send_preview, send_execute,
+   * approval_status). Optional and off by default; see index.ts.
+   */
+  wallet?: WalletService;
+}
+
+export function createMcpServer(client: AcardClient, options: McpServerOptions = {}): McpServer {
   const server = new McpServer({ name: "acard", version: "0.1.0" });
 
   server.registerTool(
@@ -208,7 +218,7 @@ export function createMcpServer(client: AcardClient): McpServer {
     {
       title: "Get wallet balance",
       description:
-        "Fetch wallet available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, …); pass a currency to focus on one.",
+        "Fetch A-CARD's fiat wallet (cards draw from it): available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, …); pass a currency to focus on one.",
       inputSchema: {
         currency: z.enum(["ZAR", "USD", "NGN", "KES"]).optional().describe("Focus on a single currency wallet"),
       },
@@ -291,6 +301,8 @@ export function createMcpServer(client: AcardClient): McpServer {
       }
     },
   );
+
+  if (options.wallet) registerWalletTools(server, options.wallet);
 
   return server;
 }

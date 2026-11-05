@@ -8,6 +8,23 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: agent wallet in the MCP server
+
+### Added
+- **`@acard/agent-wallet`** (`packages/agent-wallet`): a governed on-chain wallet for agents. Every transfer is previewed, checked against policy (limits, allow and deny lists, sanctions), approved by a person when required, then signed. Sandbox only: a mock chain and a dev signer that refuses real networks.
+- **One MCP server for cards and the wallet.** `apps/mcp` mounts the wallet's six tools (`wallet_status`, `get_balances`, `receive_info`, `send_preview`, `send_execute`, `approval_status`) when `ACARD_ENABLE_WALLET=true`; off by default, so the plugin still offers 10 tools. Approvals are decided by an operator out of band: `acard-mcp wallet-approvals`, `wallet-approve <id>`, `wallet-reject <id>`. The plugin bundle and skill are updated.
+- **Wallet phases 2–4 (sandbox):** `x402_preview` and `x402_pay` (v1 and v2, a per-request cap and domain allow-list, hosts the policy disallows are never contacted), `swap_quote` and `swap_execute` (pair and slippage policy), `defi_positions` (read-only), an `OpenFireblocksSigner` threshold-signing client, and a mainnet gate (needs the openfireblocks signer and an explicit flag). The stdio server offers 21 tools with the wallet on.
+- **The hosted (HTTP) server can offer the wallet** with `ACARD_MCP_HTTP_WALLET=true` and `ACARD_WALLET_OPERATOR_TOKEN`: one wallet per API key in memory (single instance), approvals decided over HTTP with an operator token the agent doesn't hold.
+
+### Changed
+- The x402 wire format and URL guard moved to `@acard/agent-wallet`; `apps/api` re-exports them. No behaviour change.
+- `get_wallet`'s description now says it is A-CARD's fiat wallet, to tell it apart from the on-chain one.
+
+### Fixed
+- Wallet: an execute attempt before approval used up the preview, so the person's approval couldn't be used and the agent had to start over. It no longer does.
+
+---
+
 ## [Unreleased]: x402 under card controls, and agent-app plugins
 
 ### Added

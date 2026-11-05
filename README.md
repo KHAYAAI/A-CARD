@@ -26,7 +26,7 @@ State is durable and **multi-writer** (a Postgres row-level ledger with per-wall
 
 ```bash
 npm install
-npm test                 # 515 tests: ledger invariants, auth flow, approvals, billing, webhooks,
+npm test                 # 551 tests: ledger invariants, auth flow, approvals, billing, webhooks,
                          # A-MERCHANT discovery + orders + purchase notices, AFP routing/ledger,
                          # KYC/KYB/AML compliance records, gating and transaction monitoring, API e2e,
                          # OpenAPI drift + response-shape checks, the SDK and every example over real HTTP.

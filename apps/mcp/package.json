@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@acard/agent-wallet": "*",
     "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "hono": "^4.6.0",
