@@ -1,0 +1,23 @@
+{
+  "name": "@acard/agent-wallet",
+  "version": "0.1.0",
+  "description": "FORGE Agent Wallet: governed wallet for AI agents over MCP",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "forge-agent-wallet": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/server.ts",
+    "test": "vitest run",
+    "licences": "node scripts/check-licences.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  }
+}
