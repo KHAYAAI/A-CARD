@@ -8,6 +8,20 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: agent wallet in the MCP server
+
+### Added
+- **`@acard/agent-wallet`** (`packages/agent-wallet`): a governed on-chain wallet for agents. Every transfer is previewed, checked against policy (limits, allow and deny lists, sanctions), approved by a person when required, then signed. Sandbox only: a mock chain and a dev signer that refuses real networks.
+- **One MCP server for cards and the wallet.** `apps/mcp` mounts the wallet's six tools (`wallet_status`, `get_balances`, `receive_info`, `send_preview`, `send_execute`, `approval_status`) when `ACARD_ENABLE_WALLET=true`; off by default, so the plugin still offers 10 tools. Approvals are decided by an operator out of band: `acard-mcp wallet-approvals`, `wallet-approve <id>`, `wallet-reject <id>`. The plugin bundle and skill are updated.
+
+### Fixed
+- Wallet: an execute attempt before approval used up the preview, so the person's approval couldn't be used and the agent had to start over. It no longer does.
+
+### Changed
+- `get_wallet`'s description now says it is A-CARD's fiat wallet, to tell it apart from the on-chain one.
+
+---
+
 ## [Unreleased]: x402 under card controls, and agent-app plugins
 
 ### Added

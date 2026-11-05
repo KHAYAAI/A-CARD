@@ -25,6 +25,16 @@ A-CARD gives you a virtual card per task. The card, not you, holds the limits. Y
   - Prices below a cent are fine.
   - The card must allow the `x402` category (or have no category list), and the host must be in its `x402_allowed_hosts` if that's set.
 
+## The on-chain wallet (optional, sandbox)
+
+If `wallet_status` is among your tools, the operator has switched on the sandbox wallet: a mock chain with test funds, never real money. Don't describe those balances as real.
+
+- Transfers are two steps. `send_preview` returns a `preview_id` and a decision (`allow`, `require_approval` or `deny`); nothing moves. `send_execute` with that `preview_id` moves the funds only if the decision was `allow`, or a person has approved it.
+- On `require_approval`, tell the human the `approval_id`. They approve in a separate terminal (`acard-mcp wallet-approve <id>`). You can't approve your own transfers, so don't try. After they do, call `send_execute` again with the same `preview_id`; check `approval_status` if unsure.
+- On `deny`, read `reasons` and stop. Don't split a transfer to get under a limit.
+- Amounts are integer strings in the asset's smallest unit (USDC has 6 decimals: 5 USDC is `"5000000"`).
+- A-CARD's fiat wallet is `get_wallet`; the on-chain one is `wallet_status` and `get_balances`.
+
 ## When A-CARD says no
 
 Every decline has a `decline_reason`. Don't work around it.

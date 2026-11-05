@@ -12,6 +12,10 @@ Clean-room implementation — see [CLEANROOM.md](CLEANROOM.md). Spec: [SPEC.md](
 v0.1 scaffold: MCP server (stdio), policy engine, dev signer, mock chain, events,
 9 tests. Next: Base Sepolia adapter, x402, openfireblocks signer, A-CARD cards.
 
+## In A-CARD's MCP server
+
+`apps/mcp` mounts these tools (`registerWalletTools`) when started with `ACARD_ENABLE_WALLET=true`, so the A-CARD plugin for Claude Code, Codex and OpenClaw offers cards and the wallet together. See [plugins/acard](../../plugins/acard/README.md). It's sandbox only there.
+
 ## Try it
 
 ```bash

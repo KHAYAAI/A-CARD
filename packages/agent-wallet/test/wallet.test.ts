@@ -81,6 +81,21 @@ describe("wallet flow", () => {
     await expect(wallet.sendExecute(p2.id)).resolves.toHaveProperty("txHash");
   });
 
+  it("an execute attempt before approval doesn't spend the preview; the same preview works once approved", async () => {
+    const p = await wallet.sendPreview(req(30n));
+    await expect(wallet.sendExecute(p.id)).rejects.toThrow("approval_required");
+    await expect(wallet.sendExecute(p.id)).rejects.toThrow("approval_required");
+    wallet.decideApproval(p.approvalId!, true);
+    await expect(wallet.sendExecute(p.id)).resolves.toHaveProperty("txHash");
+    await expect(wallet.sendExecute(p.id)).rejects.toThrow("preview_already_used");
+  });
+
+  it("a rejected approval stays rejected", async () => {
+    const p = await wallet.sendPreview(req(30n));
+    wallet.decideApproval(p.approvalId!, false);
+    await expect(wallet.sendExecute(p.id)).rejects.toThrow("approval_rejected");
+  });
+
   it("re-checks policy at execute time", async () => {
     const p = await wallet.sendPreview(req(10n, "carol"));
     sanctioned.add("carol"); // carol becomes sanctioned after the preview

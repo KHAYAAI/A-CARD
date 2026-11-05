@@ -1,6 +1,6 @@
 # A-CARD plugin for Claude Code, Codex and OpenClaw
 
-One plugin folder serves all three apps. It gives your agent the A-CARD MCP server, with its 10 tools: per-task cards, merchant payments, x402 API payments, A-MERCHANT supply search, the wallet and transactions. It also adds a skill that teaches the agent to scope cards and respect declines.
+One plugin folder serves all three apps. It gives your agent the A-CARD MCP server, with its 10 tools: per-task cards, merchant payments, x402 API payments, A-MERCHANT supply search, the fiat wallet and transactions. Six more tools, an on-chain agent wallet, are available when you opt in (below). It also adds a skill that teaches the agent to scope cards and respect declines.
 
 The server is a single bundled file (`server/acard-mcp.mjs`) that needs only **Node.js 20 or later**: no npm install, and no clone of this repository.
 
@@ -15,6 +15,19 @@ node <plugin folder>/server/acard-mcp.mjs setup --api-key ak_… --api-url https
 This writes `~/.acard/config.json` with owner-only permissions. It's the same file the `acard` CLI uses. Leave out `--api-url` to use the local sandbox (`http://localhost:8787`).
 
 In Claude Code you can skip this step and enter the key when you enable the plugin instead. It's stored in your system's secure credential store.
+
+### Optional: the sandbox agent wallet
+
+Set `ACARD_ENABLE_WALLET=true` in the environment the server starts with to add six tools: `wallet_status`, `get_balances`, `receive_info`, `send_preview`, `send_execute`, `approval_status`. It's **sandbox only**: a mock chain with test funds and a dev signer that refuses real networks. It starts with 500 USDC; 10 USDC and under goes through, anything above needs a person's approval, and above 50 USDC is refused.
+
+Approvals are decided by an operator in a separate terminal, never by the agent:
+
+```bash
+node <plugin folder>/server/acard-mcp.mjs wallet-approvals          # list pending
+node <plugin folder>/server/acard-mcp.mjs wallet-approve <id>       # or wallet-reject <id>
+```
+
+They live in `~/.acard/wallet-approvals.json`. An agent with a shell on the same machine could run the same commands, so this proves the flow and isn't a security boundary. A real deployment has to send approvals to a channel the agent can't reach. The wallet's state is in memory and resets on restart.
 
 ## 2. Install
 
@@ -55,7 +68,7 @@ OpenClaw asks you to confirm installing from a local path and to accept the plug
 | Claude Code | `claude plugin validate` passed for the plugin and the marketplace. Installed through `claude plugin marketplace add` and `install`; `claude mcp list` showed `plugin:acard:acard … √ Connected`. |
 | Codex (CLI 0.166.0) | `codex plugin marketplace add` and `codex plugin add` installed it into Codex's plugin cache, with `cwd` resolved to the plugin root. The server ran from that cached copy and served all 10 tools against a live API. |
 | OpenClaw (2026.10.9) | `openclaw plugins install` installed it and `plugins doctor` passed. `plugins inspect` showed a Codex-format bundle with skills and an MCP server, and OpenClaw's own MCP loader reported the server as runnable over stdio. The server ran from the installed copy. |
-| The server itself | `apps/api/test/plugins.test.ts` launches the committed bundle as Claude Code and Codex do, against a live API. It creates a card and pays an x402 API through it. It also fails if the bundle is stale. |
+| The server itself | `apps/api/test/plugins.test.ts` launches the committed bundle as Claude Code and Codex do, against a live API. It creates a card and pays an x402 API through it, runs the opt-in wallet (5 USDC sent, 20 held until an operator approves it, 90 refused), and fails if the bundle is stale. |
 
 Not yet done: a full agent conversation inside each app, because that needs a signed-in model account in each one.
 

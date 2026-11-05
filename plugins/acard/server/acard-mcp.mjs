@@ -6893,9 +6893,9 @@ var require_dist = __commonJS({
 });
 
 // apps/mcp/src/index.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -9988,24 +9988,24 @@ var JSONSchemaGenerator = class {
         const _json = result.schema;
         switch (def.type) {
           case "string": {
-            const json = _json;
-            json.type = "string";
+            const json2 = _json;
+            json2.type = "string";
             const { minimum, maximum, format, patterns, contentEncoding } = schema._zod.bag;
             if (typeof minimum === "number")
-              json.minLength = minimum;
+              json2.minLength = minimum;
             if (typeof maximum === "number")
-              json.maxLength = maximum;
+              json2.maxLength = maximum;
             if (format) {
-              json.format = formatMap[format] ?? format;
-              if (json.format === "")
-                delete json.format;
+              json2.format = formatMap[format] ?? format;
+              if (json2.format === "")
+                delete json2.format;
             }
             if (contentEncoding)
-              json.contentEncoding = contentEncoding;
+              json2.contentEncoding = contentEncoding;
             if (patterns && patterns.size > 0) {
               const regexes = [...patterns];
               if (regexes.length === 1)
-                json.pattern = regexes[0].source;
+                json2.pattern = regexes[0].source;
               else if (regexes.length > 1) {
                 result.schema.allOf = [
                   ...regexes.map((regex) => ({
@@ -10018,41 +10018,41 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "number": {
-            const json = _json;
+            const json2 = _json;
             const { minimum, maximum, format, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema._zod.bag;
             if (typeof format === "string" && format.includes("int"))
-              json.type = "integer";
+              json2.type = "integer";
             else
-              json.type = "number";
+              json2.type = "number";
             if (typeof exclusiveMinimum === "number")
-              json.exclusiveMinimum = exclusiveMinimum;
+              json2.exclusiveMinimum = exclusiveMinimum;
             if (typeof minimum === "number") {
-              json.minimum = minimum;
+              json2.minimum = minimum;
               if (typeof exclusiveMinimum === "number") {
                 if (exclusiveMinimum >= minimum)
-                  delete json.minimum;
+                  delete json2.minimum;
                 else
-                  delete json.exclusiveMinimum;
+                  delete json2.exclusiveMinimum;
               }
             }
             if (typeof exclusiveMaximum === "number")
-              json.exclusiveMaximum = exclusiveMaximum;
+              json2.exclusiveMaximum = exclusiveMaximum;
             if (typeof maximum === "number") {
-              json.maximum = maximum;
+              json2.maximum = maximum;
               if (typeof exclusiveMaximum === "number") {
                 if (exclusiveMaximum <= maximum)
-                  delete json.maximum;
+                  delete json2.maximum;
                 else
-                  delete json.exclusiveMaximum;
+                  delete json2.exclusiveMaximum;
               }
             }
             if (typeof multipleOf === "number")
-              json.multipleOf = multipleOf;
+              json2.multipleOf = multipleOf;
             break;
           }
           case "boolean": {
-            const json = _json;
-            json.type = "boolean";
+            const json2 = _json;
+            json2.type = "boolean";
             break;
           }
           case "bigint": {
@@ -10100,23 +10100,23 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "array": {
-            const json = _json;
+            const json2 = _json;
             const { minimum, maximum } = schema._zod.bag;
             if (typeof minimum === "number")
-              json.minItems = minimum;
+              json2.minItems = minimum;
             if (typeof maximum === "number")
-              json.maxItems = maximum;
-            json.type = "array";
-            json.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
+              json2.maxItems = maximum;
+            json2.type = "array";
+            json2.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
             break;
           }
           case "object": {
-            const json = _json;
-            json.type = "object";
-            json.properties = {};
+            const json2 = _json;
+            json2.type = "object";
+            json2.properties = {};
             const shape = def.shape;
             for (const key in shape) {
-              json.properties[key] = this.process(shape[key], {
+              json2.properties[key] = this.process(shape[key], {
                 ...params,
                 path: [...params.path, "properties", key]
               });
@@ -10131,15 +10131,15 @@ var JSONSchemaGenerator = class {
               }
             }));
             if (requiredKeys.size > 0) {
-              json.required = Array.from(requiredKeys);
+              json2.required = Array.from(requiredKeys);
             }
             if (def.catchall?._zod.def.type === "never") {
-              json.additionalProperties = false;
+              json2.additionalProperties = false;
             } else if (!def.catchall) {
               if (this.io === "output")
-                json.additionalProperties = false;
+                json2.additionalProperties = false;
             } else if (def.catchall) {
-              json.additionalProperties = this.process(def.catchall, {
+              json2.additionalProperties = this.process(def.catchall, {
                 ...params,
                 path: [...params.path, "additionalProperties"]
               });
@@ -10147,15 +10147,15 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "union": {
-            const json = _json;
-            json.anyOf = def.options.map((x, i) => this.process(x, {
+            const json2 = _json;
+            json2.anyOf = def.options.map((x, i) => this.process(x, {
               ...params,
               path: [...params.path, "anyOf", i]
             }));
             break;
           }
           case "intersection": {
-            const json = _json;
+            const json2 = _json;
             const a = this.process(def.left, {
               ...params,
               path: [...params.path, "allOf", 0]
@@ -10169,17 +10169,17 @@ var JSONSchemaGenerator = class {
               ...isSimpleIntersection(a) ? a.allOf : [a],
               ...isSimpleIntersection(b) ? b.allOf : [b]
             ];
-            json.allOf = allOf;
+            json2.allOf = allOf;
             break;
           }
           case "tuple": {
-            const json = _json;
-            json.type = "array";
+            const json2 = _json;
+            json2.type = "array";
             const prefixItems = def.items.map((x, i) => this.process(x, { ...params, path: [...params.path, "prefixItems", i] }));
             if (this.target === "draft-2020-12") {
-              json.prefixItems = prefixItems;
+              json2.prefixItems = prefixItems;
             } else {
-              json.items = prefixItems;
+              json2.items = prefixItems;
             }
             if (def.rest) {
               const rest = this.process(def.rest, {
@@ -10187,29 +10187,29 @@ var JSONSchemaGenerator = class {
                 path: [...params.path, "items"]
               });
               if (this.target === "draft-2020-12") {
-                json.items = rest;
+                json2.items = rest;
               } else {
-                json.additionalItems = rest;
+                json2.additionalItems = rest;
               }
             }
             if (def.rest) {
-              json.items = this.process(def.rest, {
+              json2.items = this.process(def.rest, {
                 ...params,
                 path: [...params.path, "items"]
               });
             }
             const { minimum, maximum } = schema._zod.bag;
             if (typeof minimum === "number")
-              json.minItems = minimum;
+              json2.minItems = minimum;
             if (typeof maximum === "number")
-              json.maxItems = maximum;
+              json2.maxItems = maximum;
             break;
           }
           case "record": {
-            const json = _json;
-            json.type = "object";
-            json.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
-            json.additionalProperties = this.process(def.valueType, {
+            const json2 = _json;
+            json2.type = "object";
+            json2.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
+            json2.additionalProperties = this.process(def.valueType, {
               ...params,
               path: [...params.path, "additionalProperties"]
             });
@@ -10228,17 +10228,17 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "enum": {
-            const json = _json;
+            const json2 = _json;
             const values = getEnumValues(def.entries);
             if (values.every((v) => typeof v === "number"))
-              json.type = "number";
+              json2.type = "number";
             if (values.every((v) => typeof v === "string"))
-              json.type = "string";
-            json.enum = values;
+              json2.type = "string";
+            json2.enum = values;
             break;
           }
           case "literal": {
-            const json = _json;
+            const json2 = _json;
             const vals = [];
             for (const val of def.values) {
               if (val === void 0) {
@@ -10259,23 +10259,23 @@ var JSONSchemaGenerator = class {
             if (vals.length === 0) {
             } else if (vals.length === 1) {
               const val = vals[0];
-              json.type = val === null ? "null" : typeof val;
-              json.const = val;
+              json2.type = val === null ? "null" : typeof val;
+              json2.const = val;
             } else {
               if (vals.every((v) => typeof v === "number"))
-                json.type = "number";
+                json2.type = "number";
               if (vals.every((v) => typeof v === "string"))
-                json.type = "string";
+                json2.type = "string";
               if (vals.every((v) => typeof v === "boolean"))
-                json.type = "string";
+                json2.type = "string";
               if (vals.every((v) => v === null))
-                json.type = "null";
-              json.enum = vals;
+                json2.type = "null";
+              json2.enum = vals;
             }
             break;
           }
           case "file": {
-            const json = _json;
+            const json2 = _json;
             const file = {
               type: "string",
               format: "binary",
@@ -10289,15 +10289,15 @@ var JSONSchemaGenerator = class {
             if (mime) {
               if (mime.length === 1) {
                 file.contentMediaType = mime[0];
-                Object.assign(json, file);
+                Object.assign(json2, file);
               } else {
-                json.anyOf = mime.map((m) => {
+                json2.anyOf = mime.map((m) => {
                   const mFile = { ...file, contentMediaType: m };
                   return mFile;
                 });
               }
             } else {
-              Object.assign(json, file);
+              Object.assign(json2, file);
             }
             break;
           }
@@ -10318,8 +10318,8 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "success": {
-            const json = _json;
-            json.type = "boolean";
+            const json2 = _json;
+            json2.type = "boolean";
             break;
           }
           case "default": {
@@ -10354,12 +10354,12 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "template_literal": {
-            const json = _json;
+            const json2 = _json;
             const pattern = schema._zod.pattern;
             if (!pattern)
               throw new Error("Pattern not found in template literal");
-            json.type = "string";
-            json.pattern = pattern.source;
+            json2.type = "string";
+            json2.pattern = pattern.source;
             break;
           }
           case "pipe": {
@@ -13008,8 +13008,8 @@ var StdioServerTransport = class {
   }
   send(message) {
     return new Promise((resolve) => {
-      const json = serializeMessage(message);
-      if (this._stdout.write(json)) {
+      const json2 = serializeMessage(message);
+      if (this._stdout.write(json2)) {
         resolve();
       } else {
         this._stdout.once("drain", resolve);
@@ -13018,99 +13018,165 @@ var StdioServerTransport = class {
   }
 };
 
-// apps/mcp/src/client.ts
-var AcardApiError = class extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
+// packages/agent-wallet/src/wallet.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+// packages/agent-wallet/src/policy/engine.ts
+var DAY_MS = 24 * 60 * 60 * 1e3;
+async function evaluate(req, policy, ledger, sanctions, now = Date.now()) {
+  try {
+    if (!policy) return deny("no_policy_for_wallet");
+    if (req.amount <= 0n) return deny("amount_must_be_positive");
+    if (!policy.allowedChains.includes(req.chain)) return deny(`chain_not_allowed:${req.chain}`);
+    const limits = policy.assets[req.asset];
+    if (!limits) return deny(`asset_not_allowed:${req.asset}`);
+    const to = req.to.toLowerCase();
+    if (policy.denyList?.some((a) => a.toLowerCase() === to)) return deny("recipient_on_deny_list");
+    if (policy.allowList && !policy.allowList.some((a) => a.toLowerCase() === to)) {
+      return deny("recipient_not_on_allow_list");
+    }
+    if (await sanctions(req.to) !== "clear") return deny("sanctions_hit");
+    if (req.amount > limits.perTx) return deny("exceeds_per_tx_limit");
+    const spent = ledger.spentSince(req.walletId, req.asset, now - DAY_MS);
+    if (spent + req.amount > limits.per24h) return deny("exceeds_24h_limit");
+    if (limits.approvalAbove !== void 0 && req.amount > limits.approvalAbove) {
+      return { decision: "require_approval", reasons: ["above_approval_threshold"] };
+    }
+    return { decision: "allow", reasons: [] };
+  } catch (err) {
+    return deny(`policy_error:${err.message}`);
   }
-  status;
-  code;
+}
+function deny(reason) {
+  return { decision: "deny", reasons: [reason] };
+}
+
+// packages/agent-wallet/src/events.ts
+import { randomUUID } from "node:crypto";
+var stderrSink = (e) => {
+  process.stderr.write(JSON.stringify(e) + "\n");
 };
-var AcardClient = class {
-  constructor(options) {
-    this.options = options;
+function makeEvent(fields) {
+  return { id: randomUUID(), occurredAt: (/* @__PURE__ */ new Date()).toISOString(), ...fields };
+}
+
+// packages/agent-wallet/src/approvals.ts
+var MemoryApprovalStore = class {
+  #states = /* @__PURE__ */ new Map();
+  open(approvalId) {
+    this.#states.set(approvalId, "pending");
   }
-  options;
-  async request(path, init = {}) {
-    const response = await fetch(`${this.options.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${this.options.apiKey}`,
-        "content-type": "application/json",
-        ...init.headers ?? {}
-      }
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new AcardApiError(
-        response.status,
-        body?.error?.code ?? "unknown",
-        body?.error?.message ?? `request failed with ${response.status}`
-      );
+  status(approvalId) {
+    return this.#states.get(approvalId) ?? "unknown";
+  }
+  decide(approvalId, approve) {
+    if (this.#states.get(approvalId) !== "pending") throw new Error("approval_not_pending");
+    this.#states.set(approvalId, approve ? "approved" : "rejected");
+  }
+};
+
+// packages/agent-wallet/src/wallet.ts
+var PREVIEW_TTL_MS = 5 * 60 * 1e3;
+var WalletService = class {
+  constructor(d) {
+    this.d = d;
+    this.#now = d.now ?? Date.now;
+    this.#approvals = d.approvals ?? new MemoryApprovalStore();
+  }
+  d;
+  #previews = /* @__PURE__ */ new Map();
+  #approvals;
+  #executed = [];
+  #now;
+  spentSince(walletId, asset, sinceMs) {
+    return this.#executed.filter((e) => e.walletId === walletId && e.asset === asset && e.at >= sinceMs).reduce((s, e) => s + e.amount, 0n);
+  }
+  async address(chain) {
+    return this.d.signer.address(chain);
+  }
+  async status() {
+    return Object.entries(this.d.policies).map(([walletId, p]) => ({
+      walletId,
+      signer: this.d.signer.id,
+      chains: p.allowedChains,
+      assets: Object.fromEntries(
+        Object.entries(p.assets).map(([a, l]) => [
+          a,
+          { perTx: l.perTx.toString(), per24h: l.per24h.toString(), approvalAbove: l.approvalAbove?.toString() ?? null }
+        ])
+      )
+    }));
+  }
+  async balances(chain) {
+    return this.d.chain.balances(await this.d.signer.address(chain));
+  }
+  async sendPreview(req) {
+    const policy = await evaluate(req, this.d.policies[req.walletId], this, this.d.sanctions, this.#now());
+    const now = this.#now();
+    const preview = { id: randomUUID2(), request: req, policy, createdAt: now, expiresAt: now + PREVIEW_TTL_MS, used: false };
+    if (policy.decision === "require_approval") {
+      const approvalId = randomUUID2();
+      preview.approvalId = approvalId;
+      this.#approvals.open(approvalId);
     }
-    return body;
-  }
-  wallet(currency) {
-    const qs = currency ? `?currency=${encodeURIComponent(currency)}` : "";
-    return this.request(`/v1/wallet${qs}`);
-  }
-  fundWallet(amount, currency) {
-    return this.request("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount, currency }) });
-  }
-  createCard(input, idempotencyKey) {
-    return this.request("/v1/cards", {
-      method: "POST",
-      body: JSON.stringify(input),
-      headers: idempotencyKey ? { "idempotency-key": idempotencyKey } : {}
+    this.#previews.set(preview.id, preview);
+    await this.#emit(policy.decision === "deny" ? "agent_wallet.transfer.denied" : "agent_wallet.transfer.previewed", req, {
+      decision: policy.decision,
+      reasons: policy.reasons
     });
+    return preview;
   }
-  getCard(id) {
-    return this.request(`/v1/cards/${id}`);
+  /** Operator-only. Never exposed as an agent tool. */
+  decideApproval(approvalId, approve) {
+    this.#approvals.decide(approvalId, approve);
   }
-  listCards() {
-    return this.request("/v1/cards");
+  approvalStatus(approvalId) {
+    return this.#approvals.status(approvalId);
   }
-  closeCard(id) {
-    return this.request(`/v1/cards/${id}/close`, { method: "POST" });
-  }
-  listTransactions(cardId) {
-    const qs = cardId ? `?card_id=${encodeURIComponent(cardId)}` : "";
-    return this.request(`/v1/transactions${qs}`);
-  }
-  listApprovals(status) {
-    const qs = status ? `?status=${status}` : "";
-    return this.request(`/v1/approvals${qs}`);
-  }
-  decideApproval(id, decision) {
-    return this.request(`/v1/approvals/${id}/${decision}`, { method: "POST" });
-  }
-  searchMerchants(params) {
-    const qs = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== void 0 && value !== "") qs.set(key, String(value));
+  async sendExecute(previewId) {
+    const p = this.#previews.get(previewId);
+    if (!p) throw new Error("unknown_preview");
+    if (p.used) throw new Error("preview_already_used");
+    if (this.#now() > p.expiresAt) throw new Error("preview_expired");
+    if (p.policy.decision === "deny") throw new Error(`denied:${p.policy.reasons.join(",")}`);
+    if (p.policy.decision === "require_approval") {
+      const approval = this.approvalStatus(p.approvalId);
+      if (approval === "rejected") throw new Error("approval_rejected");
+      if (approval !== "approved") throw new Error("approval_required");
     }
-    return this.request(
-      `/v1/merchants/search?${qs.toString()}`
+    p.used = true;
+    const recheck = await evaluate(p.request, this.d.policies[p.request.walletId], this, this.d.sanctions, this.#now());
+    if (recheck.decision === "deny") {
+      await this.#emit("agent_wallet.transfer.denied", p.request, { decision: "deny", reasons: recheck.reasons });
+      throw new Error(`denied:${recheck.reasons.join(",")}`);
+    }
+    const r = p.request;
+    try {
+      const from = await this.d.signer.address(r.chain);
+      const payload = this.d.chain.encodeTransfer(from, r.to, r.asset, r.amount);
+      const signed = await this.d.signer.sign({ chain: r.chain, payload });
+      const txHash = await this.d.chain.broadcast(signed);
+      this.#executed.push({ walletId: r.walletId, asset: r.asset, amount: r.amount, at: this.#now() });
+      await this.#emit("agent_wallet.transfer.executed", r, { decision: "allow", txHash });
+      return { txHash };
+    } catch (err) {
+      await this.#emit("agent_wallet.transfer.failed", r, { reasons: [err.message] });
+      throw err;
+    }
+  }
+  async #emit(type, r, extra) {
+    await this.d.sink(
+      makeEvent({
+        type,
+        agentId: this.d.agentId,
+        walletId: r.walletId,
+        chain: r.chain,
+        asset: r.asset,
+        amount: r.amount.toString(),
+        counterparty: r.to,
+        ...extra
+      })
     );
-  }
-  getMerchant(id) {
-    return this.request(`/v1/merchants/${id}`);
-  }
-  /** Pay for a URL over x402, governed by a card. A fresh Idempotency-Key per call, so a retry after approval is a new attempt. */
-  payX402(input) {
-    return this.request("/v1/afp/x402/pay", {
-      method: "POST",
-      body: JSON.stringify(input),
-      headers: { "idempotency-key": `mcp_${crypto.randomUUID()}` }
-    });
-  }
-  x402Tab(cardId) {
-    return this.request(`/v1/afp/x402/tabs/${encodeURIComponent(cardId)}`);
-  }
-  simulatePurchase(input) {
-    return this.request("/v1/simulate/purchase", { method: "POST", body: JSON.stringify(input) });
   }
 };
 
@@ -13380,8 +13446,8 @@ var ZodIssueCode = util.arrayToEnum([
   "not_finite"
 ]);
 var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
+  const json2 = JSON.stringify(obj, null, 2);
+  return json2.replace(/"([^"]+)":/g, "$1:");
 };
 var ZodError2 = class _ZodError extends Error {
   get errors() {
@@ -17154,6 +17220,261 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER2 = INVALID;
+
+// packages/agent-wallet/src/tools/wallet.ts
+var CHAINS = ["mock", "base-sepolia", "solana-devnet"];
+var json = (v) => ({ content: [{ type: "text", text: JSON.stringify(v, null, 2) }] });
+var fail = (e) => ({ isError: true, content: [{ type: "text", text: e.message }] });
+function registerWalletTools(server2, wallet2) {
+  server2.registerTool(
+    "wallet_status",
+    { description: "On-chain agent wallet (sandbox: test chains only, no real funds). Lists wallets, signer, allowed chains and spending limits. For A-CARD's fiat wallet use get_wallet.", annotations: { readOnlyHint: true } },
+    async () => json(await wallet2.status())
+  );
+  server2.registerTool(
+    "get_balances",
+    {
+      description: "On-chain wallet balances (sandbox) for the agent's address on a chain. Amounts are integer strings in the asset's smallest unit.",
+      inputSchema: { chain: external_exports.enum(CHAINS) },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ chain }) => json({ chain, address: await wallet2.address(chain), balances: await wallet2.balances(chain) })
+  );
+  server2.registerTool(
+    "receive_info",
+    { description: "Address to receive funds on a chain.", inputSchema: { chain: external_exports.enum(CHAINS) }, annotations: { readOnlyHint: true } },
+    async ({ chain }) => json({ chain, address: await wallet2.address(chain) })
+  );
+  server2.registerTool(
+    "send_preview",
+    {
+      description: "Step 1 of an on-chain transfer (sandbox). Checks policy and returns a preview_id and decision (allow, require_approval, deny). Nothing moves yet.",
+      inputSchema: {
+        wallet_id: external_exports.string(),
+        chain: external_exports.enum(CHAINS),
+        asset: external_exports.string(),
+        to: external_exports.string(),
+        amount: external_exports.string().regex(/^\d+$/, "integer string in smallest unit"),
+        memo: external_exports.string().max(140).optional()
+      }
+    },
+    async (a) => {
+      try {
+        const p = await wallet2.sendPreview({ walletId: a.wallet_id, chain: a.chain, asset: a.asset, to: a.to, amount: BigInt(a.amount), memo: a.memo });
+        return json({ preview_id: p.id, decision: p.policy.decision, reasons: p.policy.reasons, approval_id: p.approvalId ?? null, expires_at: new Date(p.expiresAt).toISOString() });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "send_execute",
+    {
+      description: "Step 2 of a transfer. Executes a previewed transfer if policy allows (and approval was granted when required). Single use.",
+      inputSchema: { preview_id: external_exports.string().uuid() },
+      annotations: { destructiveHint: true }
+    },
+    async ({ preview_id }) => {
+      try {
+        return json(await wallet2.sendExecute(preview_id));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  server2.registerTool(
+    "approval_status",
+    { description: "Check whether a human has approved a pending transfer.", inputSchema: { approval_id: external_exports.string().uuid() }, annotations: { readOnlyHint: true } },
+    async ({ approval_id }) => json({ approval_id, status: wallet2.approvalStatus(approval_id) })
+  );
+}
+
+// packages/agent-wallet/src/signer/index.ts
+import { generateKeyPairSync, sign as edSign, createHash } from "node:crypto";
+
+// packages/agent-wallet/src/types.ts
+var TESTNETS = /* @__PURE__ */ new Set(["mock", "base-sepolia", "solana-devnet"]);
+
+// packages/agent-wallet/src/signer/index.ts
+var DevSigner = class {
+  id = "dev";
+  #privateKey;
+  #publicKeyDer;
+  constructor() {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    this.#privateKey = privateKey;
+    this.#publicKeyDer = publicKey.export({ type: "spki", format: "der" });
+  }
+  async address(chain) {
+    this.#assertTestnet(chain);
+    const h = createHash("sha256").update(this.#publicKeyDer).digest("hex");
+    return `${chain}:${h.slice(0, 40)}`;
+  }
+  async sign(req) {
+    this.#assertTestnet(req.chain);
+    const signature = edSign(null, req.payload, this.#privateKey).toString("hex");
+    return { chain: req.chain, payload: req.payload, signature, signerId: this.id };
+  }
+  #assertTestnet(chain) {
+    if (!TESTNETS.has(chain)) throw new Error(`DevSigner refuses non-testnet chain: ${chain}`);
+  }
+  /** Prevent accidental serialisation of the signer (and its key) into logs/output. */
+  toJSON() {
+    return { id: this.id };
+  }
+};
+
+// packages/agent-wallet/src/chains/mock.ts
+import { createHash as createHash2 } from "node:crypto";
+var MockChain = class {
+  #balances = /* @__PURE__ */ new Map();
+  // key: address|asset
+  credit(address, asset, amount) {
+    const k = `${address}|${asset}`;
+    this.#balances.set(k, (this.#balances.get(k) ?? 0n) + amount);
+  }
+  balance(address, asset) {
+    return this.#balances.get(`${address}|${asset}`) ?? 0n;
+  }
+  balances(address) {
+    const out = {};
+    for (const [k, v] of this.#balances) {
+      const [addr, asset] = k.split("|");
+      if (addr === address) out[asset] = v.toString();
+    }
+    return out;
+  }
+  encodeTransfer(from, to, asset, amount) {
+    return new TextEncoder().encode(JSON.stringify({ from, to, asset, amount: amount.toString() }));
+  }
+  async broadcast(tx) {
+    const { from, to, asset, amount } = JSON.parse(new TextDecoder().decode(tx.payload));
+    const amt = BigInt(amount);
+    if (this.balance(from, asset) < amt) throw new Error("insufficient_funds");
+    this.credit(from, asset, -amt);
+    this.credit(to, asset, amt);
+    return "0x" + createHash2("sha256").update(tx.signature).digest("hex");
+  }
+};
+
+// packages/agent-wallet/src/dev.ts
+async function devWallet(options = {}) {
+  const policies = {
+    default: {
+      allowedChains: ["mock"],
+      assets: { USDC: { perTx: 50000000n, per24h: 200000000n, approvalAbove: 10000000n } }
+    }
+  };
+  const chain = new MockChain();
+  const signer = new DevSigner();
+  const wallet2 = new WalletService({
+    agentId: "dev-agent",
+    signer,
+    chain,
+    policies,
+    sanctions: async () => "clear",
+    sink: options.sink ?? stderrSink,
+    approvals: options.approvals
+  });
+  chain.credit(await signer.address("mock"), "USDC", 500000000n);
+  return wallet2;
+}
+
+// apps/mcp/src/client.ts
+var AcardApiError = class extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+  status;
+  code;
+};
+var AcardClient = class {
+  constructor(options) {
+    this.options = options;
+  }
+  options;
+  async request(path, init = {}) {
+    const response = await fetch(`${this.options.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${this.options.apiKey}`,
+        "content-type": "application/json",
+        ...init.headers ?? {}
+      }
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new AcardApiError(
+        response.status,
+        body?.error?.code ?? "unknown",
+        body?.error?.message ?? `request failed with ${response.status}`
+      );
+    }
+    return body;
+  }
+  wallet(currency) {
+    const qs = currency ? `?currency=${encodeURIComponent(currency)}` : "";
+    return this.request(`/v1/wallet${qs}`);
+  }
+  fundWallet(amount, currency) {
+    return this.request("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount, currency }) });
+  }
+  createCard(input, idempotencyKey) {
+    return this.request("/v1/cards", {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: idempotencyKey ? { "idempotency-key": idempotencyKey } : {}
+    });
+  }
+  getCard(id) {
+    return this.request(`/v1/cards/${id}`);
+  }
+  listCards() {
+    return this.request("/v1/cards");
+  }
+  closeCard(id) {
+    return this.request(`/v1/cards/${id}/close`, { method: "POST" });
+  }
+  listTransactions(cardId) {
+    const qs = cardId ? `?card_id=${encodeURIComponent(cardId)}` : "";
+    return this.request(`/v1/transactions${qs}`);
+  }
+  listApprovals(status) {
+    const qs = status ? `?status=${status}` : "";
+    return this.request(`/v1/approvals${qs}`);
+  }
+  decideApproval(id, decision) {
+    return this.request(`/v1/approvals/${id}/${decision}`, { method: "POST" });
+  }
+  searchMerchants(params) {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== void 0 && value !== "") qs.set(key, String(value));
+    }
+    return this.request(
+      `/v1/merchants/search?${qs.toString()}`
+    );
+  }
+  getMerchant(id) {
+    return this.request(`/v1/merchants/${id}`);
+  }
+  /** Pay for a URL over x402, governed by a card. A fresh Idempotency-Key per call, so a retry after approval is a new attempt. */
+  payX402(input) {
+    return this.request("/v1/afp/x402/pay", {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: { "idempotency-key": `mcp_${crypto.randomUUID()}` }
+    });
+  }
+  x402Tab(cardId) {
+    return this.request(`/v1/afp/x402/tabs/${encodeURIComponent(cardId)}`);
+  }
+  simulatePurchase(input) {
+    return this.request("/v1/simulate/purchase", { method: "POST", body: JSON.stringify(input) });
+  }
+};
 
 // node_modules/zod/v4/mini/schemas.js
 var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
@@ -21209,11 +21530,11 @@ var EMPTY_COMPLETION_RESULT = {
 function ok(payload) {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
 }
-function fail(error2) {
+function fail2(error2) {
   const message = error2 instanceof AcardApiError ? `${error2.code}: ${error2.message}` : error2 instanceof Error ? error2.message : String(error2);
   return { content: [{ type: "text", text: `Error \u2014 ${message}` }], isError: true };
 }
-function createMcpServer(client) {
+function createMcpServer(client, options = {}) {
   const server2 = new McpServer({ name: "acard", version: "0.1.0" });
   server2.registerTool(
     "create_card",
@@ -21248,7 +21569,7 @@ function createMcpServer(client) {
         });
         return ok(result.card);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21264,7 +21585,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.getCard(card_id)).card);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21280,7 +21601,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.listCards()).cards);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21308,7 +21629,7 @@ function createMcpServer(client) {
         });
         return ok(result);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21335,7 +21656,7 @@ function createMcpServer(client) {
         }
         return ok(result);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21351,7 +21672,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.closeCard(card_id)).card);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21367,7 +21688,7 @@ function createMcpServer(client) {
       try {
         return ok((await client.listTransactions(card_id)).transactions);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21375,7 +21696,7 @@ function createMcpServer(client) {
     "get_wallet",
     {
       title: "Get wallet balance",
-      description: "Fetch wallet available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, \u2026); pass a currency to focus on one.",
+      description: "Fetch A-CARD's fiat wallet (cards draw from it): available/posted/held balances in minor units. Returns every currency wallet the org holds (ZAR, USD, \u2026); pass a currency to focus on one.",
       inputSchema: {
         currency: external_exports.enum(["ZAR", "USD", "NGN", "KES"]).optional().describe("Focus on a single currency wallet")
       },
@@ -21386,7 +21707,7 @@ function createMcpServer(client) {
         const result = await client.wallet(currency);
         return ok(currency ? result.wallet : result.wallets);
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21428,7 +21749,7 @@ function createMcpServer(client) {
           })
         );
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
@@ -21444,17 +21765,56 @@ function createMcpServer(client) {
       try {
         return ok(await client.getMerchant(merchant_id));
       } catch (error2) {
-        return fail(error2);
+        return fail2(error2);
       }
     }
   );
+  if (options.wallet) registerWalletTools(server2, options.wallet);
   return server2;
 }
 
+// apps/mcp/src/walletApprovals.ts
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+var WALLET_APPROVALS_FILE = join(homedir(), ".acard", "wallet-approvals.json");
+var FileApprovalStore = class {
+  constructor(file = WALLET_APPROVALS_FILE) {
+    this.file = file;
+  }
+  file;
+  #read() {
+    return existsSync(this.file) ? JSON.parse(readFileSync(this.file, "utf8")) : {};
+  }
+  #write(entries) {
+    mkdirSync(dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(entries, null, 2), { mode: 384 });
+    renameSync(tmp, this.file);
+  }
+  open(approvalId) {
+    const entries = this.#read();
+    entries[approvalId] = { state: "pending", at: (/* @__PURE__ */ new Date()).toISOString() };
+    this.#write(entries);
+  }
+  status(approvalId) {
+    return this.#read()[approvalId]?.state ?? "unknown";
+  }
+  decide(approvalId, approve) {
+    const entries = this.#read();
+    if (entries[approvalId]?.state !== "pending") throw new Error("approval_not_pending");
+    entries[approvalId] = { state: approve ? "approved" : "rejected", at: (/* @__PURE__ */ new Date()).toISOString() };
+    this.#write(entries);
+  }
+  pending() {
+    return Object.entries(this.#read()).filter(([, e]) => e.state === "pending").map(([id]) => id);
+  }
+};
+
 // apps/mcp/src/index.ts
-var CONFIG_DIR = join(homedir(), ".acard");
-var CONFIG_FILE = join(CONFIG_DIR, "config.json");
-var fileConfig = existsSync(CONFIG_FILE) ? JSON.parse(readFileSync(CONFIG_FILE, "utf8")) : {};
+var CONFIG_DIR = join2(homedir2(), ".acard");
+var CONFIG_FILE = join2(CONFIG_DIR, "config.json");
+var fileConfig = existsSync2(CONFIG_FILE) ? JSON.parse(readFileSync2(CONFIG_FILE, "utf8")) : {};
 if (process.argv[2] === "setup") {
   const flag = (name) => {
     const i = process.argv.indexOf(`--${name}`);
@@ -21465,8 +21825,8 @@ if (process.argv[2] === "setup") {
     console.error("usage: acard-mcp setup --api-key ak_\u2026 [--api-url https://your-a-card-api]");
     process.exit(1);
   }
-  mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify({ ...fileConfig, apiKey: apiKey2, apiUrl: flag("api-url") ?? fileConfig.apiUrl ?? "http://localhost:8787" }, null, 2), { mode: 384 });
+  mkdirSync2(CONFIG_DIR, { recursive: true });
+  writeFileSync2(CONFIG_FILE, JSON.stringify({ ...fileConfig, apiKey: apiKey2, apiUrl: flag("api-url") ?? fileConfig.apiUrl ?? "http://localhost:8787" }, null, 2), { mode: 384 });
   console.error(`Saved to ${CONFIG_FILE}. Restart your agent app to connect.`);
   process.exit(0);
 }
@@ -21474,12 +21834,34 @@ var env = (name) => {
   const value = process.env[name];
   return value && !value.startsWith("${") ? value : void 0;
 };
+if (["wallet-approvals", "wallet-approve", "wallet-reject"].includes(process.argv[2] ?? "")) {
+  const store = new FileApprovalStore();
+  const [command, id] = [process.argv[2], process.argv[3]];
+  if (command === "wallet-approvals") {
+    const pending = store.pending();
+    console.log(pending.length ? pending.join("\n") : `No pending approvals (${WALLET_APPROVALS_FILE}).`);
+    process.exit(0);
+  }
+  if (!id) {
+    console.error(`usage: acard-mcp ${command} <approval_id>`);
+    process.exit(1);
+  }
+  try {
+    store.decide(id, command === "wallet-approve");
+    console.log(`${command === "wallet-approve" ? "Approved" : "Rejected"} ${id}.`);
+    process.exit(0);
+  } catch (error2) {
+    console.error(`${error2.message}: ${id} is not a pending approval.`);
+    process.exit(1);
+  }
+}
 var baseUrl = env("ACARD_API_URL") ?? fileConfig.apiUrl ?? "http://localhost:8787";
 var apiKey = env("ACARD_API_KEY") ?? fileConfig.apiKey;
 if (!apiKey) {
   console.error(`No A-CARD API key: set ACARD_API_KEY, or run \`acard-mcp setup --api-key ak_\u2026\` (writes ${CONFIG_FILE}).`);
   process.exit(1);
 }
-var server = createMcpServer(new AcardClient({ baseUrl, apiKey }));
+var wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore() }) : void 0;
+var server = createMcpServer(new AcardClient({ baseUrl, apiKey }), { wallet });
 await server.connect(new StdioServerTransport());
-console.error(`acard MCP server connected (API: ${baseUrl})`);
+console.error(`acard MCP server connected (API: ${baseUrl})${wallet ? " \xB7 sandbox wallet on" : ""}`);

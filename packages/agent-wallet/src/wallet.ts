@@ -3,11 +3,10 @@ import { evaluate, type SanctionsCheck, type SpendLedger, type WalletPolicy } fr
 import type { Signer } from "./signer/index.js";
 import type { MockChain } from "./chains/mock.js";
 import { makeEvent, type EventSink } from "./events.js";
+import { MemoryApprovalStore, type ApprovalState, type ApprovalStore } from "./approvals.js";
 import type { ChainId, Preview, TransferRequest } from "./types.js";
 
 const PREVIEW_TTL_MS = 5 * 60 * 1000;
-
-type ApprovalState = "pending" | "approved" | "rejected";
 
 interface Executed {
   walletId: string;
@@ -23,6 +22,8 @@ export interface WalletServiceDeps {
   policies: Record<string, WalletPolicy>;
   sanctions: SanctionsCheck;
   sink: EventSink;
+  /** Defaults to an in-memory store. */
+  approvals?: ApprovalStore;
   now?: () => number;
 }
 
@@ -32,12 +33,13 @@ export interface WalletServiceDeps {
  */
 export class WalletService implements SpendLedger {
   #previews = new Map<string, Preview>();
-  #approvals = new Map<string, ApprovalState>();
+  readonly #approvals: ApprovalStore;
   #executed: Executed[] = [];
   readonly #now: () => number;
 
   constructor(private readonly d: WalletServiceDeps) {
     this.#now = d.now ?? Date.now;
+    this.#approvals = d.approvals ?? new MemoryApprovalStore();
   }
 
   spentSince(walletId: string, asset: string, sinceMs: number): bigint {
@@ -75,7 +77,7 @@ export class WalletService implements SpendLedger {
     if (policy.decision === "require_approval") {
       const approvalId = randomUUID();
       preview.approvalId = approvalId;
-      this.#approvals.set(approvalId, "pending");
+      this.#approvals.open(approvalId);
     }
     this.#previews.set(preview.id, preview);
     await this.#emit(policy.decision === "deny" ? "agent_wallet.transfer.denied" : "agent_wallet.transfer.previewed", req, {
@@ -87,12 +89,11 @@ export class WalletService implements SpendLedger {
 
   /** Operator-only. Never exposed as an agent tool. */
   decideApproval(approvalId: string, approve: boolean): void {
-    if (this.#approvals.get(approvalId) !== "pending") throw new Error("approval_not_pending");
-    this.#approvals.set(approvalId, approve ? "approved" : "rejected");
+    this.#approvals.decide(approvalId, approve);
   }
 
   approvalStatus(approvalId: string): ApprovalState | "unknown" {
-    return this.#approvals.get(approvalId) ?? "unknown";
+    return this.#approvals.status(approvalId);
   }
 
   async sendExecute(previewId: string): Promise<{ txHash: string }> {
@@ -100,12 +101,16 @@ export class WalletService implements SpendLedger {
     if (!p) throw new Error("unknown_preview");
     if (p.used) throw new Error("preview_already_used");
     if (this.#now() > p.expiresAt) throw new Error("preview_expired");
-    p.used = true; // single use, even if what follows fails
 
     if (p.policy.decision === "deny") throw new Error(`denied:${p.policy.reasons.join(",")}`);
-    if (p.policy.decision === "require_approval" && this.approvalStatus(p.approvalId!) !== "approved") {
-      throw new Error("approval_required");
+    if (p.policy.decision === "require_approval") {
+      const approval = this.approvalStatus(p.approvalId!);
+      // Asking before the human has decided doesn't spend the preview: the
+      // agent can come back with the same preview_id once they have.
+      if (approval === "rejected") throw new Error("approval_rejected");
+      if (approval !== "approved") throw new Error("approval_required");
     }
+    p.used = true; // single use, even if what follows fails
 
     // Re-check: limits or lists may have changed since the preview.
     const recheck = await evaluate(p.request, this.d.policies[p.request.walletId], this, this.d.sanctions, this.#now());

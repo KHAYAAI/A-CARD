@@ -3,8 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { devWallet } from "@acard/agent-wallet";
 import { AcardClient } from "./client.js";
 import { createMcpServer } from "./server.js";
+import { FileApprovalStore, WALLET_APPROVALS_FILE } from "./walletApprovals.js";
 
 /**
  * Credentials come from ACARD_API_URL / ACARD_API_KEY, falling back to
@@ -40,6 +42,30 @@ const env = (name: string) => {
   const value = process.env[name];
   return value && !value.startsWith("${") ? value : undefined;
 };
+// Operator commands for the sandbox wallet's approvals (see walletApprovals.ts).
+// They run in a separate terminal from the agent and need no API key.
+if (["wallet-approvals", "wallet-approve", "wallet-reject"].includes(process.argv[2] ?? "")) {
+  const store = new FileApprovalStore();
+  const [command, id] = [process.argv[2], process.argv[3]];
+  if (command === "wallet-approvals") {
+    const pending = store.pending();
+    console.log(pending.length ? pending.join("\n") : `No pending approvals (${WALLET_APPROVALS_FILE}).`);
+    process.exit(0);
+  }
+  if (!id) {
+    console.error(`usage: acard-mcp ${command} <approval_id>`);
+    process.exit(1);
+  }
+  try {
+    store.decide(id, command === "wallet-approve");
+    console.log(`${command === "wallet-approve" ? "Approved" : "Rejected"} ${id}.`);
+    process.exit(0);
+  } catch (error) {
+    console.error(`${(error as Error).message}: ${id} is not a pending approval.`);
+    process.exit(1);
+  }
+}
+
 const baseUrl = env("ACARD_API_URL") ?? fileConfig.apiUrl ?? "http://localhost:8787";
 const apiKey = env("ACARD_API_KEY") ?? fileConfig.apiKey;
 
@@ -48,6 +74,11 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const server = createMcpServer(new AcardClient({ baseUrl, apiKey }));
+// The on-chain wallet is opt-in, and sandbox only: a mock chain and a dev
+// signer that refuses real networks (packages/agent-wallet). Off by default, so
+// a plugin install never presents invented balances to an agent.
+const wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore() }) : undefined;
+
+const server = createMcpServer(new AcardClient({ baseUrl, apiKey }), { wallet });
 await server.connect(new StdioServerTransport());
-console.error(`acard MCP server connected (API: ${baseUrl})`);
+console.error(`acard MCP server connected (API: ${baseUrl})${wallet ? " · sandbox wallet on" : ""}`);

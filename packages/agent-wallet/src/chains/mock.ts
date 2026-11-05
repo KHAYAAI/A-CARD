@@ -17,7 +17,7 @@ export class MockChain {
   balances(address: string): Record<string, string> {
     const out: Record<string, string> = {};
     for (const [k, v] of this.#balances) {
-      const [addr, asset] = k.split("|");
+      const [addr, asset] = k.split("|") as [string, string];
       if (addr === address) out[asset] = v.toString();
     }
     return out;

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -142,6 +143,48 @@ describe("plugins/acard", () => {
       const paid = await call(client, "pay_x402", { card_id: card.id, url: resourceUrl, max_usd: "0.01" });
       expect(paid).toMatchObject({ status: "paid", charged_cents: 1, price: { usd: "0.003000" }, resource: { body: "weather: 24C, clear" } });
       expect(paidRequests).toBe(1);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("offers the sandbox wallet only when asked, and an operator approves out of band", async () => {
+    const home = mkdtempSync(join(tmpdir(), "acard-wallet-"));
+    const env = { PATH: process.env.PATH ?? "", HOME: home, ACARD_API_KEY: apiKey, ACARD_API_URL: apiUrl };
+    const raw = async (client: Client, name: string, args: Record<string, unknown>) => {
+      const res = (await client.callTool({ name, arguments: args })) as { content: Array<{ text?: string }>; isError?: boolean };
+      return { text: res.content.map((c) => c.text ?? "").join(""), isError: res.isError === true };
+    };
+    const client = await connect({ cwd: home, args: [BUNDLE], env: { ...env, ACARD_ENABLE_WALLET: "true" } });
+    try {
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      expect(names).toHaveLength(16);
+      for (const t of ["wallet_status", "get_balances", "receive_info", "send_preview", "send_execute", "approval_status"]) expect(names).toContain(t);
+      // Approving is an operator action, never an agent tool.
+      expect(names.filter((n) => /approve|decide/i.test(n))).toEqual([]);
+
+      const transfer = { wallet_id: "default", chain: "mock", asset: "USDC", to: "merchant-1" };
+      const small = JSON.parse((await raw(client, "send_preview", { ...transfer, amount: "5000000" })).text);
+      expect(small.decision).toBe("allow");
+      expect((await raw(client, "send_execute", { preview_id: small.preview_id })).isError).toBe(false);
+
+      const large = JSON.parse((await raw(client, "send_preview", { ...transfer, amount: "20000000" })).text);
+      expect(large).toMatchObject({ decision: "require_approval" });
+      expect((await raw(client, "send_execute", { preview_id: large.preview_id })).text).toContain("approval_required");
+
+      // The operator, in a separate process, approves; the agent then executes the same preview.
+      const cli = (...args: string[]) => execFileSync(process.execPath, [BUNDLE, ...args], { env, encoding: "utf8" });
+      expect(cli("wallet-approvals")).toContain(large.approval_id);
+      expect(cli("wallet-approve", large.approval_id)).toContain("Approved");
+      expect(JSON.parse((await raw(client, "approval_status", { approval_id: large.approval_id })).text).status).toBe("approved");
+      expect((await raw(client, "send_execute", { preview_id: large.preview_id })).isError).toBe(false);
+      const balances = JSON.parse((await raw(client, "get_balances", { chain: "mock" })).text);
+      expect(balances.balances.USDC).toBe("475000000"); // 500 − 5 − 20
+
+      const refused = JSON.parse((await raw(client, "send_preview", { ...transfer, amount: "90000000" })).text);
+      expect(refused).toMatchObject({ decision: "deny", reasons: ["exceeds_per_tx_limit"] });
+      expect(cli("wallet-approvals")).toContain("No pending approvals");
     } finally {
       await client.close();
     }
