@@ -143,8 +143,9 @@ A-CARD answers *what may this agent spend?* A-MERCHANT answers *where can it
 buy?* — a directory of real merchants an agent can search by keyword, distance,
 quantity, budget, and delivery deadline.
 
-**This is the read side only, on purpose.** There are no orders, no payment
-acceptance, and no settlement. An agent discovers an offer here and then pays
+**No money moves through this layer, on purpose.** There is no payment
+acceptance and no settlement. (Orders exist — see "Orders and fulfilment"
+below — but an order is a request to fulfil, not a payment.) An agent discovers an offer here and then pays
 for it with an ordinary A-CARD card through the existing flow, so nothing in
 this layer holds a merchant's money — which is what keeps it clear of funds
 custody, and out of PCI scope. Accepting and remitting on a merchant's behalf

@@ -1,7 +1,7 @@
 # A-CARD Platform: Executive Briefing
 
-**Status:** ✓ Ready for Public Beta  
-**Last Updated:** September 2026
+**Status:** Pre-launch. Sandbox only: no customers, no live cards, no card-issuing partner signed.  
+**Last Updated:** November 2026 (status, test count, pricing and A-MERCHANT scope reconciled with the code)
 
 ---
 
@@ -10,10 +10,10 @@
 A-CARD is a fintech platform that enables AI agents to transact independently using virtual cards. Every charge runs through real-time authorization with rule-based controls and human approval for unusual activity. The platform is built on a double-entry ledger that prevents overspending, operates in multiple currencies (ZAR + USD), and is deployable to production infrastructure today.
 
 ### Key Metrics
-- **551 tests passing** — coverage has not been measured; this is a count, not a percentage
+- **551 tests passing** on the `claude/forge-agent-wallet` branch (515 on `claude/agentcard-platform-build-affhcj`), including 65 that need a Postgres database (`ACARD_TEST_DATABASE_URL`). Coverage has not been measured; this is a count, not a percentage
 - **~2 seconds** — authorization decision window (within card network SLA)
-- **~90 days** — to general availability (issuer-dependent)
-- **R0–R499/month** — pricing tier (free to pro)
+- **General availability** — gated on signing an issuing partner; no date is committed
+- **$0–$2,800/month** — subscription tiers in `packages/core/src/billing.ts` (Free, Basic $8, Pro $28, Enterprise $2,800)
 
 ---
 
@@ -129,7 +129,7 @@ deadline.
   reference is evidence the merchant can reconcile against their own statement,
   not a settlement this platform performs.
 
-**Deliberately absent:** orders, payment acceptance, settlement, disputes. The
+**Deliberately absent:** payment acceptance, settlement, disputes. (Orders exist as fulfilment requests — `placed → accepted → … → delivered` — but no money moves through them; see the README's "Orders and fulfilment".) The
 moment the platform accepts payment on a merchant's behalf it is holding other
 people's money — a licensing and partner-bank question, not a schema change.
 
@@ -167,10 +167,10 @@ it moves money and that must be a deliberate deployment decision.
 
 ## Launch Readiness
 
-### ✓ Ready Now (Public Beta)
+### Built and tested (sandbox)
 
 - **551 automated tests** (ledger invariants, concurrency, auth, webhooks, A-MERCHANT discovery and purchase notices, AFP routing and cross-rail ledger, x402 under card controls, agent-app plugins, e2e)
-- **Production-quality code** (async/await, error handling, HMAC signing, row-level locks)
+- **Engineering in place** (async/await, error handling, HMAC signing, row-level locks). No independent security review, penetration test or load test yet
 - **Hardened AWS stack** (private subnets, WAF, encrypted RDS, TLS)
 - **Multi-currency** (ZAR + USD)
 - **RBAC** (user roles, team management, audit trail)
@@ -210,19 +210,26 @@ The only technical blocker is **operational readiness**. Payment rails are not a
 
 Calculation: ~2.1M agents globally by 2027 × $2,500–3,500 avg spend/month × 12. South Africa = 2.3–3.5% of TAM.
 
+_Withdrawn (November 2026): the agent count is unsourced, and the arithmetic does not reconcile (2.1M × $2,500–3,500 × 12 is $63B–88B of spend, not $5.2B). Do not quote this figure. A sourced, bottom-up market estimate is kept separately with the sale documents._
+
 ### Serviceable Obtainable Market (SOM) — Year 1
 **R2.4M–4.8M annual recurring revenue (ARR) on 300–600 paying organizations**
+
+_Targets, not forecasts, written before launch. They assume ZAR pricing that the code does not use (billing is in USD; see Pricing)._
 
 - Conservative: 300 orgs × R667/month = R2.4M ARR
 - Mid: 450 orgs × R889/month = R4.8M ARR
 - Optimistic: 600 orgs × R1,067/month = R7.7M ARR
 
 ### Pricing
-| Tier | Price (ZAR) | Price (USD) | Cards/Month | Target |
-|------|-------------|-------------|------------|--------|
-| **Free** | R0 | $0 | 5 | Builders, hobbyists |
-| **Basic** | R149 | ~$8 | 25 | Individual builders, small teams |
-| **Pro** | R499 | ~$27 | 100 | Org-scale, enterprise |
+Prices are set in USD in `packages/core/src/billing.ts`; ZAR is not a billing currency.
+
+| Tier | Price (USD/month) | Cards/Month | Per-card cap (USD cards) | Target |
+|------|-------------------|-------------|--------------------------|--------|
+| **Free** | $0 | 5 | $50 | Builders, hobbyists |
+| **Basic** | $8 | 25 | $500 | Individual builders, small teams |
+| **Pro** | $28 | 100 | $1,000 | Org-scale teams |
+| **Enterprise** | $2,800 | 100,000 | None | Enterprises |
 
 ### Revenue Model
 - **Subscriptions (80%):** Monthly plan tiers via PayFast (USD, pending PayFast confirming USD billing on the merchant account)
@@ -309,6 +316,8 @@ This makes us **rail-agnostic** and **future-proof**. Agents don't need to know 
 | **Buffer (10%)** | $50K–75K | Hiring, contingencies |
 
 ### 18-Month Roadmap
+
+_Plan as written in August 2026, kept for reference. The Q3 2026 public beta did not happen; dates below have not been re-baselined, and the signup, revenue and ARR figures are targets, not forecasts._
 
 **Q3 2026: Public Beta (Months 0–3)**
 - Deploy Phase 1 (MVP cards). 50–100 signups. First customer feedback.
