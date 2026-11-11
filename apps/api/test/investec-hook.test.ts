@@ -85,6 +85,14 @@ describe("Investec card hook", () => {
     expect(await hook.beforeTransaction(auth())).toBe(true);
   });
 
+  it("never replays an earlier decision for a different charge that reuses a reference", async () => {
+    const first = auth({ reference: "same-ref", centsAmount: 5_000 });
+    expect(await hook.beforeTransaction(first)).toBe(true);
+    const different = auth({ reference: "same-ref", centsAmount: 6_000, merchant: { name: "Lucky Spin", category: { code: "7995" }, country: { code: "ZA" } } });
+    expect(await hook.beforeTransaction(different)).toBe(false); // refused, not replayed as an approval
+    expect(await hook.beforeTransaction(first)).toBe(true); // the same charge retried is still fine
+  });
+
   it("settles the hold on success and releases it when Investec declines, so the budget tracks real spend", async () => {
     const authed = (p: string) => app.request(p, { headers: { authorization: `Bearer ${key}` } });
     const available = async () => (await j(await authed("/v1/wallet"))).wallet.available as number;

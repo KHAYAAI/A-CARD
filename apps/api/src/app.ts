@@ -1160,6 +1160,7 @@ export function createApp(config: AppConfig) {
     const pilot = config.investecPilot;
     if (pilot.secret.length < 24) throw new Error("investecPilot.secret must be at least 24 characters");
     const want = createHash("sha256").update(pilot.secret).digest();
+    const seenCharges = new Map<string, string>(); // in memory: a restart forgets it, which only matters if a reference is reused
     app.post("/webhooks/investec/authorize", async (c) => {
       const m = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "");
       if (!m || !timingSafeEqual(createHash("sha256").update(m[1]!).digest(), want)) {
@@ -1174,6 +1175,13 @@ export function createApp(config: AppConfig) {
           merchant: z.object({ name: z.string().max(200), category: z.string().max(8), country: z.string().max(3).optional() }),
         })
         .parse(await c.req.json());
+      // A reference must identify ONE charge. If the same reference arrives with different details, replaying the
+      // first decision would approve or decline the wrong charge, so refuse it outright and say why.
+      const fp = `${body.card_id}|${body.amount}|${body.currency}|${body.merchant.name}|${body.merchant.category}`;
+      const earlier = seenCharges.get(body.authorization_id);
+      if (earlier !== undefined && earlier !== fp) return c.json({ approved: false, decline_reason: "reference_reused" });
+      seenCharges.set(body.authorization_id, fp);
+      if (seenCharges.size > 20_000) seenCharges.delete(seenCharges.keys().next().value as string);
       const acardCardId = pilot.cards[body.card_id];
       // An unknown card is a clean decline, not a server error: the hook can treat both the same way.
       if (!acardCardId) return c.json({ approved: false, decline_reason: "card_not_linked" });

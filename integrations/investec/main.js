@@ -23,7 +23,7 @@
  * reads the authorization object.
  */
 
-const TIMEOUT_MS = 1500; // keep well inside the network's authorization window
+const TIMEOUT_MS = 1200; // Investec gives card code about 2 seconds in total (per their docs), so stay well inside it
 
 /** The only place that reads Investec's authorization object. */
 function describe(authorization) {

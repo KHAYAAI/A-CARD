@@ -17,15 +17,23 @@ A first real-world test of A-CARD's decision layer, on **your own Investec busin
 - API endpoints (only mounted when `ACARD_INVESTEC_HOOK_SECRET` is set): `POST /webhooks/investec/authorize`, `/settle`, `/release`. They use their own bearer secret, **not** the issuer webhook secret, and can only act on holds the hook created (`inv_…` ids) for cards you have mapped.
 - Tests: `apps/api/test/investec-hook.test.ts` runs the real `main.js` against the real API (approve, decline, threshold, unlinked card, foreign currency, wrong secret, outage, fail-open, settle, release).
 
-## Read this before you start: unverified assumptions
+## What is verified, and what is not
 
-I wrote `main.js` from Investec's public programmable-card documentation as I understood it. I have **not** run it against an Investec account. Check each of these in Investec's card-code simulator before any real charge:
+I ran `main.js` inside the community **programmable-card-code-emulator** (MIT, by a third party, not Investec) against a live in-process A-CARD API (`apps/api/scripts/investec-emulator-check.ts`). That emulator mirrors the card-code runtime as Investec documents it. Results:
 
-1. The hook is `beforeTransaction(authorization)` returning `true` or `false`, with `afterTransaction` and `afterDecline` callbacks.
-2. The authorization carries `card.id`, `centsAmount`, `currencyCode`, `reference`, and `merchant.{name, category.code, country.code}`. If a name differs, edit `describe()` in `main.js`: it is the only place that reads the object.
-3. `fetch` and `process.env` (from `env.json`) are available in card code, and an outbound call can finish inside Investec's time limit. `main.js` times out after 1.5 s; if Investec's limit is shorter, lower `TIMEOUT_MS`.
-4. `transaction.reference` in the after-callbacks equals `authorization.reference` from `beforeTransaction`. If it doesn't, settle and release won't find the hold, and holds will pile up (see "Known gaps").
-5. Investec's terms allow card code to call an external service with transaction data. Confirm with your relationship manager, and check POPIA implications of sending merchant and amount data to A-CARD.
+| Check | Result |
+|---|---|
+| Authorization object has `card.id`, `centsAmount`, `currencyCode` (lower case), `reference`, `merchant.{name, category.code, country.code}` | Matches the emulator's shape; `describe()` reads exactly these |
+| `fetch` and `process.env` available in card code | Yes in the emulator |
+| Grocery charge approved and settled; gambling and over-threshold declined; euro charge declined without a call | Yes, with the ledger showing the settled amount and no stuck hold |
+| A reused reference with different details is refused, not replayed | Yes (found and fixed here: the emulator gives every charge the same reference) |
+| Round trip inside the time limit | About 10 to 45 ms locally. Investec's docs give card code about 2 seconds in total; `TIMEOUT_MS` is 1200 ms. A real call over the internet will be slower: measure it |
+
+**Still unverified until you run it on Investec's own simulator and then one real charge:**
+1. That the emulator matches Investec's live runtime in every detail (it is community-built).
+2. That `transaction.reference` in `afterTransaction` and `afterDecline` equals the `reference` seen in `beforeTransaction` on real charges, and that references are unique per charge. If not, settle and release won't find the hold, and holds will pile up. The test plan's step 6 catches this.
+3. Network latency from Investec's runtime to your A-CARD API, inside their 2-second window. Per the community emulator, an error or timeout in `beforeTransaction` counts as a decline.
+4. That Investec's terms allow card code to call an external service with transaction data, and the POPIA position of sending merchant and amount data to A-CARD. Ask your relationship manager.
 
 ## Setup
 
@@ -40,7 +48,7 @@ I wrote `main.js` from Investec's public programmable-card documentation as I un
    ```
    Restart the API. The log shows nothing special; confirm with `curl -i -X POST $ACARD_URL/webhooks/investec/authorize`, which should answer 401.
 4. **Install the card code.** In Investec Programmable Banking, open the card's code editor, paste `main.js`, and create `env.json` from `env.example.json` (URL, the hook secret, `ACARD_FAIL_OPEN` = `false`). Treat `env.json` like a password.
-5. **Simulate first.** Use Investec's simulator with: a R50 grocery charge (expect approve), a gambling charge (expect decline), a charge above your threshold (expect decline for now), and a charge in euros (expect decline). Read Investec's logs for the `a-card:` lines.
+5. **Simulate first** (Investec's own simulator). Use Investec's simulator with: a R50 grocery charge (expect approve), a gambling charge (expect decline), a charge above your threshold (expect decline for now), and a charge in euros (expect decline). Read Investec's logs for the `a-card:` lines.
 
 ## Pilot test plan (one afternoon)
 
@@ -70,3 +78,15 @@ Any one of these stops A-CARD from approving anything: set the A-CARD card to cl
 ## From pilot to product
 
 This pilot de-risks the decision layer only. To issue cards to customers you still need an issuing partner and a programme (see the "What it takes to go live" list): a BIN sponsor or banking-as-a-service provider, then the same `authorization.request` webhook that already exists at `POST /webhooks/issuer`.
+
+## Pilot-day checklist (only you can do these)
+
+- [ ] Enable Programmable Banking on your Investec account and create API credentials in Investec's developer portal. Keep them out of chat, the repo and shell history.
+- [ ] Ask your relationship manager the two questions in "What is verified" item 4 and keep the answer in writing.
+- [ ] Choose a low-limit business card you control and note its Investec card id.
+- [ ] Deploy the A-CARD API somewhere reachable with TLS (not your laptop), with `ACARD_INVESTEC_HOOK_SECRET` and `ACARD_INVESTEC_CARDS`, PayFast off, and a funded pilot budget.
+- [ ] Create the matching A-CARD card and set the policy (blocked categories, approval threshold).
+- [ ] Put `main.js` and `env.json` on the card (Investec's editor, or the community `ipb` CLI), then run Investec's simulator through the test plan below.
+- [ ] Measure the real round-trip time of a simulated call. If it is near 2 s, deploy the API closer to Investec's runtime. Do not extend the timeout past Investec's limit.
+- [ ] Make one small real purchase (R20 to R100) and compare A-CARD's wallet to the Investec statement.
+- [ ] Keep `ACARD_FAIL_OPEN=false`. Know the kill switch.

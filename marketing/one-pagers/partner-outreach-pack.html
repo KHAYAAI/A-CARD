@@ -1,0 +1,94 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A-CARD partner outreach pack</title>
+<style>
+@page{size:A4;margin:10mm}*{box-sizing:border-box}
+body{margin:0;font:8pt/1.3 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#14201a}
+.pg{page-break-after:always}.pg:last-child{page-break-after:auto}
+h1{font-size:14.5pt;margin:0 0 2px}h2{font-size:9.5pt;margin:7px 0 3px;color:#0a6e44}.sub{color:#5f6f66;font-size:7.6pt;margin:0 0 5px}
+table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:3px}
+th{background:#14201a;color:#fff;text-align:left;padding:2.5px 4px;font-size:7.4pt}
+td{padding:2.4px 4px;border-bottom:.5pt solid #dcd6c6;vertical-align:top}
+.t1{background:#e1f1e6;font-weight:700;text-align:center}.t2{background:#fdf0c9;font-weight:700;text-align:center}.t3{background:#eee;font-weight:700;text-align:center}
+ol,ul{margin:2px 0 0 14px;padding:0}li{margin:0 0 1.5px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:9px}.box{border:.5pt solid #dcd6c6;border-radius:5px;padding:4px 7px}
+.warn{background:#fff4e0;border-radius:5px;padding:4px 7px;margin:4px 0;font-size:7.6pt}.f{color:#5f6f66;font-size:6.8pt;margin-top:4px}
+</style></head><body>
+
+<div class="pg">
+<h1>1 · Card-issuing partners: shortlist and questions for the call</h1>
+<p class="sub">Status as found in public sources, Nov 2026 (mostly news and vendor pages). "From memory" means I did not verify it here. Rank is my judgement, not a market ranking. This list is a starting point for calls, not due diligence.</p>
+<table><colgroup><col style="width:4%"><col style="width:17%"><col style="width:26%"><col style="width:31%"><col style="width:22%"></colgroup>
+<tr><th></th><th>Candidate</th><th>What they are</th><th>What I found</th><th>Why call</th></tr>
+<tr><td class="t1">1</td><td><b>Paymentology</b> with sponsor bank <b>Bank Zero</b></td><td>Issuer-processor (Paymentology) plus licensed sponsor bank</td><td>Bank Zero named Paymentology its first alliance partner (Apr 2026), letting fintechs, retailers and SMEs issue Mastercard on its platform. Mukuru launched a card this way (Oct 2026). Regional HQ in Johannesburg.</td><td>The clearest current South African route for a non-bank programme, with real-time authorisation decisioning</td></tr>
+<tr><td class="t1">2</td><td><b>Union54</b></td><td>Card-issuing API for African fintechs</td><td>One secondary source: partnered with Paymentology in 2024. Nothing else verified.</td><td>Possible faster, API-first route to a sponsor</td></tr>
+<tr><td class="t1">3</td><td><b>Investec</b></td><td>Bank; programmable cards for its own account holders</td><td>Programmable cards give you a 2-second approve/decline hook. Only for cards on your own account, not for issuing to customers.</td><td>The pilot, and a relationship with a bank that already builds for developers</td></tr>
+<tr><td class="t2">4</td><td><b>Ukheshe / EFT Eclipse</b></td><td>African fintech infrastructure (from memory)</td><td>Not covered by my searches.</td><td>Named in the earlier launch plan: verify what they offer in SA</td></tr>
+<tr><td class="t2">5</td><td><b>Sudo Africa</b></td><td>African card-issuing platform</td><td>An adapter shape already exists in the repo (<code>apps/api/src/sudo.ts</code>) and is marked unverified. SA availability not confirmed.</td><td>Quick to try if they cover rand cards</td></tr>
+<tr><td class="t2">6</td><td><b>Stripe Issuing</b></td><td>Global issuing API</td><td>Agent work found (shared tokens, Link), but I could not confirm Stripe Issuing for South African entities.</td><td>Confirm local availability; strong tooling if so</td></tr>
+<tr><td class="t3">7</td><td>Marqeta, Lithic</td><td>US and EU issuing platforms with agent tooling</td><td>Both ship MCP servers. No South African coverage found.</td><td>Only if SA entities are supported</td></tr>
+<tr><td class="t3">8</td><td>Standard Bank, Absa, Nedbank, FNB, Bank Zero (direct)</td><td>Sponsor banks (from memory)</td><td>Not researched here.</td><td>Slower; usually after a provider has proved the model</td></tr>
+</table>
+<h2>Questions to ask every issuer</h2>
+<div class="cols"><div class="box"><b>Model and licensing</b><ol>
+<li>Who is the licensed sponsor bank, and whose BIN is it? Which of our activities fall under your licence and which need our own?</li>
+<li>Do we hold customer funds, or do you? Prefunded float, or per-card funding?</li>
+<li>Which regulator approvals do you need from us, and how long do they take?</li>
+<li>Do you accept our KYC/KYB provider's results, or do you require your own checks?</li>
+<li>Who carries fraud, chargeback and dispute losses?</li></ol></div>
+<div class="box"><b>Product and integration</b><ol start="6">
+<li>Real-time authorisation: do you call our webhook, and what is the time limit and the behaviour on timeout?</li>
+<li>One-time virtual cards created per task by API: volume limits and per-card cost?</li>
+<li>Controls we can set per card (MCC, amount, velocity, merchant)? ZAR and USD cards?</li>
+<li>Card data: tokenised PANs so we stay out of PCI scope?</li>
+<li>Do you support Mastercard Agent Pay or Visa Intelligent Commerce credentials for AI-agent payments?</li></ol></div>
+<div class="box"><b>Commercial</b><ol start="11">
+<li>Pricing: set-up, per card, per transaction, minimums, and our share of interchange.</li>
+<li>Sandbox availability, and realistic time from signature to a live pilot.</li>
+<li>Settlement and reconciliation: files, timing, APIs.</li>
+<li>Exit and data portability if we move provider.</li></ol></div>
+<div class="box"><b>Ask for before you commit</b><ol start="15">
+<li>Reference customers on a similar model.</li>
+<li>Their data and POPIA position, uptime record and incident history.</li>
+<li>Their view on non-bank programme managers under the SARB's changing payments framework.</li></ol></div></div>
+<div class="warn"><b>Say plainly in every call:</b> A-CARD is a working sandbox on test money. It decides authorisations; it does not issue cards or hold funds. Do not describe it as live or certified.</div>
+<div class="f">Sources: Paymentology and Bank Zero press coverage (FinTech Futures, The Paypers, ITWeb), Mukuru case study; Investec developer documentation; vendor pages for Marqeta and Lithic. Verify each against the company before relying on it.</div>
+</div>
+
+<div class="pg">
+<h1>2 · Legal brief and questions for South African fintech counsel</h1>
+<p class="sub">A starting brief to send to counsel, not legal advice. Regulatory points below come from secondary sources and are flagged where they are drafts or conflict. Counsel should confirm the current position.</p>
+<h2>What A-CARD does (for the lawyer)</h2>
+<div class="box">A platform that lets a company's AI agents spend money safely. Each agent gets a virtual card (one-time or capped) funded from a prepaid wallet; rules, spend limits and human approvals are enforced on every authorisation; a supplier directory (A-MERCHANT) lets agents find and buy from verified suppliers, and the agent pays with an ordinary card. A-CARD decides authorisations in real time; the issuing partner issues the cards and, we expect, holds the funds. Separately, there are test-network-only crypto wallets and x402 payments that are <b>not</b> proposed for launch. <b>Status: sandbox on test money; nothing live.</b></div>
+<h2>What I found so far (verify each)</h2>
+<ul>
+<li><b>E-money:</b> a 2026 licensing guide says only registered banks may issue e-money under SARB Position Paper NPS 01/2009, so a non-bank wallet generally needs a bank partner. SARB has published <b>draft</b> documents (an exemption notice under the Banks Act, a draft directive on payment activities, authorisation tiers with minimum capital) that could open a route for non-banks. I found no final adopted version.</li>
+<li><b>Regulator change:</b> sources say PASA's recognition was withdrawn and its functions moved to the SARB and PayInc from 2 September 2026, with card clearing functions moving from 11 August 2026. Counsel should confirm who now authorises what.</li>
+<li><b>Sponsorship:</b> non-banks that cannot participate directly in clearing and settlement typically operate under a sponsor, which bears accountability to the regulators.</li>
+<li><b>FIC Act:</b> accountable institutions must identify clients and cannot deal anonymously above a threshold; SARB's electronic funds transfer directive adds originator and beneficiary information duties.</li>
+<li><b>Crypto:</b> a May 2026 draft excludes crypto and tokenised assets from the e-money definition.</li></ul>
+<h2>Questions for counsel</h2>
+<div class="cols"><div class="box"><b>Licensing and structure</b><ol>
+<li>Given a sponsor-bank model, what authorisations do we need ourselves (payment system operator, third-party payment provider, other), and under which regulator, now that PASA's functions have moved?</li>
+<li>Do we "hold funds" or run a "business of a bank" by operating a prepaid wallet, or does the sponsor bank hold them? What structure keeps us out of e-money issuance?</li>
+<li>How do the draft SARB frameworks change this, and on what timeline?</li>
+<li>Is A-MERCHANT, which never touches supplier money, outside payment regulation? Does charging fees change that?</li>
+<li>Any exchange-control issues for USD cards and cross-border supplier payments?</li></ol></div>
+<div class="box"><b>Compliance</b><ol start="6">
+<li>Are we an accountable institution under the FIC Act, or does the partner carry it? What must we register and do?</li>
+<li>KYC/KYB through a third-party provider (Didit) that may process data outside South Africa: POPIA section 72, consent, retention?</li>
+<li>FSCA: do any features (advice-like recommendations on rails, crypto) trigger FAIS or crypto-asset-provider licensing?</li>
+<li>Consumer and business protection: which laws apply to business customers and sole proprietors?</li>
+<li>Record-keeping, audit and breach-notification duties.</li></ol></div>
+<div class="box"><b>Contracts and liability</b><ol start="11">
+<li>Terms of service for customers: who is liable when an agent makes a mistake, is tricked, or overspends within its limits?</li>
+<li>Our contract with the issuing partner: what must it contain on funds flow, fraud and disputes?</li>
+<li>Supplier terms: no-custody position, listing terms, KYB, disputes, and neutral ranking.</li>
+<li>Data-sharing with POS companies and merchants; POS-partner referral and revenue-share agreements.</li>
+<li>Tax: VAT on platform and processing fees.</li></ol></div>
+<div class="box"><b>Pilot and pre-launch</b><ol start="16">
+<li>Any approvals needed to run the Investec pilot on our own card with an external decision service?</li>
+<li>What can we say publicly about the product before and after licensing, without misdescribing its status?</li>
+<li>Sequence: what must be in place before the first design customer, and before public launch?</li>
+<li>Fee estimate, timeline, and who on your team does fintech and payments work?</li></ol></div></div>
+<div class="f">Sources (secondary): Prifinance licensing guide; ENS and Legal500 commentary on SARB drafts; SARB payments pages and 2024 starter pack; TechCentral on the PASA transition; Werksmans on payment-service providers. Verify with counsel.</div>
+</div>
+</body></html>

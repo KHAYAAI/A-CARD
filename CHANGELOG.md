@@ -8,6 +8,15 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: Investec hook hardening
+
+### Fixed
+- **Investec hook no longer replays a decision for a different charge that reuses a reference.** Running the card code in a community emulator (which gives every simulated charge the same reference) showed a gambling charge approved because the first decision was replayed. `/webhooks/investec/authorize` now refuses a reused reference with different details (`reference_reused`). The hook timeout is 1.2 s, inside Investec's documented 2 s limit.
+
+### Added
+- `apps/api/scripts/investec-emulator-check.ts` runs the card code in the community emulator against a live in-process API.
+- Runbook: what is verified and what is not, and a pilot-day checklist.
+
 ## [Unreleased]: Investec programmable-card pilot
 
 ### Added
