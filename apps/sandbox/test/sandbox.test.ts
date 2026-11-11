@@ -66,24 +66,55 @@ describe("demo mode (no model, no key)", () => {
     expect((await s.state()).transactions.transactions.length).toBeGreaterThan(0);
   });
 
-  it("browses offers as results, then checks out exactly what was in the cart", async () => {
+  it("browses offers as results, then checks out the cart: merchant paid, then fees, one scoped card", async () => {
     const s = await session();
     const browse = await s.chat("Show me cement offers near Johannesburg.");
     expect(names(browse.events)).toEqual(["find_offers"]);
     const offers = JSON.parse(results(browse.events)[0]!.output).offers;
     expect(offers.length).toBeGreaterThan(1);
-    expect(offers[0].merchant.name).toBeTruthy();
-    // The cart's checkout message names the merchant, total and category; the agent pays on a card capped at that.
     const o = offers[0];
-    const msg = `Checkout: buy ${o.quantity} × ${o.item.name} from ${o.merchant.name} for R${(o.totalCents / 100).toFixed(2)} (merchant category ${o.merchant.merchantCategoryCode}). Use a single-use card limited to that category.`;
+    const items = o.totalCents, order = 1500, proc = Math.round(items * 0.029);
+    const msg = `Checkout: buy ${o.quantity} × ${o.item.name} from ${o.merchant.name} for R${(items / 100).toFixed(2)} (merchant category ${o.merchant.merchantCategoryCode}), order fee R${(order / 100).toFixed(2)} and card processing R${(proc / 100).toFixed(2)} (fees category 7399). Use one card limited to those two categories.`;
     const buy = await s.chat(msg);
-    expect(names(buy.events)).toEqual(["create_card", "pay_checkout"]);
+    expect(names(buy.events)).toEqual(["create_card", "pay_checkout", "pay_checkout", "close_card"]);
     const card = JSON.parse(results(buy.events)[0]!.output);
-    expect(card.singleUse).toBe(true);
-    expect(card.limits.total).toBe(o.totalCents);
-    expect(card.allowedMerchantCategories).toEqual([o.merchant.merchantCategoryCode]);
-    expect(results(buy.events)[1]!.is_error).toBe(false);
-    expect(texts(buy.events)).toMatch(/approved/);
+    expect(card.limits.total).toBe(items + order + proc);
+    expect(card.allowedMerchantCategories).toEqual([o.merchant.merchantCategoryCode, "7399"]);
+    expect(results(buy.events).every((r) => !r.is_error)).toBe(true);
+    expect(texts(buy.events)).toMatch(/both approved/);
+    // The ledger shows the merchant payment and the separate fee payment.
+    const tx = ((await (await fetch(`${base}/sandbox/api/v1/transactions`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).transactions;
+    expect(tx.map((t: any) => [t.merchantName, t.amount, t.status]).sort()).toEqual([[o.merchant.name, items, "completed"], ["a·card fees", order + proc, "completed"]].sort());
+    // The card is closed: nothing more can be charged.
+    const cards = ((await (await fetch(`${base}/sandbox/api/v1/cards`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).cards;
+    expect(cards[0].status).toBe("closed");
+  });
+
+  it("the expanded catalogue answers across categories, and unverified suppliers stay hidden", async () => {
+    const s = await session();
+    const asks: Array<[string, RegExp]> = [
+      ["Show me bread offers.", /bread/i], ["Find A4 paper for the office.", /paper/i], ["Show me hard hats.", /hard hat/i], ["I need laptop gear.", /laptop/i],
+      ["I need laptop gear: a monitor.", /monitor|laptop|mouse/i], ["Find cleaning supplies.", /bleach|cleaner|dish/i],
+      ["Show me engine oil and car parts.", /oil/i], ["Find gloves.", /glove/i], ["Show me bricks.", /brick/i], ["Find hand sanitiser.", /sanitiser/i],
+    ];
+    for (const [q, name] of asks) {
+      const { events } = await s.chat(q);
+      const offers = JSON.parse(results(events)[0]!.output).offers;
+      expect(offers.length, q).toBeGreaterThan(0);
+      expect(offers.some((o: any) => name.test(o.item.name)), q).toBe(true);
+      expect(texts(events), q).not.toMatch(/No verified supplier/);   // the agent can read its own results back
+    }
+    // Same product, several suppliers, ranked: bread has at least two.
+    const bread = JSON.parse(results((await s.chat("Show me bread offers.")).events)[0]!.output).offers;
+    expect(new Set(bread.map((o: any) => o.merchant.name)).size).toBeGreaterThan(1);
+    const hats = JSON.parse(results((await s.chat("Show me hard hats.")).events)[0]!.output).offers;
+    expect(new Set(hats.map((o: any) => o.merchant.name)).size).toBeGreaterThan(1);
+    // Pretoria Bulk Foods is unverified: never offered, even though it's cheapest on rice.
+    const rice = JSON.parse(results((await s.chat("Show me rice offers.")).events)[0]!.output).offers;
+    expect(rice.some((o: any) => o.merchant.name === "Pretoria Bulk Foods")).toBe(false);
+    const dir = ((await (await fetch(`${base}/sandbox/api/v1/merchants`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).merchants;
+    expect(dir.length).toBeGreaterThanOrEqual(18);
+    expect(new Set(dir.map((m: any) => m.merchantCategoryCode)).size).toBeGreaterThanOrEqual(9);
   });
 
   it("a fuel card cannot buy a TV", async () => {

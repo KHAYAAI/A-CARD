@@ -1,4 +1,5 @@
 import type { Block, Model, ModelMessage } from "./model.js";
+import { KEYWORDS } from "./catalogue.js";
 
 /**
  * Demo mode: a scripted agent. There is no model and no key. It reads the
@@ -87,55 +88,14 @@ const verdict = (x?: { raw: string; output: any }) => {
 
 const weather = (base: string) => `${base}/demo/weather`;
 
-const BROWSE: Record<string, { query: string; quantity: number; label: string }> = {
-  cement: { query: "cement", quantity: 50, label: "cement" },
-  sand: { query: "plaster sand", quantity: 5, label: "plaster sand" },
-  diesel: { query: "diesel", quantity: 200, label: "diesel" },
-  tyre: { query: "tyre", quantity: 4, label: "truck tyres" },
-};
+function parseCheckout(history: ModelMessage[]) {
+  const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
+  const m = /buy (\d+) × (.+?) from (.+?) for R([\d.]+) \(merchant category (\w+)\)(?:, order fee R([\d.]+) and card processing R([\d.]+) \(fees category (\w+)\))?/i.exec(t);
+  if (!m) return undefined;
+  return { qty: m[1]!, item: m[2]!, merchant: m[3]!, items: Math.round(Number(m[4]) * 100), mcc: m[5]!, fees: Math.round((Number(m[6] ?? 0) + Number(m[7] ?? 0)) * 100), feeMcc: m[8] ?? "7399" };
+}
 
 const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
-  {
-    // The cart's "Checkout": buy exactly what is in it, on a card scoped to that merchant's category.
-    match: /^checkout:/i,
-    steps: [
-      (_r, { history }) => {
-        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
-        const m = /buy (\d+) × (.+?) from (.+?) for R([\d.]+) \(merchant category (\w+)\)/i.exec(t);
-        if (!m) return [say("I couldn't read that cart. Try adding the item again.")];
-        const cents = Math.round(Number(m[4]) * 100);
-        return [
-          say(`Checking out: ${m[1]} × ${m[2]} from ${m[3]} for ${rands(cents)}. I'll create a single-use card capped at exactly that amount and limited to the merchant's category.`),
-          call("create_card", { label: `${m[2]} · ${m[3]}`, single_use: true, total_limit: cents, per_transaction_limit: cents, allowed_merchant_categories: [m[5]!] }),
-        ];
-      },
-      (r, { history }) => {
-        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
-        const m = /from (.+?) for R([\d.]+) \(merchant category (\w+)\)/i.exec(t)!;
-        return [call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: Math.round(Number(m[2]) * 100), merchant_name: m[1]!, merchant_category: m[3]! })];
-      },
-      (r) => {
-        const v = verdict(last(r, "pay_checkout"));
-        return [say(`A-CARD ${v}. ${v === "approved" ? "The card was single-use, so it's already closed. See Track spending for the record." : "Nothing was spent."}`)];
-      },
-    ],
-  },
-  {
-    // Browse without buying: show ranked offers as cards.
-    match: /^(?!.*\b(buy|purchase|pay|checkout)\b).*\b(show|browse|search|compare|options|offers)\b.*\b(cement|sand|diesel|tyres?)\b/i,
-    steps: [
-      (_r, { history }) => {
-        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
-        const key = Object.keys(BROWSE).find((k) => new RegExp(`\\b${k}`, "i").test(t)) ?? "cement";
-        const b = BROWSE[key]!;
-        return [say(`Searching A-MERCHANT for verified suppliers of ${b.label} near Johannesburg.`), call("find_offers", { query: b.query, quantity: b.quantity, lat: -26.2309, lng: 28.1772, radius_km: 60 })];
-      },
-      (r) => {
-        const n = (last(r, "find_offers")?.output?.offers ?? []).length;
-        return [say(n ? `${n} verified supplier${n === 1 ? "" : "s"}, ranked by price, distance and how fresh their stock count is. Tap “Add” to put one in your cart, then check out and I'll pay with a card scoped to that purchase.` : "No verified supplier matched that.")];
-      },
-    ],
-  },
   {
     // Retry after approving: re-run whatever is waiting.
     match: /\b(approved|retry|try again|go ahead|i approved|execute)\b/i,
@@ -154,11 +114,63 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
+    // The cart's "Checkout": pay the merchant, then the fees, on one card scoped to those two categories.
+    match: /^checkout:/i,
+    steps: [
+      (_r, { history }) => {
+        const c = parseCheckout(history);
+        if (!c) return [say("I couldn't read that cart. Try adding the item again.")];
+        return [
+          say(`Checking out: ${c.qty} × ${c.item} from ${c.merchant}, ${rands(c.items)}${c.fees ? ` plus ${rands(c.fees)} in fees` : ""}. I'll create one card capped at exactly ${rands(c.items + c.fees)} and limited to the merchant's category${c.fees ? " and the fee category" : ""}.`),
+          call("create_card", { label: `${c.item} · ${c.merchant}`, single_use: false, total_limit: c.items + c.fees, per_transaction_limit: c.items, allowed_merchant_categories: c.fees ? [c.mcc, c.feeMcc] : [c.mcc] }),
+        ];
+      },
+      (r, { history }) => {
+        const c = parseCheckout(history)!;
+        return [call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: c.items, merchant_name: c.merchant, merchant_category: c.mcc })];
+      },
+      (r, { history }) => {
+        const c = parseCheckout(history)!;
+        const id = last(r, "create_card")!.output.id;
+        return c.fees ? [say(`The merchant is paid (${verdict(last(r, "pay_checkout"))}). Now the fees.`), call("pay_checkout", { card_id: id, amount: c.fees, merchant_name: "a·card fees", merchant_category: c.feeMcc })] : [call("close_card", { card_id: id })];
+      },
+      (r, { history }) => {
+        const c = parseCheckout(history)!;
+        const id = last(r, "create_card")!.output.id;
+        return c.fees ? [call("close_card", { card_id: id })] : [say(`A-CARD ${verdict(last(r, "pay_checkout"))}. The card is closed. See Track spending for the record.`)];
+      },
+      (r) => {
+        const pays = r.filter((x) => x.name === "pay_checkout");
+        const ok = pays.length > 0 && pays.every((x) => verdict(x) === "approved");
+        return [say(ok ? `Done. The merchant and the fees were both approved, and the card is closed. See Track spending for the record.` : `Something was refused: ${pays.map(verdict).join("; ")}. The card is closed, so nothing more can be charged.`)];
+      },
+    ],
+  },
+  {
+    // Browse without buying: show ranked offers as cards.
+    match: new RegExp(`^(?!.*\\b(buy|purchase|pay|checkout|swap|send|transfer|usdc|approval|approved)\\b)(?=.*(?:${KEYWORDS.map((k) => k.re.source).join("|")})).*\\b(show|browse|search|compare|options|offers|find|looking for|need)\\b`, "i"),
+    steps: [
+      (_r, { history }) => {
+        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
+        // The keyword that appears earliest in what the visitor wrote.
+        const hits = KEYWORDS.map((x) => ({ x, at: t.search(x.re) })).filter((h) => h.at >= 0).sort((a, b) => a.at - b.at);
+        const k = hits[0]?.x;
+        if (!k) return [say(HELP)];
+        const lat = -26.2309, lng = 28.1772;
+        return [say(`Searching A-MERCHANT for verified suppliers of ${k.label} near Johannesburg.`), call("find_offers", { query: k.query, quantity: k.quantity, lat, lng, radius_km: 80, limit: 8 })];
+      },
+      (r) => {
+        const n = (last(r, "find_offers")?.output?.offers ?? []).length;
+        return [say(n ? `${n} verified supplier${n === 1 ? "" : "s"}, ranked by price, distance and how fresh their stock count is. Tap “Add” to put one in your cart, then check out and I'll pay with a card scoped to that purchase.` : "No verified supplier matched that. Try a simpler word, like bread, paper, gloves or cement.")];
+      },
+    ],
+  },
+  {
     match: /cement|supplier|find .*offers|a-merchant|building suppl/i,
     steps: [
       () => [
         say("I'll search A-MERCHANT for verified suppliers near Johannesburg who can deliver 50 bags by tomorrow."),
-        call("find_offers", { query: "cement", quantity: 50, lat: -26.2309, lng: 28.1772, radius_km: 60, max_lead_time_days: 1 }),
+        call("find_offers", { query: "cement", quantity: 50, lat: -26.2309, lng: 28.1772, radius_km: 60, max_lead_time_days: 1, limit: 8 }),
       ],
       (r) => {
         const offers: any[] = last(r, "find_offers")?.output?.offers ?? [];
@@ -251,7 +263,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
 
 const HELP = `I'm the scripted demo agent: no AI model is running, but every action I take is a real call to the sandbox platform, on test money. I can show you:
 
-• Browse supplier offers as cards, add one to your cart and check out ("show me cement offers")
+• Browse supplier offers as cards, add one to your cart and check out ("show me bread", "find A4 paper", "hard hats", "laptop gear", "cleaning supplies", "cement"…)
 • Find supplier offers and buy with a scoped card ("find cement near Johannesburg")
 • A fuel card refusing a TV ("fuel card, then try to buy a TV")
 • A charge held for your approval ("spend R1 500, needs my approval")

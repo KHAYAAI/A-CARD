@@ -152,7 +152,7 @@ table.grid tr:first-child td{border-top:none}
 .pcard.best{border-color:var(--green)}
 .pcard .best-tag{position:absolute;top:10px;left:10px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.05em;background:var(--green);color:#fff;border-radius:99px;padding:2px 8px;z-index:2}
 .pcard .go{position:absolute;top:10px;right:10px;color:var(--muted);font-size:14px;text-decoration:none;z-index:2}
-.pimg{height:104px;border-radius:12px;display:grid;place-items:center;font-family:var(--font-display);font-size:34px;color:color-mix(in srgb,var(--ink) 70%,transparent);position:relative;overflow:hidden}
+.pimg{height:104px;border-radius:12px;display:grid;place-items:center;color:#2a3a30;position:relative;overflow:hidden}.pimg svg{width:64%;height:78%;margin-bottom:8px}
 .pimg::after{content:attr(data-cat);position:absolute;bottom:6px;left:8px;font-family:var(--font-mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;opacity:.6}
 .pcard .pt{font-size:13px;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:34px}
 .pcard .pm{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px;color:var(--muted)}
@@ -168,10 +168,11 @@ table.grid tr:first-child td{border-top:none}
 .cart.closed .chev{transform:rotate(180deg)}.cart.closed .cart-body{display:none}
 .cart-body{padding:4px 16px 16px;border-top:1px solid var(--border-soft)}
 .cline{display:grid;grid-template-columns:46px 1fr auto;gap:12px;align-items:center;padding:10px 0}
-.cline .pimg{height:46px;width:46px;font-size:16px;border-radius:10px}.cline .pimg::after{display:none}
+.cline .pimg{height:46px;width:46px;border-radius:10px}.cline .pimg svg{width:78%;height:78%;margin:0}.cline .pimg::after{display:none}
 .cline .nm{font-size:13.5px;line-height:1.3}.cline .qty{display:inline-flex;align-items:center;gap:6px;margin-top:4px;font-family:var(--font-mono);font-size:12px;color:var(--muted)}
 .cline .qty button{width:22px;height:22px;border-radius:99px;border:1px solid var(--border);background:var(--surface);color:var(--ink);line-height:1}
 .cline .amt{font-family:var(--font-mono);font-size:14px}
+.fees{display:grid;gap:4px;margin-top:6px;font-size:13.5px;color:var(--muted)}.fees>div{display:flex;justify-content:space-between;padding:0 2px}
 .ctotal{background:var(--green-bg);border:1px solid color-mix(in srgb,var(--green) 22%,transparent);border-radius:14px;padding:14px 16px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .ctotal .l{font-weight:600}.ctotal .n{font-size:12px;color:var(--muted);margin-top:2px;max-width:340px}
 .ctotal .v{font-family:var(--font-mono);font-size:26px;font-weight:500;color:var(--green-deep)}
@@ -268,7 +269,7 @@ table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-t
 </div>
 <div id="cta"><div class="pop"><h3>Build this into your agent</h3><div class="hint">Give your own agent the same cards, limits and approvals.</div><div id="ctacmds"></div><a href="#connect" id="ctamore">More ways to connect →</a></div><button class="pill-cta" id="ctabtn"><span class="g">[*]</span> Build this into your agent <span id="ctachev">⌃</span></button></div>
 <div class="toast" id="toast"></div>
-<dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button class="btn btn-outline btn-sm" id="keyclear">Remove key</button><button class="btn btn-outline btn-sm" id="keycancel">Cancel</button><button class="btn btn-green btn-sm" id="keysave">Use key</button></div></dialog>
+<dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div id="keystat" class="hint" style="min-height:20px"></div><div class="b"><button class="btn btn-outline btn-sm" id="keycheck">Check key</button><button class="btn btn-outline btn-sm" id="keyclear">Remove key</button><button class="btn btn-outline btn-sm" id="keycancel">Cancel</button><button class="btn btn-green btn-sm" id="keysave">Use key</button></div></dialog>
 <script>
 const API = window.__ACARD_API__ || "";
 const STANDALONE = !!window.__ACARD_API__;
@@ -279,16 +280,24 @@ try { userKey = sessionStorage.getItem("acard-key") || ""; } catch {}
 const setMode = (live) => { const m = $("#mode"); m.className = "mode" + (live ? " live" : ""); m.textContent = live ? "Live · your Claude key" : "Demo agent · scripted"; $("#keybtn").textContent = userKey ? "Change key" : "Use your Claude key"; };
 setMode(!!userKey);
 const prompts = [
-  "Show me cement offers near Johannesburg.",
-  "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers.",
-  "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it.",
-  "Try to spend R500 at an online casino on a general card.",
-  "Create a card that needs my approval above R1 000 and spend R1 500 at Rand Build Supply.",
-  "Pay for the weather API with x402 from a USD card. Don't spend more than 1 cent.",
-  "Send 20 USDC from the wallet to merchant-1, then try 90.",
-  "Swap 5 USDC to ZARP and show my balances.",
+  ["Shop", "Show me bread and milk offers near Johannesburg."],
+  ["Shop", "Find A4 paper for the office."],
+  ["Shop", "Show me hard hats and safety gear."],
+  ["Shop", "I need laptop gear: a monitor and a mouse."],
+  ["Shop", "Find cleaning supplies."],
+  ["Shop", "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers."],
+  ["Controls", "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it."],
+  ["Controls", "Try to spend R500 at an online casino on a general card."],
+  ["Controls", "Create a card that needs my approval above R1 000 and spend R1 500 at Rand Build Supply."],
+  ["Money", "Pay for the weather API with x402 from a USD card. Don't spend more than 1 cent."],
+  ["Money", "Send 20 USDC from the wallet to merchant-1, then try 90."],
+  ["Money", "Swap 5 USDC to ZARP and show my balances."],
 ];
-prompts.forEach((p, i) => { const b = document.createElement("button"); b.className = "scenario"; b.innerHTML = `<span class="ix">0${i + 1}</span><span></span>`; b.lastChild.textContent = p; b.onclick = () => ask(p); $("#chips").append(b); });
+let lastGroup = "";
+prompts.forEach(([g, p], i) => {
+  if (g !== lastGroup) { const h = document.createElement("div"); h.className = "group-t"; h.style.margin = "14px 0 2px"; h.textContent = g === "Shop" ? "Shop the catalogue" : g === "Controls" ? "See the controls hold" : "Money and wallet"; $("#chips").append(h); lastGroup = g; }
+  const b = document.createElement("button"); b.className = "scenario"; b.innerHTML = `<span class="ix">${String(i + 1).padStart(2, "0")}</span><span></span>`; b.lastChild.textContent = p; b.onclick = () => ask(p); $("#chips").append(b);
+});
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (c, cur = "ZAR") => (cur === "ZAR" ? "R " : cur === "USD" ? "$" : cur + " ") + (Number(c) / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -387,20 +396,87 @@ async function ask(text) {
 $("#f").onsubmit = (e) => { e.preventDefault(); ask($("#q").value); };
 $("#q").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask($("#q").value); } };
 const dlg = $("#dlg");
-$("#keybtn").onclick = () => { $("#keyin").value = ""; dlg.showModal(); };
+$("#keybtn").onclick = () => { $("#keyin").value = ""; $("#keystat").textContent = ""; dlg.showModal(); };
 $("#keycancel").onclick = () => dlg.close();
+$("#keycheck").onclick = async () => {
+  const v = $("#keyin").value.trim() || userKey; const st = $("#keystat");
+  if (!v) { st.textContent = "Paste a key first."; return; }
+  st.style.color = "var(--muted)"; st.textContent = "Checking…";
+  try {
+    const r = window.__checkKey ? await window.__checkKey(v) : await (await fetch(API + "/sandbox/check-key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ api_key: v }) })).json();
+    st.style.color = r.ok ? "var(--green-deep)" : "var(--red)"; st.textContent = r.message;
+  } catch { st.style.color = "var(--red)"; st.textContent = "Could not run the check."; }
+};
 $("#keysave").onclick = () => { const v = $("#keyin").value.trim(); if (v) { userKey = v; try { sessionStorage.setItem("acard-key", v); } catch {} } setMode(!!userKey); dlg.close(); };
 $("#keyclear").onclick = () => { userKey = ""; try { sessionStorage.removeItem("acard-key"); } catch {} setMode(false); dlg.close(); };
 $("#theme").onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark ? "light" : "dark"; };
 $("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
 
 /* ---------------- conversational shopping: offers, cart, timing ---------------- */
+/* ---- product illustrations: simple line drawings, one per kind of product (not photographs) ---- */
+const ART = {
+  sack: '<path d="M30 20q-6 8-6 22v22q0 6 6 6h40q6 0 6-6V42q0-14-6-22zM34 20h32M38 44h24v14H38z"/>',
+  bread: '<path d="M22 54q-6-22 14-26h28q20 4 14 26 0 6-6 6H28q-6 0-6-6zM40 32v8M52 30v8M64 32v8"/>',
+  bottle: '<path d="M44 14h12v10q10 6 10 18v22q0 4-4 4H38q-4 0-4-4V42q0-12 10-18zM38 46h24v14H38z"/>',
+  carton: '<path d="M34 26l8-10h16l8 10v44H34zM34 26h32M42 40h16"/>',
+  eggs: '<path d="M20 40h60v22q0 4-4 4H24q-4 0-4-4zM32 40a6 9 0 0112 0M44 40a6 9 0 0112 0M56 40a6 9 0 0112 0"/>',
+  box: '<path d="M22 28l28-12 28 12v32L50 72 22 60zM22 28l28 12 28-12M50 40v32"/>',
+  cable: '<path d="M22 58q0-26 24-26h8q24 0 24 26M14 54h14v10H14zM72 54h14v10H72z"/>',
+  powerbank: '<path d="M32 14h36q4 0 4 4v44q0 4-4 4H32q-4 0-4-4V18q0-4 4-4zM40 28h20M40 38h20M40 48h12"/>',
+  mouse: '<path d="M50 14q20 0 20 22v14q0 16-20 16T30 50V36q0-22 20-22zM50 14v22"/>',
+  monitor: '<path d="M16 14h68v40H16zM42 64h16M50 54v10"/>',
+  laptop: '<path d="M26 18h48v34H26zM16 58h68l-6 6H22z"/>',
+  headset: '<path d="M24 48q0-32 26-32t26 32M20 46h10v18H20zM70 46h10v18H70z"/>',
+  router: '<path d="M16 46h68v16H16zM30 46V24M50 46V20M70 46V24M26 54h4M36 54h4"/>',
+  paper: '<path d="M30 14h34l8 8v44H30zM64 14v8h8M38 34h26M38 44h26M38 54h18"/>',
+  marker: '<path d="M28 58l30-30 8 8-30 30zM58 28l8-8 8 8-8 8z"/>',
+  stapler: '<path d="M20 52h60v12H20zM26 52q0-18 24-18h30v18"/>',
+  toner: '<path d="M28 30h44v28H28zM22 36h6M72 36h6M40 44h20"/>',
+  hardhat: '<path d="M22 56q0-32 28-32t28 32zM14 56h72M46 24v-8h8v8"/>',
+  boot: '<path d="M34 14h22v30l22 8v14H30zM30 66h52"/>',
+  vest: '<path d="M34 16l10 8h12l10-8 10 12v38H24V28zM24 44h52M24 54h52"/>',
+  gloves: '<path d="M30 66V40q0-6 6-6V20q0-4 4-4t4 4v12V16q0-4 4-4t4 4v16V20q0-4 4-4t4 4v32q0 14-14 14z"/>',
+  glasses: '<circle cx="32" cy="44" r="14"/><circle cx="68" cy="44" r="14"/><path d="M46 42q4-4 8 0M18 40l-4-6M82 40l4-6"/>',
+  bricks: '<path d="M16 24h68v14H16zM16 38h68v14H16zM16 52h68v14H16zM40 24v14M64 38v14M40 52v14"/>',
+  paint: '<path d="M30 28h40v38q0 4-4 4H34q-4 0-4-4zM30 34h40M44 16q6-6 12 0v12H44z"/>',
+  tyre: '<circle cx="50" cy="42" r="28"/><circle cx="50" cy="42" r="11"/><path d="M50 14v10M50 60v10M22 42h10M68 42h10"/>',
+  jerry: '<path d="M30 24h34l8 10v34H30zM38 24v-10h16v10M50 40q-8 10 0 14t0-14"/>',
+  battery: '<path d="M20 30h60v34H20zM30 24h10v6M60 24h10v6M32 47h10M56 47h10M61 42v10"/>',
+  pills: '<path d="M32 54l24-24a9 9 0 0113 13L45 67a9 9 0 01-13-13zM44 42l13 13"/>',
+  aid: '<path d="M22 28h56v40H22zM40 28v-8h20v8M50 38v20M40 48h20"/>',
+  mask: '<path d="M20 34q30-14 60 0v22q-30 14-60 0zM20 42h-8M80 42h8M30 46h40M30 54h40"/>',
+  spray: '<path d="M40 36h20v32q0 4-4 4H44q-4 0-4-4zM44 36V24h14l8 4M48 48h8"/>',
+  platter: '<path d="M14 58h72M24 58q0-20 26-20t26 20M50 38v-6"/>',
+  wiper: '<path d="M14 56q36-28 72 0M32 48l-8-12"/>',
+  cup: '<path d="M30 30h36v22q0 14-18 14t-18-14zM66 36h8q8 0 8 8t-8 8h-8"/>',
+  can: '<path d="M32 20h36v46q0 4-4 4H36q-4 0-4-4zM32 28h36M32 58h36"/>',
+  therm: '<path d="M46 16h8v34a10 10 0 11-8 0zM50 30v22"/>',
+  roll: '<path d="M26 26h48v36H26zM26 26q24 8 48 0M40 40h20"/>',
+  planks: '<path d="M16 22h68v10H16zM16 36h68v10H16zM16 50h68v10H16z"/>',
+};
+const ART_RULES = [
+  [/cement|maize|rice|sugar|sand|flour/i, "sack"], [/bread/i, "bread"], [/milk/i, "carton"], [/eggs?/i, "eggs"],
+  [/oil.*5w|engine oil/i, "jerry"], [/oil|water|bleach|dishwash|sanitiser|cleaner|spring/i, "bottle"], [/coffee|tea/i, "cup"],
+  [/pain|tablet/i, "pills"], [/first aid|plaster/i, "aid"], [/mask/i, "mask"], [/thermometer/i, "therm"],
+  [/usb|cable|jumper/i, "cable"], [/power bank/i, "powerbank"], [/mouse/i, "mouse"], [/monitor/i, "monitor"],
+  [/laptop (bag|backpack)|backpack|sleeve/i, "box"], [/laptop|stand|charger/i, "laptop"], [/webcam|headset/i, "headset"], [/router|wi-?fi/i, "router"],
+  [/paper|ream|sticky|file/i, "paper"], [/marker/i, "marker"], [/stapler/i, "stapler"], [/toner|cartridge/i, "toner"],
+  [/hard hat|helmet/i, "hardhat"], [/boot/i, "boot"], [/vest|hi-?vis|overall/i, "vest"], [/glove/i, "gloves"], [/glasses/i, "glasses"],
+  [/brick/i, "bricks"], [/paint/i, "paint"], [/timber|pine/i, "planks"], [/tyre/i, "tyre"], [/diesel|fuel/i, "jerry"],
+  [/battery/i, "battery"], [/wiper|brake/i, "wiper"], [/bin bag/i, "roll"], [/spray|cleaner/i, "spray"],
+  [/platter|sandwich|boerewors/i, "platter"], [/drink|cans/i, "can"],
+];
+const artFor = (name) => { const r = ART_RULES.find(([re]) => re.test(String(name))); return ART[r ? r[1] : "box"]; };
+const catTint = { "5411": "#e3efe2", "5912": "#e1ecf2", "5732": "#e4e3f3", "5943": "#f3ecdc", "5699": "#f4e6d8", "5169": "#e0f0ee", "5533": "#ece4e0", "5812": "#f4e3e1", "5211": "#e9e6dc", "5251": "#e9e6dc", "5541": "#f1e8d2", "7399": "#e6efe6" };
+
 const OFFERS = [];
 let cart = { merchant: null, lines: [], open: true };
-const tint = (str) => { let h = 0; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 38% 90%)`; };
-const initials = (n) => String(n).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-const pimg = (name, cat) => `<div class="pimg" style="background:${tint(name)}" data-cat="${esc(cat ? mcc(cat) : "")}">${esc(initials(name))}</div>`;
+const pimg = (itemName, cat) => `<div class="pimg" style="background:${catTint[cat] || "#eceae0"}" data-cat="${esc(cat ? mcc(cat) : "")}"><svg viewBox="0 0 100 80" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${artFor(itemName)}</svg></div>`;
+/* Illustrative sandbox fee schedule. A-CARD has no card-payment pricing yet, so these are placeholders:
+   change them here. They are real ledger entries in the sandbox, paid to "a·card fees". */
+const FEES = { orderCents: 1500, processingBps: 290, mcc: "7399" };
 const cartCents = () => cart.lines.reduce((a, l) => a + l.qty * l.unit, 0);
+const feeLines = () => { const items = cartCents(); const proc = Math.round((items * FEES.processingBps) / 10000); return { order: FEES.orderCents, proc, total: FEES.orderCents + proc }; };
 const elapsed = (t0) => `${((performance.now() - t0) / 1000).toFixed(1)}s`;
 const addTiming = (t0) => { if (performance.now() - t0 < 300) return; const d = document.createElement("div"); d.className = "timing"; d.textContent = elapsed(t0); log.append(d); };
 const ensureTyping = () => { document.querySelector(".typing")?.remove(); if (busy) { const t = document.createElement("div"); t.className = "typing"; t.innerHTML = "<i></i><i></i><i></i>"; log.append(t); log.scrollTop = log.scrollHeight; } };
@@ -411,7 +487,7 @@ function showOffers(output, t0) {
   const tray = document.createElement("div"); tray.className = "tray";
   tray.innerHTML = offers.map((o, i) => {
     const idx = OFFERS.push(o) - 1;
-    return `<div class="pcard${i === 0 ? " best" : ""}">${i === 0 ? '<span class="best-tag">TOP MATCH</span>' : ""}<a class="go" href="#merchants" title="See in Merchants">↗</a>${pimg(o.merchant?.name ?? "Supplier", o.merchant?.merchantCategoryCode)}<div class="pt">${esc(o.item?.name ?? "")}</div><div class="pm"><span>${esc(o.merchant?.name ?? "")}</span><span class="price">${money(o.totalCents, o.currency)}</span></div><div class="pf">${o.distanceKm != null ? Math.round(o.distanceKm) + " km · " : ""}${o.leadTimeDays}d lead · ${esc(o.freshness ?? "")} stock</div><button class="add" data-add="${idx}">+ Add</button></div>`;
+    return `<div class="pcard${i === 0 ? " best" : ""}">${i === 0 ? '<span class="best-tag">TOP MATCH</span>' : ""}<a class="go" href="#merchants" title="See in Merchants">↗</a>${pimg(o.item?.name ?? "", o.merchant?.merchantCategoryCode)}<div class="pt">${esc(o.item?.name ?? "")}</div><div class="pm"><span>${esc(o.merchant?.name ?? "")}</span><span class="price">${money(o.totalCents, o.currency)}</span></div><div class="pf">${o.distanceKm != null ? Math.round(o.distanceKm) + " km · " : ""}${o.leadTimeDays}d lead · ${esc(o.freshness ?? "")} stock</div><button class="add" data-add="${idx}">+ Add</button></div>`;
   }).join("");
   log.append(tray); addTiming(t0); log.scrollTop = log.scrollHeight;
 }
@@ -429,7 +505,7 @@ function renderCart() {
   const w = $("#cartwrap");
   if (!cart.lines.length) { w.innerHTML = ""; return; }
   const n = cart.lines.length, cur = cart.merchant.currency;
-  w.innerHTML = `<div class="cart${cart.open ? "" : " closed"}"><button class="cart-head" data-cart="toggle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.7 12.4a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 7H6"/></svg><b>Cart</b><span class="sub">${n} item${n === 1 ? "" : "s"} · ${esc(cart.merchant.name)}</span><span class="chev">⌄</span></button><div class="cart-body">${cart.lines.map((l, i) => `<div class="cline">${pimg(cart.merchant.name, l.cat)}<div><div class="nm">${esc(l.name)}</div><div class="qty"><button data-cart="dec" data-i="${i}" aria-label="Fewer">−</button>${l.qty} ×<button data-cart="inc" data-i="${i}" aria-label="More">+</button><span>${money(l.unit, cur)} each</span></div></div><div class="amt">${money(l.qty * l.unit, cur)}</div></div>`).join("")}<div class="ctotal"><div><div class="l">Estimated total</div><div class="n">Final price is confirmed when the agent pays. The card it creates is capped at this amount.</div></div><div class="v">${money(cartCents(), cur)}</div></div><div class="cart-actions"><button class="btn btn-outline btn-sm" data-cart="clear">Clear</button><button class="btn btn-green btn-sm" data-cart="checkout">Checkout with agent</button></div></div></div>`;
+  w.innerHTML = `<div class="cart${cart.open ? "" : " closed"}"><button class="cart-head" data-cart="toggle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.7 12.4a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 7H6"/></svg><b>Cart</b><span class="sub">${n} item${n === 1 ? "" : "s"} · ${esc(cart.merchant.name)}</span><span class="chev">⌄</span></button><div class="cart-body">${cart.lines.map((l, i) => `<div class="cline">${pimg(l.name, l.cat)}<div><div class="nm">${esc(l.name)}</div><div class="qty"><button data-cart="dec" data-i="${i}" aria-label="Fewer">−</button>${l.qty} ×<button data-cart="inc" data-i="${i}" aria-label="More">+</button><span>${money(l.unit, cur)} each</span></div></div><div class="amt">${money(l.qty * l.unit, cur)}</div></div>`).join("")}<div class="fees"><div><span>Order fee</span><span class="mono">${money(feeLines().order, cur)}</span></div><div><span>Card processing (${(FEES.processingBps / 100).toFixed(1)}%)</span><span class="mono">${money(feeLines().proc, cur)}</span></div></div><div class="ctotal"><div><div class="l">Estimated total</div><div class="n">Fees are an illustrative sandbox schedule, not A-CARD pricing. The card the agent creates is capped at this total.</div></div><div class="v">${money(cartCents() + feeLines().total, cur)}</div></div><div class="cart-actions"><button class="btn btn-outline btn-sm" data-cart="clear">Clear</button><button class="btn btn-green btn-sm" data-cart="checkout">Checkout with agent</button></div></div></div>`;
 }
 $("#cartwrap").addEventListener("click", (e) => {
   const b = e.target.closest("[data-cart]"); if (!b) return; const a = b.dataset.cart, i = Number(b.dataset.i);
@@ -439,7 +515,7 @@ $("#cartwrap").addEventListener("click", (e) => {
   else if (a === "dec") { cart.lines[i].qty -= 1; if (cart.lines[i].qty <= 0) cart.lines.splice(i, 1); if (!cart.lines.length) cart = { merchant: null, lines: [], open: true }; }
   else if (a === "checkout") {
     const l = cart.lines.map((x) => `${x.qty} × ${x.name}`).join(" and ");
-    const q = `Checkout: buy ${l} from ${cart.merchant.name} for R${(cartCents() / 100).toFixed(2)} (merchant category ${cart.merchant.mcc}). Use a single-use card limited to that category.`;
+    const f = feeLines(); const q = `Checkout: buy ${l} from ${cart.merchant.name} for R${(cartCents() / 100).toFixed(2)} (merchant category ${cart.merchant.mcc}), order fee R${(f.order / 100).toFixed(2)} and card processing R${(f.proc / 100).toFixed(2)} (fees category ${FEES.mcc}). Use one card limited to those two categories.`;
     cart = { merchant: null, lines: [], open: true }; renderCart(); ask(q); return;
   }
   renderCart();
@@ -458,7 +534,7 @@ const NAVS = [
   ["agent", "Agent"], ["cards", "Manage cards"], ["spending", "Track spending"], ["wallet", "Wallet"],
   ["approvals", "Approvals"], ["policies", "Policies"], ["audit", "Audit log"], ["merchants", "Merchants"], ["connect", "Connect agents"],
 ];
-const MCC = { "5411": "Groceries", "5734": "Software", "4816": "Cloud", "7311": "Advertising", "4511": "Airlines", "5812": "Restaurants", "7995": "Gambling", "6051": "Crypto", "5211": "Building supplies", "5251": "Hardware", "5541": "Fuel", "5542": "Fuel", "5732": "Electronics", "5200": "Home supplies", "7538": "Auto service", "7372": "Software", "x402": "x402 APIs" };
+const MCC = { "5411": "Groceries", "5734": "Software", "4816": "Cloud", "7311": "Advertising", "4511": "Airlines", "5812": "Restaurants", "7995": "Gambling", "6051": "Crypto", "5211": "Building supplies", "5251": "Hardware", "5541": "Fuel", "5542": "Fuel", "5732": "Electronics", "5200": "Home supplies", "7538": "Auto service", "7372": "Software", "x402": "x402 APIs", "5912": "Pharmacy", "5943": "Office supplies", "5699": "Workwear", "5169": "Cleaning supplies", "5533": "Auto parts", "7399": "Fees & services" };
 const mcc = (c) => (MCC[c] ? `${MCC[c]} (${c})` : c);
 let view = "agent", pendingCount = 0, viewToken = 0;
 const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2400); };
@@ -541,7 +617,7 @@ const VIEWS = {
   async merchants() {
     const { merchants } = await api("/v1/merchants");
     const rows = merchants.map((m) => `<tr><td><b>${esc(m.name)}</b></td><td>${esc(mcc(m.merchantCategoryCode))}</td><td>${esc(m.address?.city ?? "")}</td><td class="mono">${m.serviceRadiusKm} km</td><td><span class="pill ${m.verified ? "completed" : "pending"}">${m.verified ? "verified" : esc(m.status)}</span></td></tr>`).join("");
-    return head("Merchants", "A-MERCHANT: verified suppliers agents can find and buy from. Unverified merchants never appear in agent search.") + `<div class="panel" style="margin-bottom:18px"><h2>Search supply</h2><div class="filters"><input id="mq" value="cement" placeholder="What does the agent need?"><button class="btn btn-green" id="msearch">Search near Johannesburg</button></div><div id="mres" class="hint">Search runs against the same ranking an agent sees: price, distance, lead time and how fresh the stock count is.</div></div><div class="panel"><h2>Directory</h2><table class="grid wide"><thead><tr><th>Merchant</th><th>Category</th><th>City</th><th>Service radius</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    return head("Merchants", "A-MERCHANT: verified suppliers agents can find and buy from. Unverified merchants never appear in agent search.") + `<div class="panel" style="margin-bottom:18px"><h2>Search supply</h2><div class="filters"><input id="mq" value="cement" placeholder="What does the agent need?"><button class="btn btn-green" id="msearch">Search near Johannesburg</button></div><div class="ctabs" style="margin-bottom:12px">${["bread", "milk", "paper", "monitor", "hard hat", "gloves", "bleach", "engine oil", "bricks", "paint", "diesel", "pain"].map((w) => `<button class="ctab" data-q="${w}">${w}</button>`).join("")}</div><div id="mres" class="hint">Search runs against the same ranking an agent sees: price, distance, lead time and how fresh the stock count is.</div></div><div class="panel"><h2>Directory</h2><table class="grid wide"><thead><tr><th>Merchant</th><th>Category</th><th>City</th><th>Service radius</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   },
   async connect() {
     return head("Connect agents", "Use this platform from your own agent. The sandbox runs in this page, so these connect to a real A-CARD deployment.") + `<div class="panel"><div class="ctabs" id="ct">${["Claude Code", "Codex", "OpenClaw", "MCP server"].map((t, i) => `<button class="ctab${i ? "" : " sel"}" data-t="${t}">${t}</button>`).join("")}</div><div id="cc"></div><div class="hint" style="margin-top:14px">Get an agent API key (<span class="mono">ak_…</span>) from the A-CARD console, or run <span class="mono">acard signup</span> against the sandbox API. Add <span class="mono">ACARD_ENABLE_WALLET=true</span> to the environment to give the agent the sandbox wallet tools. Never paste a key into a chat.</div></div>`;
@@ -568,6 +644,7 @@ $("#vo").addEventListener("click", async (e) => {
       const offers = r.offers ?? [];
       $("#mres").innerHTML = offers.length ? `<table class="grid wide"><thead><tr><th>#</th><th>Supplier</th><th>Item</th><th class="right">Total</th><th>Distance</th><th>Lead</th><th>Stock</th><th></th></tr></thead><tbody>${offers.map((o, i) => `<tr class="${i ? "" : "row-hl"}"><td class="mono">${i + 1}</td><td><b>${esc(o.merchant?.name ?? "")}</b><div class="hint">${esc((o.matchReasons ?? []).slice(0, 2).join(" · "))}</div></td><td>${esc(o.item?.name ?? "")}</td><td class="right mono">${money(o.totalCents, o.currency)}</td><td class="mono">${o.distanceKm != null ? o.distanceKm.toFixed(0) + " km" : "—"}</td><td class="mono">${o.leadTimeDays}d</td><td><span class="pill ${o.freshness === "fresh" ? "completed" : "pending"}">${esc(o.freshness ?? "")}</span></td><td class="right"><button class="btn btn-outline btn-sm" data-addm="${OFFERS.push(o) - 1}">+ Add</button></td></tr>`).join("")}</tbody></table>${(r.excluded ?? r.exclusions ?? []).length ? `<div class="hint" style="margin-top:10px">${(r.excluded ?? r.exclusions).length} other candidate(s) excluded, with reasons the agent can see.</div>` : ""}` : "No supplier matched that search.";
     }
+    else if (t.dataset.q) { $("#mq").value = t.dataset.q; $("#msearch").click(); }
     else if (t.dataset.addm) { addToCart(Number(t.dataset.addm)); toast("Added to your cart. Check out from the Agent screen."); }
     else if (t.dataset.t) showConnect(t.dataset.t);
     else if (t.dataset.copy) { navigator.clipboard?.writeText(t.dataset.copy).catch(() => {}); toast("Copied."); }

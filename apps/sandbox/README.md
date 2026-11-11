@@ -11,6 +11,12 @@ Screens, as in the console: Agent (chat), Manage cards, Track spending, Wallet, 
 
 Restrictions shown and enforced: an organisation policy (gambling and crypto blocked to start, editable under Policies) that beats any card's rules, per-card limits and approval thresholds, wallet limits (10 USDC auto-approve, 50 per transfer, 200 a day, x402 up to 1 USDC) and x402 price ceilings.
 
+**Catalogue:** about 18 fictional suppliers and ~120 products around Johannesburg (groceries, pharmacy, electronics, office, workwear and safety, cleaning, auto parts, catering, building, fuel and tyres), defined in `src/catalogue.ts`. Several suppliers stock the same product so ranking has something to decide, and one is deliberately unverified so you can see agents never get offered it. Prices are plausible shelf prices, not quotes. Product pictures are line illustrations drawn for each kind of product (no photographs).
+
+**Fees:** the cart adds an order fee and card processing, charged through the real ledger as a separate payment to "a·card fees" (category 7399) on the same card. The rates (`FEES` in `public/index.html`) are placeholders, not A-CARD pricing: set them to what you decide to charge, or to zero.
+
+**Live mode check:** "Check key" in the key dialog makes a one-token call and says plainly whether the key works, is rejected, is rate-limited, or can't be reached.
+
 Each visitor gets a fresh account: R20 000 and US$500 in the fiat wallet, 500 test USDC on a mock chain. The real A-CARD API runs in-process (`/v1/*`) with a seeded A-MERCHANT directory and a paid x402 test API at `/demo/weather`.
 
 Limits: 40 messages a session, 12 tool calls a message, 6 new sessions per IP per hour. Everything is in memory: a restart resets it, so run one instance.

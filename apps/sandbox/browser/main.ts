@@ -1,6 +1,6 @@
 import { createSandbox } from "../src/app.js";
 import { mockModel } from "../src/mock.js";
-import { anthropicModel } from "../src/model.js";
+import { anthropicModel, checkAnthropicKey } from "../src/model.js";
 
 /**
  * The whole sandbox, running in the page: the A-CARD platform, the demo
@@ -17,6 +17,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 (window as any).__ACARD_API__ = BASE;
+(window as any).__checkKey = (key: string) => checkAnthropicKey(key, { browserDirect: true });
 (window as any).__sandboxReady = (async () => {
   const sb = await createSandbox({
     baseUrl: BASE,

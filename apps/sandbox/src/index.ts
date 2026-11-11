@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { createSandbox } from "./app.js";
-import { anthropicModel } from "./model.js";
+import { anthropicModel, checkAnthropicKey } from "./model.js";
 import { mockModel } from "./mock.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -15,6 +15,7 @@ const sandbox = await createSandbox({
   baseUrl: `http://127.0.0.1:${PORT}`,
   mockModel,
   liveModel: (apiKey) => anthropicModel({ apiKey, model: modelName }),
+  checkKey: (apiKey) => checkAnthropicKey(apiKey),
   maxTurnsPerSession: Number(process.env.SANDBOX_MAX_TURNS ?? 40),
 });
 

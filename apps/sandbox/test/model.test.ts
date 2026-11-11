@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { anthropicModel } from "../src/model.js";
+import { anthropicModel, checkAnthropicKey } from "../src/model.js";
 
 /**
  * The live-mode adapter against a local stand-in for the documented Messages
@@ -54,5 +54,23 @@ describe("anthropicModel", () => {
     const err = await anthropicModel({ apiKey: key, model: "m", baseUrl: url })({ system: "s", messages: [], tools: [] }).catch((e) => e as Error);
     expect((err as Error).message).toContain("401");
     expect((err as Error).message).not.toContain(key);
+  });
+});
+
+describe("checkAnthropicKey", () => {
+  const key = "sk-ant-test-key-0123456789";
+  it("says the key works on a 200, using a one-token request", async () => {
+    reply = { status: 200, body: { content: [{ type: "text", text: "h" }] } };
+    expect(await checkAnthropicKey(key, { baseUrl: url })).toEqual({ ok: true, message: "Key works. Live mode is ready." });
+    expect(seen.at(-1)!.body.max_tokens).toBe(1);
+  });
+  it("explains a rejected key, a rate limit and an unreachable service in plain words", async () => {
+    reply = { status: 401, body: { error: { message: "invalid x-api-key" } } };
+    const bad = await checkAnthropicKey(key, { baseUrl: url });
+    expect(bad.ok).toBe(false); expect(bad.message).toContain("rejected"); expect(bad.message).not.toContain(key);
+    reply = { status: 429, body: { error: { message: "rate" } } };
+    expect((await checkAnthropicKey(key, { baseUrl: url })).message).toContain("rate-limited");
+    const down = await checkAnthropicKey(key, { baseUrl: "http://127.0.0.1:9", browserDirect: true });
+    expect(down.ok).toBe(false); expect(down.message).toContain("browser couldn't reach");
   });
 });
