@@ -227,3 +227,26 @@ Do **not** move real cardholder money until every box is ticked:
   the multi-writer Postgres store is the default and the path to scale.
 - Turning on CloudTrail/GuardDuty/WAF logging is not the same as someone
   watching them — no alerting or on-call process sits on top of them yet.
+
+---
+
+## 7. Update, 2026-11-11: readiness scorecard
+
+Built since the plan above: AFP routing (card, x402, stablecoin), the agent wallet, a self-hosted wallet provider (test networks only), A-MERCHANT self-serve stores and CSV upload, an Investec programmable-card pilot hook, the public sandbox, and the dashboard's crypto and routing screens. 557 automated tests pass.
+
+| Area | State | Gate for real money? |
+|---|---|---|
+| Decision engine, ledger, approvals, RBAC | Built and tested | No: ready |
+| Public sandbox and developer preview | Built; hosting is a deploy step (Fly or AWS) | No: can go public as a preview |
+| Card issuing partner | **Not signed** | **Yes: the single biggest blocker** |
+| Regulatory and legal position (SARB, NPS Act, FICA, POPIA, T&Cs) | **Not done**; no counsel engaged | **Yes** |
+| KYC/KYB (Didit) | Integrated; no signed provider agreement, consent and retention posture unsettled | Yes |
+| Funding rail (PayFast) | Wired; not run against PayFast's real sandbox end to end | Yes |
+| Operations (alerts, on-call, tested restore, security contact) | Mostly missing | Yes |
+| Independent security review / penetration test | **Not done** | Yes |
+| Investec pilot (own account, own card) | Hook and runbook built; never run against a real account | No: the fastest route to a real-money test |
+| Crypto and stablecoin rails | Test networks only; wallet provider unaudited, master key in an environment variable, Solana transfers unsupported | Keep off for launch |
+| SOC 2 | None | Not a launch gate, but large buyers will ask |
+| POS and ERP connectors | None built (CSV and API sync only) | No: needed for supply growth, not for first money |
+
+Order of operations: (1) run the Investec pilot on your own account to test the decision layer on real charges, (2) engage counsel and start issuing-partner talks now, since both take months, (3) finish operational readiness and a penetration test while they run, (4) go live with a small design-partner group on cards only, (5) keep crypto off until a KMS-backed provider has been audited.
