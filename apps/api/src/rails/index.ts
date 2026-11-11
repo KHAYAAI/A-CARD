@@ -8,3 +8,4 @@ export {
   type StablecoinRailConfig,
   type StablecoinRailClient,
 } from "./stablecoin.js";
+export { createProviderStablecoinRail, type ProviderStablecoinConfig } from "./providerStablecoin.js";

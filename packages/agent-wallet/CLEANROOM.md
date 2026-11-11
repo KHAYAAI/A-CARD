@@ -34,6 +34,8 @@ Business 1.0.0) or any other non-permissively licensed project.
 
 | 2026-11-05 | Claude (Claude Code session, steered by Tebogo Mvelase) | Phases 2–4: x402 tools (wire format and URL guard moved in from `apps/api/src/x402`, A-CARD's own code from the public x402 spec), swap and DeFi-read providers, `OpenFireblocksSigner`, mainnet gate, hosted-wallet host in `apps/mcp` | Own code only. x402 public spec (coinbase/x402 `specs/`) |
 
+| 2026-11-11 | Claude (Claude Code session, steered by Tebogo Mvelase) | `apps/wallet-provider`: self-hosted embedded-wallet provider (sealed key storage, address derivation, testnet USDC transfer) and the API stablecoin rail that uses it | Own code only. viem, @noble/curves, @scure/base (MIT); EIP-55, ERC-20 and Circle test-USDC addresses from public docs. No third-party wallet project consulted |
+
 ## Exceptions approved
 
 None.

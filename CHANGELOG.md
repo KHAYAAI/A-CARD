@@ -8,6 +8,13 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: self-hosted wallet provider and testnet USDC transfer
+
+### Added
+- **`apps/wallet-provider`**: a self-hostable embedded-wallet provider. Real key generation (secp256k1, ed25519), AES-256-GCM sealed storage with HKDF per-record keys, EIP-55 / base58 addresses, USDC balances, and signed USDC transfers on EVM test networks (Sepolia, Amoy by default). Solana: keys and balances only; transfers return 501. Per-transfer and daily caps, idempotent transfers, per-wallet nonce serialisation, and a startup refusal of any non-testnet network without `PROVIDER_ALLOW_MAINNET=true`. Unaudited.
+- **Provider-backed stablecoin rail** (`apps/api/src/rails/providerStablecoin.ts`), enabled by `ACARD_WALLET_PROVIDER_URL` + `ACARD_WALLET_PROVIDER_KEY`. It pays from the holder's embedded wallet, uses the intent id as the idempotency key, treats an unconfirmed or transport-failed broadcast as reconciling, and reads `carriesRealValue` from the provider. The same variables also turn on signup auto-provisioning of the embedded wallet, which was previously only wired in code.
+- Tests against a fake JSON-RPC node that independently decodes and verifies the signed transaction. No real chain was reached.
+
 ## [Unreleased]: agent wallet in the MCP server
 
 ### Added

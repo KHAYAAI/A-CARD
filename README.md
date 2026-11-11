@@ -635,6 +635,16 @@ or `ACARD_AFP_STABLECOIN_FROM_ADDRESS`, and even then they run against
 custodied wallet exists yet, so turning either on only proves the protocol
 round trip, not real settlement (the server logs this loudly on boot).
 
+**A real (test-network) stablecoin rail.** `apps/wallet-provider` is a
+self-hostable embedded-wallet provider: real key generation, encrypted key
+storage, and signed USDC transfers on Sepolia/Amoy. Set
+`ACARD_WALLET_PROVIDER_URL` and `ACARD_WALLET_PROVIDER_KEY` on the API and
+signups get a real wallet, while the stablecoin rail pays from it. Whether the
+rail carries real value is read from the provider's own network config, and
+the provider refuses mainnet unless `PROVIDER_ALLOW_MAINNET=true`. It is
+unaudited and tested against a fake chain node only; see
+[its README](apps/wallet-provider/README.md).
+
 ## How an authorization is decided
 
 1. Merchant charge hits the issuer; the issuer calls `POST /webhooks/issuer` with an HMAC-signed `authorization.request` (Stripe-style `t=…,v1=…` header, timing-safe verify, replay-window check).

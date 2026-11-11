@@ -8,7 +8,7 @@ import { InMemoryMerchantAuth, InMemoryMerchantDirectory, PostgresMerchantAuth, 
 import type { MerchantAuthPort, MerchantDirectoryPort } from "./merchant/types.js";
 import { AfpLedger } from "@acard/core";
 import { InMemoryAfpLedger, PostgresAfpLedger, startAfpWorkers, type AfpLedgerPort } from "./afp/index.js";
-import { createCardRail, createX402Rail, createStablecoinRail, createSandboxStablecoinClient, SANDBOX_SIGNER, type RailAdapter } from "./rails/index.js";
+import { createCardRail, createX402Rail, createStablecoinRail, createProviderStablecoinRail, createSandboxStablecoinClient, SANDBOX_SIGNER, type RailAdapter } from "./rails/index.js";
 import { createEip3009Signer, createX402Payer, type X402Payer, type X402Signer } from "./x402/index.js";
 import { ComplianceService } from "@acard/core";
 import {
@@ -44,6 +44,8 @@ const afpX402RealValue = process.env.ACARD_AFP_X402_REAL_VALUE === "true";
 const afpX402Networks = (process.env.ACARD_AFP_X402_NETWORKS ?? "eip155:84532").split(",").map((n) => n.trim()).filter(Boolean);
 const afpX402AllowPrivate = process.env.ACARD_AFP_X402_ALLOW_PRIVATE_NETWORKS === "true";
 const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
+const walletProviderUrl = process.env.ACARD_WALLET_PROVIDER_URL;
+const walletProviderKey = process.env.ACARD_WALLET_PROVIDER_KEY;
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
 const complianceMonitor = process.env.ACARD_COMPLIANCE_MONITOR_TRANSACTIONS === "true";
@@ -193,7 +195,19 @@ if (afpEnabled) {
     );
   }
 
-  if (afpStablecoinFromAddress) {
+  // A self-hosted wallet provider (apps/wallet-provider) replaces the sandbox
+  // stablecoin client. Whether it moves real value comes from the provider's
+  // own network config, never from a flag here.
+  if (walletProviderUrl) {
+    if (!walletProviderKey) throw new Error("ACARD_WALLET_PROVIDER_URL is set but ACARD_WALLET_PROVIDER_KEY is not");
+    const providerRail = await createProviderStablecoinRail({ baseUrl: walletProviderUrl, apiKey: walletProviderKey, listLinkedWallets: (id) => platform.listLinkedWallets(id) });
+    rails.push(providerRail);
+    console.log(
+      providerRail.carriesRealValue
+        ? "A-CARD API: AFP stablecoin rail enabled via the wallet provider — MAINNET, moves real USDC"
+        : "A-CARD API: AFP stablecoin rail enabled via the wallet provider — test networks only, no real value",
+    );
+  } else if (afpStablecoinFromAddress) {
     rails.push(
       createStablecoinRail({
         client: createSandboxStablecoinClient(),
@@ -329,6 +343,8 @@ const app = createApp({
   merchants,
   merchantAuth,
   afp,
+  // Auto-provisions a linked embedded wallet at signup, from the provider.
+  embeddedWallet: walletProviderUrl && walletProviderKey ? { baseUrl: walletProviderUrl, apiKey: walletProviderKey, defaultChain: "ethereum" } : undefined,
   // AuthKit is a separate WorkOS product from the org-SSO `workos` config
   // below — same API key and project, but this logs an individual merchant
   // user in (password, magic link, WorkOS-hosted signup), where org SSO

@@ -1,0 +1,25 @@
+{
+  "name": "@acard/wallet-provider",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Self-hostable embedded wallet provider for A-CARD: real keys, encrypted at rest, testnet-first USDC transfers",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/service.ts",
+    "./app": "./src/app.ts",
+    "./testing": "./src/testing/fakeEvmNode.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "licences": "node ../../packages/agent-wallet/scripts/check-licences.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "@noble/curves": "^2.4.0",
+    "@scure/base": "^2.3.0",
+    "hono": "^4.6.0",
+    "viem": "^2.57.5"
+  }
+}

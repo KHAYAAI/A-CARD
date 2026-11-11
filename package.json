@@ -12,7 +12,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
-    "typecheck": "tsc -p packages/core && tsc -p apps/api && tsc -p apps/mcp && tsc -p apps/cli && tsc -p packages/sdk && tsc -p packages/agent-wallet --noEmit && tsc -p examples && tsc -p apps/sandbox",
+    "typecheck": "tsc -p packages/core && tsc -p apps/api && tsc -p apps/mcp && tsc -p apps/cli && tsc -p packages/sdk && tsc -p packages/agent-wallet --noEmit && tsc -p examples && tsc -p apps/sandbox && tsc -p apps/wallet-provider",
     "dev:api": "npm run dev -w @acard/api",
     "dev:mcp": "npm run dev -w @acard/mcp",
     "dev:dashboard": "npm run dev -w @acard/dashboard",
