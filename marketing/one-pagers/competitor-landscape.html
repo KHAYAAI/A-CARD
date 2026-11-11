@@ -1,0 +1,44 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A-CARD competitor landscape</title>
+<style>
+@page{size:A4 landscape;margin:7mm}
+*{box-sizing:border-box}body{margin:0;font:7.3pt/1.23 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#14201a}
+h1{font-size:15pt;margin:0 0 2px;letter-spacing:-.3px}.sub{color:#5f6f66;margin:0 0 5px;font-size:8pt}
+.what{background:#e7efe9;border-radius:6px;padding:4px 8px;margin:0 0 5px;font-size:7.2pt}.what b{color:#0a6e44}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{background:#14201a;color:#fff;text-align:left;font-weight:600;padding:3px 5px;font-size:7pt}
+td{padding:2px 5px;border-bottom:.5pt solid #dcd6c6;vertical-align:top}
+tr.g td{background:#f6f4ec;font-weight:700;font-size:7.2pt;color:#0a6e44;padding:2px 5px;border-bottom:none}
+td.n{font-weight:700}.live{color:#0a6e44;font-weight:600}.pilot{color:#a86f00;font-weight:600}.no{color:#b3382f;font-weight:600}
+.foot{margin-top:5px;color:#5f6f66;font-size:6.8pt;line-height:1.3}
+.us{margin-top:5px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:7pt}.us div{border:.5pt solid #dcd6c6;border-radius:6px;padding:4px 7px}.us b{display:block;color:#0a6e44}
+</style></head><body>
+<h1>A‑CARD: who we compete with, and where each one really stands</h1>
+<p class="sub">Status as reported in public sources, November 2026. Most sources are secondary (news, blogs, trackers) and some conflict; verify against each company's own announcements before quoting.</p>
+<div class="what"><b>What A‑CARD is:</b> a control layer that lets a company's AI agents spend money safely. Each agent gets its own virtual card or wallet with limits, merchant rules and human approvals; it finds suppliers (A‑MERCHANT); each payment is routed over card, x402 or stablecoin (AFP); one ledger and audit log. Rand‑first. <b>Today: a working sandbox on test money, not live.</b></div>
+<table>
+<colgroup><col style="width:12%"><col style="width:25%"><col style="width:34%"><col style="width:29%"></colgroup>
+<tr><th>Player</th><th>What they do</th><th>Real status (reported)</th><th>Overlap with A‑CARD, and our angle</th></tr>
+<tr class="g"><td colspan="4">Networks and payments majors: the biggest threat, and also our rails</td></tr>
+<tr><td class="n">Visa Intelligent Commerce</td><td>Tokenised credentials so agents can pay on Visa cards</td><td><span class="pilot">Pilots.</span> Live agent transactions with 30+ issuers in Europe (Jul 2026). Merchant product "Connect" still in pilot, no GA date.</td><td>Rail, not a rival product. They provide the credential; we provide budgets, approvals, supply and ledger on top.</td></tr>
+<tr><td class="n">Mastercard Agent Pay</td><td>Agent tokens on Mastercard cards; "for Machines" programme</td><td><span class="live">Broadest rollout.</span> US consumer rollout via banks since late 2025; one source says enabled on nearly all cards (unverified). Mastercard calls some tests "controlled"; Machines still pilot.</td><td>Same: a rail we could sit on. Risk if they add business controls themselves.</td></tr>
+<tr><td class="n">Stripe (ACP, shared tokens, Link agent wallet)</td><td>Open protocol with OpenAI; shared payment tokens; one‑time cards via Link</td><td><span class="pilot">Preview.</span> Shared token in public preview (Apr 2026); extended to Visa/Mastercard agent credentials and BNPL (Mar 2026); Etsy, URBN reported. Stripe Issuing for agents: not confirmed.</td><td><b>Closest big competitor</b> for the checkout side. Not rand‑first or supplier‑discovery; we integrate rather than fight.</td></tr>
+<tr><td class="n">Google AP2</td><td>Open agent payments protocol, now donated to FIDO Alliance</td><td><span class="pilot">Early.</span> v0.2 (Apr 2026); public use mostly PayPal and Mastercard pilots.</td><td>Standard to support, not a product competitor.</td></tr>
+<tr class="g"><td colspan="4">Card issuing infrastructure: suppliers more than rivals</td></tr>
+<tr><td class="n">Lithic</td><td>Card‑issuing API</td><td><span class="live">Shipping.</span> MCP server (Apr 2026); says agents already use its cards.</td><td>Builders add the controls and flow themselves: that's what we sell. Possible partner.</td></tr>
+<tr><td class="n">Marqeta</td><td>Card‑issuing platform</td><td><span class="live">Shipping.</span> MCP server lets agents issue cards and file disputes; AI risk scoring (Mar 2026). Q1 2026 TPV $112B.</td><td>Infrastructure, not agent‑native workflow. Possible partner.</td></tr>
+<tr class="g"><td colspan="4">Spend management</td></tr>
+<tr><td class="n">Ramp</td><td>Corporate cards and spend software</td><td><span class="pilot">Early access.</span> Agent Cards launched Mar 2026: per‑transaction tokenised credentials via Visa Intelligent Commerce.</td><td><b>Direct competitor</b> for the budget owner, US‑first. We differ on supplier discovery, rails and rand.</td></tr>
+<tr><td class="n">Brex</td><td>Corporate cards</td><td><span class="no">No agent cards found.</span> AI is expense automation. Reported owned by Capital One since Apr 2026.</td><td>Watch, not a current rival.</td></tr>
+<tr class="g"><td colspan="4">Agent‑payments startups: the closest like‑for‑like</td></tr>
+<tr><td class="n">Skyfire</td><td>Agent identity (KYA) and payments across card, ACH, stablecoin</td><td><span class="live">Operating.</span> ~$9.5M raised (a16z CSX, Coinbase Ventures, Neuberger Berman). Reports of thousands of daily transactions (unverified).</td><td>Overlaps on payments and routing. We add business controls, supply and local focus.</td></tr>
+<tr><td class="n">Payman</td><td>Per‑agent wallets with limits and approvals (USD, USDC)</td><td><span class="pilot">Early.</span> Funding reports conflict (~$14M most common). Claims SOC 2, Fifth Third custody, Stripe processing. Few named customers.</td><td><b>Most similar product.</b> We add card issuing, supplier directory, rand, routing.</td></tr>
+<tr><td class="n">Natural</td><td>B2B agent payments</td><td><span class="pilot">Early.</span> Launched Oct 2025 (~$9.8M); a later $30M Series A is reported by one source only.</td><td>Targets the same B2B buyers. Watch closely.</td></tr>
+<tr><td class="n">Nekuda</td><td>Agent wallet and "mandates" SDK</td><td><span class="pilot">Pilots.</span> $5M seed (May 2025); Visa Intelligent Commerce launch partner.</td><td>Credentials and authorisation layer; narrower than us.</td></tr>
+<tr><td class="n">Crossmint</td><td>Agent wallets and checkout, crypto‑leaning</td><td><span class="live">Operating.</span> ~$23.6M raised (one source).</td><td>Overlaps on wallets. We lead on cards and controls.</td></tr>
+<tr class="g"><td colspan="4">Crypto rails and South Africa</td></tr>
+<tr><td class="n">Coinbase x402</td><td>Pay‑per‑request stablecoin protocol; agent wallets</td><td><span class="live">Real, but inflated.</span> Foundation under Linux Foundation (Apr 2026). 100M+ transactions, but heavy self‑dealing and speculative activity; adjusted volume far lower; activity fell off late 2026.</td><td>We support x402 as a rail, governed by our limits. Not a competitor.</td></tr>
+<tr><td class="n">SA banks (Discovery, Absa, Standard Bank, Nedbank) and Visa SA</td><td>Consumer and bank AI; Visa "Agentic Ready" programme</td><td><span class="no">Nothing broadly live for businesses.</span> Visa says no autonomous AI transactions in SA yet. Discovery Bank has launched consumer agentic payments. Law assumes a human approves each payment.</td><td><b>Open local gap.</b> A bank could close it, but is slow; regulatory fit (FICA, POPIA, SARB) is the shared hurdle.</td></tr>
+</table>
+<div class="us"><div><b>Where A‑CARD is different</b>Rand‑first; one product for supplier discovery, controlled cards, wallets and rail routing; humans stay in control (approvals, policy, audit); works end to end in a sandbox today.</div><div><b>Where we're weaker</b>Not live; no issuing partner, licences or SOC 2 yet. Competitors are shipping to real customers, and the networks and Stripe have far more resources.</div></div>
+<div class="foot"><b>Sources (secondary, unverified):</b> Shatale, ATXP, elogic (Visa/Mastercard status); Stripe changelog and AgentsPay (shared tokens); Ramp and Stabledash (Agent Cards); Marqeta and Lithic product pages; Trio, Rye, BeInCrypto (startup funding); Chainalysis via Bravenewcoin, Decrypt (x402); Google/FIDO announcement (AP2); Stitch, TechCentral, ITWeb, Pulse (South Africa).</div>
+</body></html>
