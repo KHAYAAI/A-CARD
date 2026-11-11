@@ -8,6 +8,12 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: Investec programmable-card pilot
+
+### Added
+- **Decision hook for an Investec card** (`integrations/investec/main.js`) and three endpoints that serve it: `POST /webhooks/investec/authorize`, `/settle` and `/release`. Off unless `ACARD_INVESTEC_HOOK_SECRET` is set; cards are mapped with `ACARD_INVESTEC_CARDS`. The hook secret is separate from the issuer webhook secret and can only act on holds it created. Fails closed by default. Tested end to end by running the real script against the API. **Not run against a real Investec account**: see the runbook's list of assumptions to check in Investec's simulator.
+- **Runbook**: `docs/integrations/investec-pilot.md`.
+
 ## [Unreleased]: A-MERCHANT self-serve stores and CSV upload
 
 ### Added

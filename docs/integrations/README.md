@@ -4,6 +4,7 @@ A-CARD reaches an agent in one of three ways. Pick the one your stack already sp
 
 | Your agent is built with | Connect through | Guide |
 |---|---|---|
+| Investec programmable card (pilot, own account) | Card code + decision endpoints | [investec-pilot.md](investec-pilot.md) |
 | Claude Desktop, Claude Code | MCP (stdio or HTTP) | [claude.md](claude.md#claude-desktop) |
 | The Claude API | Tool runner + `@acard/sdk`, or the MCP connector | [claude.md](claude.md#the-claude-api) |
 | OpenAI Agents SDK | MCP (stdio) | [openai-agents-sdk.md](openai-agents-sdk.md) |

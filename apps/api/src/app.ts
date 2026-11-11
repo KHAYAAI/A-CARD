@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
@@ -163,6 +164,15 @@ export interface AppConfig {
    * merchant user into without a directory record for them.
    */
   merchantAuth?: MerchantAuthPort;
+  /**
+   * Investec programmable-card pilot (optional): lets code running on an
+   * Investec card ask A-CARD whether to approve each charge. The secret is
+   * deliberately NOT the issuer webhook secret: this door can only ask for
+   * a decision on the cards listed in `cards`, never capture, reverse or
+   * touch anything else, so a leaked hook secret is a much smaller problem.
+   * `cards` maps an Investec card id to an A-CARD card id.
+   */
+  investecPilot?: { secret: string; cards: Record<string, string> };
   /**
    * Open store signup (`POST /v1/merchant-api/signup`): a shop applies to list
    * itself and gets a write-scoped merchant key at once. Off unless set. The
@@ -1145,6 +1155,61 @@ export function createApp(config: AppConfig) {
   // this schema/HMAC assumes (unconfirmed — see sudo.ts), that mapping
   // belongs here, translating their event into this shape before it reaches
   // `issuerEventSchema.parse` below.
+
+  if (config.investecPilot) {
+    const pilot = config.investecPilot;
+    if (pilot.secret.length < 24) throw new Error("investecPilot.secret must be at least 24 characters");
+    const want = createHash("sha256").update(pilot.secret).digest();
+    app.post("/webhooks/investec/authorize", async (c) => {
+      const m = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "");
+      if (!m || !timingSafeEqual(createHash("sha256").update(m[1]!).digest(), want)) {
+        return c.json({ error: { code: "unauthorized", message: "missing or invalid hook secret" } }, 401);
+      }
+      const body = z
+        .object({
+          authorization_id: z.string().min(1).max(128),
+          card_id: z.string().min(1).max(128),
+          amount: z.number().int().positive(),
+          currency: currencySchema,
+          merchant: z.object({ name: z.string().max(200), category: z.string().max(8), country: z.string().max(3).optional() }),
+        })
+        .parse(await c.req.json());
+      const acardCardId = pilot.cards[body.card_id];
+      // An unknown card is a clean decline, not a server error: the hook can treat both the same way.
+      if (!acardCardId) return c.json({ approved: false, decline_reason: "card_not_linked" });
+      const decision = await platform.authorize({
+        authorizationId: `inv_${body.authorization_id}`,
+        cardId: acardCardId,
+        amount: body.amount,
+        currency: body.currency,
+        merchant: body.merchant,
+      });
+      return c.json({ approved: decision.approved, decline_reason: decision.declineReason, approval_id: decision.approvalId });
+    });
+
+    // The two follow-ups for a hold this door created. Without them a pilot card's holds would pile up and the
+    // budget would drain with nothing settled. Scoped to `inv_` authorizations, so this secret cannot touch
+    // anything the real issuer webhook or an agent created.
+    const followUp = (kind: "settle" | "release") =>
+      (async (c: Context<Env>) => {
+        const m = /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "");
+        if (!m || !timingSafeEqual(createHash("sha256").update(m[1]!).digest(), want)) {
+          return c.json({ error: { code: "unauthorized", message: "missing or invalid hook secret" } }, 401);
+        }
+        const body = z.object({ authorization_id: z.string().min(1).max(128), final_amount: z.number().int().positive().optional() }).parse(await c.req.json());
+        const id = `inv_${body.authorization_id}`;
+        try {
+          if (kind === "settle") await platform.capture(id, body.final_amount);
+          else await platform.reverse(id);
+        } catch (error) {
+          // Not found / already settled: the hook has nothing more to do, and must not retry forever.
+          return c.json({ ok: false, reason: error instanceof Error ? error.message : String(error) });
+        }
+        return c.json({ ok: true });
+      });
+    app.post("/webhooks/investec/settle", followUp("settle"));
+    app.post("/webhooks/investec/release", followUp("release"));
+  }
 
   app.post("/webhooks/issuer", async (c) => {
     const rawBody = await c.req.text();

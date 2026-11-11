@@ -174,6 +174,14 @@ export const ROUTES: RouteDoc[] = [
       "Called by the issuing partner. `authorization.request` must be answered inside the network's ~2-second window and returns the decision; `transaction.capture` settles a hold; `authorization.reversal` releases one. See docs/reference/webhooks.md.",
     response: { schema: z.object({ approved: z.boolean(), decline_reason: str, approval_id: str, received: z.boolean() }).partial() },
   }),
+  r("post", "/webhooks/investec/authorize", "Inbound webhooks", "Investec programmable-card authorization (pilot)", {
+    auth: "issuer_signature",
+    description:
+      "Only mounted when `ACARD_INVESTEC_HOOK_SECRET` is set. Called by card code running on an Investec card, with `Authorization: Bearer <hook secret>`. Answers approve or decline for a mapped card; it cannot capture or reverse. Unmapped cards are declined with `card_not_linked`.",
+    response: { schema: z.object({ approved: z.boolean(), decline_reason: str, approval_id: str }).partial() },
+  }),
+  r("post", "/webhooks/investec/settle", "Inbound webhooks", "Investec pilot: settle a hold the hook created", { auth: "issuer_signature", description: "Same bearer secret as `/webhooks/investec/authorize`. Captures an `inv_`-prefixed hold only.", response: { schema: z.object({ ok: z.boolean(), reason: str }).partial() } }),
+  r("post", "/webhooks/investec/release", "Inbound webhooks", "Investec pilot: release a hold the hook created", { auth: "issuer_signature", description: "Used when Investec declines a charge A-CARD had approved. Releases an `inv_`-prefixed hold only.", response: { schema: z.object({ ok: z.boolean(), reason: str }).partial() } }),
   r("post", "/webhooks/payfast", "Inbound webhooks", "PayFast ITN (payment notification)", { auth: "payfast_itn", description: "Form-encoded. Validated by signature, source, and confirm-back to PayFast before any wallet is credited.", response: { schema: z.object({ received: z.boolean() }) } }),
   r("post", "/webhooks/compliance", "Inbound webhooks", "Verification provider decisions", { auth: "compliance_signature", requires: "compliance", response: { schema: z.object({ received: z.boolean(), matched: z.boolean() }).partial() } }),
 

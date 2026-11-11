@@ -47,6 +47,8 @@ const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
 const walletProviderUrl = process.env.ACARD_WALLET_PROVIDER_URL;
 const walletProviderKey = process.env.ACARD_WALLET_PROVIDER_KEY;
 const selfServeStores = process.env.ACARD_SELF_SERVE_STORES === "true";
+const investecHookSecret = process.env.ACARD_INVESTEC_HOOK_SECRET;
+const investecCards = process.env.ACARD_INVESTEC_CARDS;
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
 const complianceMonitor = process.env.ACARD_COMPLIANCE_MONITOR_TRANSACTIONS === "true";
@@ -344,6 +346,7 @@ const app = createApp({
   merchants,
   merchantAuth,
   selfServeStores: selfServeStores ? {} : undefined,
+  investecPilot: investecHookSecret ? { secret: investecHookSecret, cards: investecCards ? (JSON.parse(investecCards) as Record<string, string>) : {} } : undefined,
   afp,
   // Auto-provisions a linked embedded wallet at signup, from the provider.
   embeddedWallet: walletProviderUrl && walletProviderKey ? { baseUrl: walletProviderUrl, apiKey: walletProviderKey, defaultChain: "ethereum" } : undefined,

@@ -1030,6 +1030,58 @@ Called by the issuing partner. `authorization.request` must be answered inside t
 
 Errors: `401` — see [errors.md](../reference/errors.md).
 
+### `POST /webhooks/investec/authorize`
+
+**Investec programmable-card authorization (pilot)**
+
+Only mounted when `ACARD_INVESTEC_HOOK_SECRET` is set. Called by card code running on an Investec card, with `Authorization: Bearer <hook secret>`. Answers approve or decline for a mapped card; it cannot capture or reverse. Unmapped cards are declined with `card_not_linked`.
+
+- **Auth:** `webhookSignature`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `approved` | boolean |  |  |
+| `decline_reason` | string |  |  |
+| `approval_id` | string |  |  |
+
+Errors: `401` — see [errors.md](../reference/errors.md).
+
+### `POST /webhooks/investec/settle`
+
+**Investec pilot: settle a hold the hook created**
+
+Same bearer secret as `/webhooks/investec/authorize`. Captures an `inv_`-prefixed hold only.
+
+- **Auth:** `webhookSignature`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `ok` | boolean |  |  |
+| `reason` | string |  |  |
+
+Errors: `401` — see [errors.md](../reference/errors.md).
+
+### `POST /webhooks/investec/release`
+
+**Investec pilot: release a hold the hook created**
+
+Used when Investec declines a charge A-CARD had approved. Releases an `inv_`-prefixed hold only.
+
+- **Auth:** `webhookSignature`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `ok` | boolean |  |  |
+| `reason` | string |  |  |
+
+Errors: `401` — see [errors.md](../reference/errors.md).
+
 ### `POST /webhooks/payfast`
 
 **PayFast ITN (payment notification)**

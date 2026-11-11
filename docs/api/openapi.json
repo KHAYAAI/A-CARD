@@ -3038,6 +3038,135 @@
         }
       }
     },
+    "/webhooks/investec/authorize": {
+      "post": {
+        "operationId": "post_webhooks_investec_authorize",
+        "tags": [
+          "Inbound webhooks"
+        ],
+        "summary": "Investec programmable-card authorization (pilot)",
+        "description": "Only mounted when `ACARD_INVESTEC_HOOK_SECRET` is set. Called by card code running on an Investec card, with `Authorization: Bearer <hook secret>`. Answers approve or decline for a mapped card; it cannot capture or reverse. Unmapped cards are declined with `card_not_linked`.",
+        "security": [
+          {
+            "webhookSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approved": {
+                      "type": "boolean"
+                    },
+                    "decline_reason": {
+                      "type": "string"
+                    },
+                    "approval_id": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/webhooks/investec/settle": {
+      "post": {
+        "operationId": "post_webhooks_investec_settle",
+        "tags": [
+          "Inbound webhooks"
+        ],
+        "summary": "Investec pilot: settle a hold the hook created",
+        "description": "Same bearer secret as `/webhooks/investec/authorize`. Captures an `inv_`-prefixed hold only.",
+        "security": [
+          {
+            "webhookSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/webhooks/investec/release": {
+      "post": {
+        "operationId": "post_webhooks_investec_release",
+        "tags": [
+          "Inbound webhooks"
+        ],
+        "summary": "Investec pilot: release a hold the hook created",
+        "description": "Used when Investec declines a charge A-CARD had approved. Releases an `inv_`-prefixed hold only.",
+        "security": [
+          {
+            "webhookSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/webhooks/payfast": {
       "post": {
         "operationId": "post_webhooks_payfast",
