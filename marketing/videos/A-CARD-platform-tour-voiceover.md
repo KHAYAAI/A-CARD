@@ -1,7 +1,7 @@
 # A-CARD platform tour: voice-over script
 
-For `A-CARD-platform-tour.mp4` (5:40). About 780 words at a calm 140 words a minute.
-Timings are approximate (±5 s): the video is paced by captions, so read to the
+For `A-CARD-platform-tour.mp4` (now 6:08: the wallet section gained two dropdown beats). About 780 words at a calm 140 words a minute.
+Timings below are from the earlier 5:40 cut: from the wallets section (3:40) onward, add about 25 seconds. They are approximate (±5 s): the video is paced by captions, so read to the
 scene, not the clock. Lines in *italics* are stage directions, not read aloud.
 Say "sandbox" every time the screen says it. Do not say "live", "launched" or "certified".
 
@@ -56,6 +56,8 @@ Fiat balances in rand and dollars fund the cards.
 Crypto: an embedded wallet is created for every account at signup. Users can also link their own: MetaMask, WalletConnect, Coinbase, Solana.
 And the agent's own wallet, with its own limits. Small payments go through, larger ones need a person, and above the hard cap they're refused.
 *(routing)* Then routing. Say what you want to pay, and AFP scores each rail on cost, speed and finality. Cards are fast but can be reversed for months. Stablecoins settle instantly and finally. Each option shows its trade-off, and one ledger records them all.
+
+*(Wallets, extra beat)* Pick the chain and the wallet app from a list with their marks; the platform checks the address format for the chain. In routing, choose who you're paying: an API, a supplier's wallet, or a merchant on a card. The choice decides which rails can carry it.
 
 **4:30 · 5. Machine payments**
 Agents also pay APIs directly, per call, using the x402 standard. The agent sets its own ceiling; anything above it is refused, and the payment is recorded like any other.
