@@ -1,6 +1,6 @@
 import type { Model, ModelMessage } from "./model.js";
 import { FEES } from "./fees.js";
-import { freeform, HELP } from "./freeform.js";
+import { checkout, freeform, HELP } from "./freeform.js";
 import { call, earlier, last, lastUserText, parse as _parse, rands, resultsSinceLastUserMessage, say, verdict, type Step } from "./plan.js";
 
 /**
@@ -12,13 +12,6 @@ import { call, earlier, last, lastUserText, parse as _parse, rands, resultsSince
  */
 
 const weather = (base: string) => `${base}/demo/weather`;
-
-function parseCheckout(history: ModelMessage[]) {
-  const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
-  const m = /buy (\d+) × (.+?) from (.+?) for R([\d.]+) \(merchant category (\w+)\)(?:, order fee R([\d.]+) and card processing R([\d.]+) \(fees category (\w+)\))?/i.exec(t);
-  if (!m) return undefined;
-  return { qty: m[1]!, item: m[2]!, merchant: m[3]!, items: Math.round(Number(m[4]) * 100), mcc: m[5]!, fees: Math.round((Number(m[6] ?? 0) + Number(m[7] ?? 0)) * 100), feeMcc: m[8] ?? "7399" };
-}
 
 const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
   {
@@ -35,39 +28,6 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
         const x = r[0]!;
         if (x.name === "pay_checkout") return [say(`A-CARD ${verdict(x)}. ${verdict(x) === "approved" ? "It went through exactly once, because you approved it." : ""}`.trim())];
         return [say(x.output?.status === "settled" || x.output?.tx_hash || x.output?.txHash ? "Done. The transfer settled on the mock chain after your approval." : `The wallet says: ${x.raw.slice(0, 160)}`)];
-      },
-    ],
-  },
-  {
-    // The cart's "Checkout": pay the merchant, then the fees, on one card scoped to those two categories.
-    match: /^checkout:/i,
-    steps: [
-      (_r, { history }) => {
-        const c = parseCheckout(history);
-        if (!c) return [say("I couldn't read that cart. Try adding the item again.")];
-        return [
-          say(`Checking out: ${c.qty} × ${c.item} from ${c.merchant}, ${rands(c.items)}${c.fees ? ` plus ${rands(c.fees)} in fees` : ""}. I'll create one card capped at exactly ${rands(c.items + c.fees)} and limited to the merchant's category${c.fees ? " and the fee category" : ""}.`),
-          call("create_card", { label: `${c.item} · ${c.merchant}`, single_use: false, total_limit: c.items + c.fees, per_transaction_limit: c.items, allowed_merchant_categories: c.fees ? [c.mcc, c.feeMcc] : [c.mcc] }),
-        ];
-      },
-      (r, { history }) => {
-        const c = parseCheckout(history)!;
-        return [call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: c.items, merchant_name: c.merchant, merchant_category: c.mcc })];
-      },
-      (r, { history }) => {
-        const c = parseCheckout(history)!;
-        const id = last(r, "create_card")!.output.id;
-        return c.fees ? [say(`The merchant is paid (${verdict(last(r, "pay_checkout"))}). Now the fees.`), call("pay_checkout", { card_id: id, amount: c.fees, merchant_name: "a·card fees", merchant_category: c.feeMcc })] : [call("close_card", { card_id: id })];
-      },
-      (r, { history }) => {
-        const c = parseCheckout(history)!;
-        const id = last(r, "create_card")!.output.id;
-        return c.fees ? [call("close_card", { card_id: id })] : [say(`A-CARD ${verdict(last(r, "pay_checkout"))}. The card is closed. See Track spending for the record.`)];
-      },
-      (r) => {
-        const pays = r.filter((x) => x.name === "pay_checkout");
-        const ok = pays.length > 0 && pays.every((x) => verdict(x) === "approved");
-        return [say(ok ? `Done. The merchant and the fees were both approved, and the card is closed. See Track spending for the record.` : `Something was refused: ${pays.map(verdict).join("; ")}. The card is closed, so nothing more can be charged.`)];
       },
     ],
   },
@@ -159,6 +119,7 @@ export const mockModel: Model = async ({ messages, base }) => {
   const text = lastUserText(messages);
   const ctx = { base: base ?? "", history: messages as ModelMessage[] };
   // The curated demonstrations first (their exact scenarios), then anything else in plain English.
+  if (/^checkout:/i.test(text)) return { content: checkout(text, results) };
   const scenario = SCENARIOS.find((s) => s.match.test(text));
   if (scenario) {
     const step = scenario.steps[turns];

@@ -122,12 +122,18 @@ const OUT_OF_SCOPE = (t: string) =>
 const LAT = -26.2309, LNG = 28.1772;
 const money0 = (o: any, cur = "ZAR") => (cur === "USD" ? usd(Number(o ?? 0)) : rands(Number(o ?? 0)));
 
-function queriesFor(t: string) {
-  const hit = KEYWORDS.map((x) => ({ x, at: t.search(x.re) })).filter((h) => h.at >= 0).sort((a, b) => a.at - b.at)[0]?.x;
-  const toks = tokens(t);
-  const bigrams = toks.slice(0, -1).map((w, i) => `${w} ${toks[i + 1]}`);
-  const list = [toks.length > 1 ? toks.slice(0, 4).join(" ") : undefined, ...bigrams, ...[...toks].reverse(), hit?.query].filter((x): x is string => !!x);
-  return { hit, list: [...new Set(list)].slice(0, 6) };
+/** The things the visitor asked for, one per product ("milk and eggs" is two). */
+interface Want { text: string; list: string[]; hit?: (typeof KEYWORDS)[number]; qty?: number }
+function wants(t: string): Want[] {
+  const pieces = t.split(/\s*(?:,|;|&|\bplus\b|\band\b|\bas well as\b)\s*/i).map((x) => x.trim()).filter((x) => tokens(x).length > 0);
+  const segs = pieces.length > 1 ? pieces : [t];
+  return segs.map((seg) => {
+    const hit = KEYWORDS.map((x) => ({ x, at: seg.search(x.re) })).filter((h) => h.at >= 0).sort((a, b) => a.at - b.at)[0]?.x;
+    const toks = tokens(seg);
+    const bigrams = toks.slice(0, -1).map((w, i) => `${w} ${toks[i + 1]}`);
+    const list = [toks.length > 1 ? toks.slice(0, 4).join(" ") : undefined, ...bigrams, ...[...toks].reverse(), hit?.query].filter((x): x is string => !!x);
+    return { text: seg, list: [...new Set(list)].slice(0, 5), hit, qty: quantity(seg) };
+  }).filter((w) => w.list.length > 0);
 }
 
 function chooseOffer(offers: any[], t: string) {
@@ -137,43 +143,82 @@ function chooseOffer(offers: any[], t: string) {
   return offers[0];
 }
 
+/** One order: what is bought from whom, then the fees. Paid from a single card. */
+export interface Basket { groups: Array<{ desc: string; merchant: string; items: number; mcc: string }>; fees: number; feeMcc: string }
+
+/** Pay a basket: one card for the whole order, each supplier, then the fees, then close it. Stops cleanly on a hold or a decline. */
+function runBasket(b: Basket, r: Results, intro: string): Block[] {
+  const items = b.groups.reduce((a, g) => a + g.items, 0);
+  const cards = all(r, "create_card"), pays = all(r, "pay_checkout"), closes = all(r, "close_card");
+  const cats = [...new Set([...b.groups.map((g) => g.mcc), ...(b.fees ? [b.feeMcc] : [])])];
+  if (!cards.length)
+    return [say(intro), call("create_card", { label: `${b.groups.map((g) => g.merchant).join(" + ")}`.slice(0, 40), single_use: false, total_limit: items + b.fees, per_transaction_limit: Math.max(...b.groups.map((g) => g.items)), allowed_merchant_categories: cats })];
+  const id = cards[0]!.output?.id;
+  if (!id) return [say(`The card wasn't created: ${cards[0]!.raw.replace(/^Error\s*—\s*/, "").slice(0, 160)}`)];
+  const bad = pays.findIndex((p) => verdict(p) !== "approved");
+  if (bad >= 0) {
+    const what = bad < b.groups.length ? `${rands(b.groups[bad]!.items)} at ${b.groups[bad]!.merchant}` : `the ${rands(b.fees)} fees`;
+    if (held(pays[bad])) return [say(`${what} is above a threshold, so A-CARD is holding it for your approval. I can't approve it myself. Approve it in the Approvals panel, then tell me “I approved it” and I'll retry once.${bad > 0 ? ` The earlier payment${bad > 1 ? "s were" : " was"} already approved.` : ""}`)];
+    if (!closes.length) return [call("close_card", { card_id: id })];
+    return [say(`A-CARD ${verdict(pays[bad])} for ${what}. I won't try another card to get around that. The card is closed, so nothing more can be charged.${bad > 0 ? ` ${bad} earlier payment${bad > 1 ? "s" : ""} went through.` : ""}`)];
+  }
+  if (pays.length < b.groups.length) { const g = b.groups[pays.length]!; return [call("pay_checkout", { card_id: id, amount: g.items, merchant_name: g.merchant, merchant_category: g.mcc })]; }
+  if (b.fees > 0 && pays.length === b.groups.length) return [say(`${b.groups.length === 1 ? "The supplier is" : "All suppliers are"} paid. Now the fees.`), call("pay_checkout", { card_id: id, amount: b.fees, merchant_name: "a·card fees", merchant_category: b.feeMcc })];
+  if (!closes.length) return [call("close_card", { card_id: id })];
+  return [say(`Done. ${b.groups.map((g) => `${g.desc} from ${g.merchant}: ${rands(g.items)}`).join("; ")}${b.fees ? `; ${rands(b.fees)} in fees` : ""}. One card covered the order and it's now closed. See Track spending for the record.`)];
+}
+
+/** The cart's "Checkout:" message: one or more "buy … from … for R… (merchant category …)" groups, then the fees. */
+export function checkout(text: string, r: Results): Block[] {
+  const groups = [...text.matchAll(/buy (.+?) from (.+?) for R([\d.]+) \(merchant category (\w+)\)/gi)].map((m) => ({ desc: m[1]!, merchant: m[2]!, items: Math.round(Number(m[3]) * 100), mcc: m[4]! }));
+  if (!groups.length) return [say("I couldn't read that cart. Try adding the item again.")];
+  const f = /order fee R([\d.]+) and card processing R([\d.]+) \(fees category (\w+)\)/i.exec(text);
+  const b: Basket = { groups, fees: f ? Math.round((Number(f[1]) + Number(f[2])) * 100) : 0, feeMcc: f?.[3] ?? FEES.mcc };
+  const total = b.groups.reduce((a, g) => a + g.items, 0) + b.fees;
+  return runBasket(b, r, `Checking out ${groups.length === 1 ? "" : `${groups.length} suppliers, `}${rands(total - b.fees)}${b.fees ? ` plus ${rands(b.fees)} in fees` : ""}. I'll create one card capped at exactly ${rands(total)} and limited to the merchants' categories${b.fees ? " and the fee category" : ""}.`);
+}
+
 function shop(t: string, r: Results, buy: boolean): Block[] {
-  const { hit, list } = queriesFor(t);
+  const ws = wants(t);
+  if (!ws.length) return [say(`What would you like me to find? For example “find A4 paper”, “buy 10 hard hats” or “milk and eggs”.`)];
   const budget = moneyAfter(t, /\b(under|below|less than|max(?:imum)?|within|up to)\b/i);
   const lead = /\b(today|same day|now|asap)\b/i.test(t) ? 0 : /\b(tomorrow|next day)\b/i.test(t) ? 1 : undefined;
-  const qty = quantity(t);
-  const args = (q: string) => ({ query: q, quantity: qty ?? (hit && (q.includes(hit.query.split(" ")[0]!) || hit.query.includes(q)) ? hit.quantity : 1), lat: LAT, lng: LNG, radius_km: 80, limit: 8, ...(budget ? { max_total_cents: budget } : {}), ...(lead !== undefined ? { max_lead_time_days: lead } : {}) });
-  const finds = all(r, "find_offers");
-  const found = finds.find((f) => (f.output?.offers ?? []).length > 0);
-  if (!found) {
-    if (list.length === 0) return [say(`What would you like me to find? For example “find A4 paper” or “buy 10 hard hats”.`)];
-    if (finds.length < list.length) {
-      const q = list[finds.length]!;
-      return [say(finds.length === 0 ? `Searching A-MERCHANT for “${q}” near Johannesburg${budget ? `, under ${rands(budget)}` : ""}.` : `Nothing for “${list[finds.length - 1]}”. Trying “${q}”.`), call("find_offers", args(q))];
-    }
-    return [say(`I couldn't find that from a verified supplier${budget ? ` under ${rands(budget)}` : ""}. The catalogue covers groceries, pharmacy, electronics, office supplies, workwear and safety, cleaning, auto parts, catering, building materials, fuel and tyres. Try simpler words, or add your own Claude key (top right) for a live agent.`)];
-  }
-  const offers: any[] = found.output.offers;
-  const query = found.input.query;
-  if (!buy) return [say(`${offers.length} verified supplier${offers.length === 1 ? "" : "s"} for “${query}”, ranked by price, distance and how fresh their stock count is. Tap “Add” to put one in your cart, then check out and I'll pay with a card scoped to that purchase.`)];
+  const args = (w: Want, q: string) => ({ query: q, quantity: w.qty ?? (w.hit && (q.includes(w.hit.query.split(" ")[0]!) || w.hit.query.includes(q)) ? w.hit.quantity : 1), lat: LAT, lng: LNG, radius_km: 80, limit: 8, ...(budget ? { max_total_cents: budget } : {}), ...(lead !== undefined ? { max_lead_time_days: lead } : {}) });
 
-  const pick = chooseOffer(offers, t);
-  const items: number = pick.totalCents, f = feeFor(items);
-  const merchant = pick.merchant?.name ?? "Supplier", mcc = pick.merchant?.merchantCategoryCode ?? "5999";
-  const cards = all(r, "create_card"), pays = all(r, "pay_checkout"), closes = all(r, "close_card");
-  if (!cards.length)
-    return [
-      say(`${offers.length} supplier${offers.length === 1 ? "" : "s"} matched. I'll buy ${pick.quantity} × ${pick.item?.name} from ${merchant} at ${rands(items)}, plus ${rands(f.total)} in sandbox fees. One card, capped at ${rands(items + f.total)} and limited to that merchant's category and the fee category.`),
-      call("create_card", { label: `${pick.item?.name} · ${merchant}`, single_use: false, total_limit: items + f.total, per_transaction_limit: items, allowed_merchant_categories: [mcc, FEES.mcc] }),
-    ];
-  const id = cards[0]!.output?.id;
-  if (!pays.length) return [call("pay_checkout", { card_id: id, amount: items, merchant_name: merchant, merchant_category: mcc })];
-  const first = pays[0]!;
-  if (held(first)) return [say(`${rands(items)} at ${merchant} is above a threshold, so A-CARD is holding it for your approval. I can't approve it myself. Approve it in the Approvals panel, then tell me “I approved it” and I'll retry once.`)];
-  if (verdict(first) !== "approved") return [say(`A-CARD ${verdict(first)}. I won't try another card to get around that. Nothing else was charged.`)];
-  if (pays.length === 1 && !closes.length) return [say("The supplier is paid. Now the fees."), call("pay_checkout", { card_id: id, amount: f.total, merchant_name: "a·card fees", merchant_category: FEES.mcc })];
-  if (!closes.length) return [call("close_card", { card_id: id })];
-  return [say(`Done. ${pick.quantity} × ${pick.item?.name} from ${merchant}: ${rands(items)} paid, and ${rands(f.total)} in fees. The card is closed. See Track spending for the record.`)];
+  // Replay the searches so far, item by item, to see where each product stands and what to search next.
+  const finds = all(r, "find_offers");
+  let used = 0;
+  const state = ws.map((w) => {
+    let offers: any[] | undefined, query = "", tried = 0;
+    while (!offers && tried < w.list.length && used < finds.length) {
+      const f = finds[used++]!;
+      tried++;
+      const o: any[] = f.output?.offers ?? [];
+      if (o.length) { offers = o; query = f.input.query; }
+    }
+    return { w, offers, query, tried };
+  });
+  const pending = state.find((x) => !x.offers && x.tried < x.w.list.length);
+  if (pending) {
+    const q = pending.w.list[pending.tried]!;
+    const first = used === 0;
+    const label = ws.length > 1 ? `“${pending.w.list[0]}”` : `“${q}”`;
+    return [say(first ? `Searching A-MERCHANT near Johannesburg for ${ws.length > 1 ? ws.map((w) => `“${w.list[0]}”`).join(" and ") : `“${q}”`}${budget ? `, each under ${rands(budget)}` : ""}.` : pending.tried === 0 ? `Now ${label}.` : `Nothing for “${pending.w.list[pending.tried - 1]}”. Trying “${q}”.`), call("find_offers", args(pending.w, q))];
+  }
+  const foundItems = state.filter((x) => x.offers);
+  const missing = state.filter((x) => !x.offers).map((x) => `“${x.w.list[0]}”`);
+  if (!foundItems.length)
+    return [say(`I couldn't find that from a verified supplier${budget ? ` under ${rands(budget)}` : ""}. The catalogue covers groceries, pharmacy, electronics, office supplies, workwear and safety, cleaning, auto parts, catering, building materials, fuel and tyres. Try simpler words, or add your own Claude key (top right) for a live agent.`)];
+  const missNote = missing.length ? ` I couldn't find ${missing.join(" or ")}.` : "";
+  if (!buy)
+    return [say(`${foundItems.map((x) => `${x.offers!.length} supplier${x.offers!.length === 1 ? "" : "s"} for “${x.query}”`).join(", ")}, ranked by price, distance and how fresh their stock count is.${missNote} Tap “Add” to put what you want in your cart, then check out and I'll pay with one card scoped to the order.`)];
+
+  const picks = foundItems.map((x) => { const o = chooseOffer(x.offers!, t); return { o, merchant: o.merchant?.name ?? "Supplier", mcc: o.merchant?.merchantCategoryCode ?? "5999", items: o.totalCents as number, desc: `${o.quantity} × ${o.item?.name}` }; });
+  const byMerchant = new Map<string, { desc: string[]; merchant: string; items: number; mcc: string }>();
+  for (const p of picks) { const g = byMerchant.get(p.merchant) ?? { desc: [] as string[], merchant: p.merchant, items: 0, mcc: p.mcc as string }; g.desc.push(p.desc); g.items += p.items; byMerchant.set(p.merchant, g); }
+  const groups = [...byMerchant.values()].map((g) => ({ desc: g.desc.join(" and "), merchant: g.merchant, items: g.items, mcc: g.mcc }));
+  const items = groups.reduce((a, g) => a + g.items, 0), f = feeFor(items);
+  return runBasket({ groups, fees: f.total, feeMcc: FEES.mcc }, r, `${picks.length === 1 ? `${picks[0]!.desc} from ${picks[0]!.merchant} at ${rands(items)}` : `${picks.length} items from ${groups.length} supplier${groups.length === 1 ? "" : "s"} (${groups.map((g) => `${g.merchant} ${rands(g.items)}`).join(", ")})`}, plus ${rands(f.total)} in sandbox fees.${missNote} One card, capped at ${rands(items + f.total)} and limited to those merchants' categories and the fee category.`);
 }
 
 function createCard(t: string, r: Results): Block[] {

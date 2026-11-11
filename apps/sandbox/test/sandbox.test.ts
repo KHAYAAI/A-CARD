@@ -84,7 +84,7 @@ describe("demo mode (no model, no key)", () => {
     expect(card.limits.total).toBe(items + order + proc);
     expect(card.allowedMerchantCategories).toEqual([o.merchant.merchantCategoryCode, "7399"]);
     expect(results(buy.events).every((r) => !r.is_error)).toBe(true);
-    expect(texts(buy.events)).toMatch(/both approved/);
+    expect(texts(buy.events)).toMatch(/One card covered the order/);
     // The ledger shows the merchant payment and the separate fee payment.
     const tx = ((await (await fetch(`${base}/sandbox/api/v1/transactions`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).transactions;
     expect(tx.map((t: any) => [t.merchantName, t.amount, t.status]).sort()).toEqual([[o.merchant.name, items, "completed"], ["a·card fees", order + proc, "completed"]].sort());
@@ -296,7 +296,7 @@ describe("free-form requests (no model, no key)", () => {
     expect(names(q.events)).toEqual(["find_offers"]);
     const cheap = await s.chat("cheapest white bread please");
     expect(names(cheap.events)[0]).toBe("find_offers");
-    expect(texts(cheap.events)).toMatch(/verified supplier/);
+    expect(texts(cheap.events)).toMatch(/suppliers? for “/);
     const buy = await s.chat("Buy 5 reams of A4 paper");
     expect(noFinds(buy.events)).toEqual(["create_card", "pay_checkout", "pay_checkout", "close_card"]);
     expect(texts(buy.events)).toMatch(/Done\. 5 × A4 paper/);
@@ -350,6 +350,32 @@ describe("free-form requests (no model, no key)", () => {
     expect(texts((await s.chat("swap 10 ZARP to USDC")).events)).toMatch(/only swaps USDC into ZARP/);
   });
 
+  it("handles several products in one request: searches each, and buys the whole basket on one card", async () => {
+    const s = await session();
+    const browse = await s.chat("show me milk and eggs");
+    const finds = results(browse.events).filter((r, i) => names(browse.events)[i] === "find_offers");
+    const withOffers = finds.map((r) => { try { return JSON.parse(r.output).offers?.length ?? 0; } catch { return 0; } }).filter((n) => n > 0);
+    expect(withOffers.length).toBe(2);                       // one result set per product
+    expect(texts(browse.events)).toMatch(/for “milk”.*for “egg/s);
+    // Two products from the same supplier: one payment to it, then the fees.
+    const buy = await s.chat("I'd like to buy some milk and eggs");
+    expect(noFinds(buy.events)).toEqual(["create_card", "pay_checkout", "pay_checkout", "close_card"]);
+    // Two products that only different suppliers carry: one card, a payment to each, then the fees.
+    const split = await s.chat("buy 2 hard hats and 3 hi-vis vests and 6 gloves and a bleach");
+    const pays = results(split.events).filter((r, i) => names(split.events)[i] === "pay_checkout");
+    expect(noFinds(split.events).filter((n) => n === "create_card")).toHaveLength(1);
+    expect(pays.length).toBeGreaterThanOrEqual(3);          // at least two suppliers + the fees
+    expect(texts(split.events)).toMatch(/One card covered the order/);
+    const cards = ((await (await fetch(`${base}/sandbox/api/v1/cards`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).cards;
+    expect(cards.every((c: any) => c.status === "closed")).toBe(true);
+    const tx = ((await (await fetch(`${base}/sandbox/api/v1/transactions`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).transactions;
+    expect(tx.filter((t: any) => t.merchantName === "a·card fees")).toHaveLength(2);   // one fee payment per order
+    // Something in the list that isn't in the catalogue is reported, and the rest still goes through.
+    const part = await s.chat("buy 5 reams of A4 paper and a unicorn");
+    expect(texts(part.events)).toMatch(/couldn't find “unicorn”/);
+    expect(texts(part.events)).toMatch(/One card covered the order/);
+  });
+
   it("is honest about what it can't do, and points to live Claude", async () => {
     const s = await session();
     for (const q of ["Write me a poem about rain", "what is the capital of France?", "book me a flight to Cape Town"]) {
@@ -360,6 +386,113 @@ describe("free-form requests (no model, no key)", () => {
     }
     expect(texts((await s.chat("hello")).events)).toMatch(/Hello!/);
     expect(texts((await s.chat("help")).events)).toMatch(/Try asking me to/);
+  });
+});
+
+describe("wallets: fiat, crypto, the agent's wallet, and routing", () => {
+  const authed = (sid: string) => ({ "x-sandbox-session": sid, "content-type": "application/json" });
+  const J = async (sid: string, method: string, path: string, body?: unknown, extra: Record<string, string> = {}) => {
+    const r = await fetch(`${base}${path}`, { method, headers: { ...authed(sid), ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, j: (await r.json().catch(() => ({}))) as any };
+  };
+
+  it("gives every account an embedded wallet on each chain, and lets it link its own", async () => {
+    const s = await session();
+    const { j } = await J(s.sid, "GET", "/sandbox/crypto");
+    expect(j.wallets.map((w: any) => w.chain).sort()).toEqual(["ethereum", "polygon", "solana"]);
+    expect(j.wallets.every((w: any) => w.kind === "embedded" && Number(w.usdc) > 0)).toBe(true);
+    expect(j.wallets.filter((w: any) => w.isDefault)).toHaveLength(1);
+    expect(j.wallets.find((w: any) => w.chain === "ethereum").address).toMatch(/^0x[0-9a-f]{40}$/);
+    // Distinct visitors get distinct addresses.
+    const other = await J((await session()).sid, "GET", "/sandbox/crypto");
+    expect(other.j.wallets[0].address).not.toBe(j.wallets[0].address);
+
+    // The platform validates the address for the chain.
+    const bad = await J(s.sid, "POST", "/sandbox/api/v1/wallets/crypto/link", { chain: "ethereum", address: "nope", connector: "metamask" });
+    expect(bad.status).toBe(409);
+    expect(bad.j.error.message).toMatch(/not a valid ethereum address/);
+    const ok = await J(s.sid, "POST", "/sandbox/api/v1/wallets/crypto/link", { chain: "solana", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", connector: "walletconnect", label: "Cold" });
+    expect(ok.status).toBe(201);
+    expect((await J(s.sid, "POST", "/sandbox/api/v1/wallets/crypto/link", { chain: "solana", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", connector: "walletconnect" })).status).toBe(409); // duplicate
+    // Make it the default, then unlink; the embedded wallet can never be unlinked.
+    expect((await J(s.sid, "POST", `/sandbox/api/v1/wallets/crypto/${ok.j.wallet.id}/default`, {})).status).toBe(200);
+    const embedded = j.wallets[0];
+    const un = await J(s.sid, "DELETE", `/sandbox/api/v1/wallets/crypto/${embedded.id}`);
+    expect(un.status).toBe(409);
+    expect((await J(s.sid, "DELETE", `/sandbox/api/v1/wallets/crypto/${ok.j.wallet.id}`)).status).toBe(200);
+    expect((await J(s.sid, "GET", "/sandbox/crypto")).j.wallets.filter((w: any) => w.isDefault)).toHaveLength(1);
+    // Test funds: only embedded wallets, capped.
+    expect((await J(s.sid, "POST", "/sandbox/crypto/fund", { id: embedded.id, usdc: 25 })).status).toBe(200);
+    expect((await J(s.sid, "POST", "/sandbox/crypto/fund", { id: embedded.id, usdc: 5000 })).status).toBe(400);
+    expect((await J(s.sid, "GET", "/sandbox/crypto")).j.wallets.find((w: any) => w.id === embedded.id).usdc).toBe(String(Number(embedded.usdc) + 25_000_000));
+  });
+
+  it("routes a payment over the rails that can carry it, explains why, and keeps one ledger", async () => {
+    const s = await session();
+    const intent = async (body: any) => (await J(s.sid, "POST", "/sandbox/api/v1/afp/intents", body)).j;
+    // USD to an API: x402 and stablecoin can; a card can't because there is none yet.
+    const api = await intent({ amount: 500, currency: "USD", purpose: "Weather", counterparty: `${base}/demo/weather` });
+    expect(api.decision.chosenRail).toBe("x402");
+    expect(api.decision.scored.map((x: any) => x.rail).sort()).toEqual(["stablecoin", "x402"]);
+    expect(api.decision.rejected).toEqual([{ rail: "card", reason: "no active card in USD" }]);
+    expect(api.decision.scored[0].matchReasons).toContain("lowest fee");
+    // ZAR to a merchant: nothing can carry it until a card exists.
+    const zar = await intent({ amount: 12000, currency: "ZAR", purpose: "Rand Build Supply", counterparty: "mch_1" });
+    expect(zar.decision.chosenRail).toBeUndefined();
+    expect(zar.decision.rejected.map((x: any) => x.reason).join(" ")).toMatch(/no active card in ZAR.*must be in USD/s);
+    await s.chat("create a R5000 card");
+    const zar2 = await intent({ amount: 12000, currency: "ZAR", purpose: "Rand Build Supply", counterparty: "mch_1" });
+    expect(zar2.decision.chosenRail).toBe("card");
+
+    // Execute: the card is final only after its 120-day window (posted), the others are instant (settled).
+    const card = await J(s.sid, "POST", `/sandbox/api/v1/afp/intents/${zar2.intent.id}/execute`, {});
+    expect(card.status).toBe(201);
+    expect(card.j.transaction).toMatchObject({ rail: "card", status: "posted", finality: { kind: "reversal_window", reversalWindowDays: 120 } });
+    const key = "k-" + Math.random();
+    const x = await J(s.sid, "POST", `/sandbox/api/v1/afp/intents/${api.intent.id}/execute`, { rail: "x402" }, { "idempotency-key": key });
+    expect(x.j.transaction).toMatchObject({ rail: "x402", status: "settled", finality: { kind: "instant" } });
+    const again = await J(s.sid, "POST", `/sandbox/api/v1/afp/intents/${api.intent.id}/execute`, { rail: "x402" }, { "idempotency-key": key });
+    expect(again.j.transaction.id).toBe(x.j.transaction.id);                    // a repeat is a lookup, never a second payment
+    // Stablecoin: debits the embedded ethereum wallet by exactly the amount, and refuses what it can't cover.
+    const before = Number((await J(s.sid, "GET", "/sandbox/crypto")).j.wallets.find((w: any) => w.chain === "ethereum").usdc);
+    const sc = await intent({ amount: 1000, currency: "USD", purpose: "Supplier", counterparty: "0x" + "ab".repeat(20) });
+    expect((await J(s.sid, "POST", `/sandbox/api/v1/afp/intents/${sc.intent.id}/execute`, { rail: "stablecoin" })).j.transaction.status).toBe("settled");
+    expect(Number((await J(s.sid, "GET", "/sandbox/crypto")).j.wallets.find((w: any) => w.chain === "ethereum").usdc)).toBe(before - 10_000_000);
+    const big = await intent({ amount: 5_000_000, currency: "USD", purpose: "Too much", counterparty: "0x" + "ab".repeat(20) });
+    expect(big.decision.rejected.find((x: any) => x.rail === "stablecoin").reason).toMatch(/embedded wallet holds/);
+    // One ledger, three rails.
+    const tx = (await J(s.sid, "GET", "/sandbox/api/v1/afp/transactions")).j.transactions;
+    expect(tx.map((t: any) => t.rail).sort()).toEqual(["card", "stablecoin", "x402"]);
+  });
+
+  it("keeps visitors apart, and agents away from outside addresses", async () => {
+    const a = await session(), b = await session();
+    const i = (await J(a.sid, "POST", "/sandbox/api/v1/afp/intents", { amount: 100, currency: "USD", purpose: "x", counterparty: `${base}/demo/weather` })).j.intent;
+    // Another visitor can't execute, or even see, the first one's intent.
+    expect((await J(b.sid, "POST", `/sandbox/api/v1/afp/intents/${i.id}/execute`, {})).status).toBe(404);
+    expect((await J(b.sid, "GET", "/sandbox/api/v1/afp/transactions")).j.transactions).toEqual([]);
+    // x402 aimed at an address outside the sandbox never leaves: the rail parks it instead of paying.
+    const evil = (await J(a.sid, "POST", "/sandbox/api/v1/afp/intents", { amount: 100, currency: "USD", purpose: "x", counterparty: "http://169.254.169.254/latest/meta-data/" })).j.intent;
+    const r = await J(a.sid, "POST", `/sandbox/api/v1/afp/intents/${evil.id}/execute`, { rail: "x402" });
+    expect(r.j.transaction.status).toBe("reconciling");
+    expect(JSON.stringify(r.j.transaction.history)).toMatch(/built-in demo API/);
+    // Things a console user can't do aren't reachable here.
+    expect((await J(a.sid, "POST", "/sandbox/api/v1/afp/x402/pay", {})).status).toBe(404);
+    expect((await J(a.sid, "GET", "/sandbox/crypto")).status).toBe(200);
+    expect((await fetch(`${base}/sandbox/crypto`)).status).toBe(401);
+  });
+
+  it("shows the agent wallet: balances, limits, what it has used, and what it did", async () => {
+    const s = await session();
+    await s.chat("send 7 USDC to supplier-1");
+    await s.chat("transfer 25 USDC to supplier-2");
+    const { j } = await J(s.sid, "GET", "/sandbox/agent-wallet");
+    expect(j.balances.USDC).toBe("493000000");
+    expect(j.policy.assets.USDC).toEqual({ perTx: "50000000", per24h: "200000000", approvalAbove: "10000000" });
+    expect(j.spent24h).toBe("7000000");
+    expect(j.pending).toHaveLength(1);
+    expect(j.events.map((e: any) => e.type)).toEqual(expect.arrayContaining(["agent_wallet.transfer.previewed", "agent_wallet.transfer.executed"]));
+    expect(j.address).toMatch(/^mock:/);
   });
 });
 
