@@ -73,6 +73,18 @@ function earlier(history: ModelMessage[]) {
   return { card, heldCharge, heldTransfer };
 }
 
+/** One plain sentence for a pay_checkout / pay_x402 result. */
+const verdict = (x?: { raw: string; output: any }) => {
+  const o = x?.output;
+  if (o && typeof o === "object") {
+    if (o.approved === true) return "approved";
+    if (o.approved === false) return `declined (${o.decline_reason ?? o.declineReason ?? "no reason given"})`;
+    if (o.status === "paid") return `paid${o.body ? `. The API replied: ${typeof o.body === "string" ? o.body : JSON.stringify(o.body)}` : ""}`;
+    if (o.status) return String(o.status);
+  }
+  return (x?.raw ?? "").replace(/^Error\s*—\s*/, "").replace(/\s+/g, " ").slice(0, 160);
+};
+
 const weather = (base: string) => `${base}/demo/weather`;
 
 const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
@@ -88,7 +100,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
       },
       (r) => {
         const x = r[0]!;
-        if (x.name === "pay_checkout") return [say(/completed|approved|success/i.test(x.raw) && !/pending/i.test(x.raw) ? "Done. The charge went through, exactly once, because you approved it." : `A-CARD says: ${x.raw.slice(0, 160)}`)];
+        if (x.name === "pay_checkout") return [say(`A-CARD ${verdict(x)}. ${verdict(x) === "approved" ? "It went through exactly once, because you approved it." : ""}`.trim())];
         return [say(x.output?.status === "settled" || x.output?.tx_hash || x.output?.txHash ? "Done. The transfer settled on the mock chain after your approval." : `The wallet says: ${x.raw.slice(0, 160)}`)];
       },
     ],
@@ -118,7 +130,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
         const total = best.totalCents ?? best.total_cents ?? 0;
         return [say("Card ready. Paying the supplier."), call("pay_checkout", { card_id: card.id, amount: total, merchant_name: best.merchant?.name ?? "Supplier", merchant_category: best.merchant?.merchantCategoryCode ?? best.merchant?.merchant_category_code ?? "5211" })];
       },
-      (r) => [say(`Result from A-CARD: ${(last(r, "pay_checkout")?.raw ?? "").slice(0, 140).replace(/\s+/g, " ")}. The card was single-use, so it's now closed. Check the Cards and Transactions panels.`)],
+      (r) => [say(`A-CARD ${verdict(last(r, "pay_checkout"))}. The card was single-use, so it's now closed. Check the Cards and Transactions panels.`)],
     ],
   },
   {
@@ -126,7 +138,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     steps: [
       () => [say("I'll create a single-use R1 000 fuel card, which only works at fuel stations."), call("create_card", { label: "Fleet fuel", single_use: false, total_limit: 100000, per_transaction_limit: 100000, allowed_merchant_categories: ["5541"] })],
       (r) => [say("Now the test: trying to buy a TV with it."), call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: 90000, merchant_name: "Game Electronics", merchant_category: "5732" })],
-      (r) => [say(`Declined, as it should be: ${(last(r, "pay_checkout")?.raw ?? "").replace(/^Error\s*—\s*/, "").slice(0, 160)}. A fuel card can't buy electronics. I won't try another card to get around it.`)],
+      (r) => [say(`A-CARD ${verdict(last(r, "pay_checkout"))}. A fuel card can't buy electronics, and I won't try another card to get around it.`)],
     ],
   },
   {
@@ -145,7 +157,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
         call("create_card", { label: "Weather API", currency: "USD", single_use: false, allowed_merchant_categories: ["x402"], x402_allowed_hosts: [new URL(base).hostname] }),
       ],
       (r, { base }) => [call("pay_x402", { card_id: last(r, "create_card")!.output.id, url: weather(base), max_usd: "0.01" })],
-      (r) => [say(`The API wanted 0.003 USDC and A-CARD paid it from the card within my ceiling. Response: ${(last(r, "pay_x402")?.raw ?? "").replace(/\s+/g, " ").slice(0, 200)}`)],
+      (r) => [say(`The API asked 0.003 USDC; my ceiling was 1 cent. A-CARD ${verdict(last(r, "pay_x402"))}.`)],
     ],
   },
   {

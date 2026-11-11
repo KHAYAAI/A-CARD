@@ -11,6 +11,12 @@ Each visitor gets a fresh account: R20 000 and US$500 in the fiat wallet, 500 te
 
 Limits: 40 messages a session, 12 tool calls a message, 6 new sessions per IP per hour. Everything is in memory: a restart resets it, so run one instance.
 
+## One HTML file, no server
+
+`apps/sandbox/a-card-sandbox.html` is the whole sandbox in a single file (0.9 MB): the A-CARD platform, the demo agent, the MCP tools and the wallet, all running in the visitor's browser. Attach it to an email, drop it on any static host (GitHub Pages, S3, Netlify, a USB stick), or just double-click it. Nothing is sent to any server, and reloading resets it. In live mode a visitor's own Anthropic key goes only from their browser straight to Anthropic.
+
+Rebuild it after changing the sandbox: `npm run standalone -w @acard/sandbox`, then copy `apps/sandbox/dist/a-card-sandbox.html` over `apps/sandbox/a-card-sandbox.html`.
+
 ## Run locally
 
 ```bash

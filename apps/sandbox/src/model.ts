@@ -16,11 +16,11 @@ export interface ModelMessage {
 export type Model = (req: { system: string; messages: ModelMessage[]; tools: ToolDef[]; base?: string }) => Promise<{ content: Block[] }>;
 
 /** Claude over the Messages API, with a key the visitor supplied for this request. Never stored or logged. */
-export function anthropicModel(opts: { apiKey: string; model: string; maxTokens?: number; baseUrl?: string }): Model {
+export function anthropicModel(opts: { apiKey: string; model: string; maxTokens?: number; baseUrl?: string; /** Calling from a web page (the standalone build): the key goes from the visitor's browser straight to Anthropic. */ browserDirect?: boolean }): Model {
   return async ({ system, messages, tools }) => {
     const res = await fetch(`${opts.baseUrl ?? "https://api.anthropic.com"}/v1/messages`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": opts.apiKey, "anthropic-version": "2023-06-01" },
+      headers: { "content-type": "application/json", "x-api-key": opts.apiKey, "anthropic-version": "2023-06-01", ...(opts.browserDirect ? { "anthropic-dangerous-direct-browser-access": "true" } : {}) },
       body: JSON.stringify({
         model: opts.model,
         max_tokens: opts.maxTokens ?? 1500,

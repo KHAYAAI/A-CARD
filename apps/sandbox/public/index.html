@@ -69,6 +69,8 @@ footer{font-size:12px;color:var(--mute);padding:6px 20px;border-top:1px solid va
 <dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button id="keyclear">Remove key</button><button id="keycancel">Cancel</button><button class="go" id="keysave">Use key</button></div></dialog>
 <footer>Sandbox: simulated card network, mock chain, no real money. Live card issuance launches with our issuing partner. Conversations reset when the server restarts.</footer>
 <script>
+const API = window.__ACARD_API__ || "";
+const STANDALONE = !!window.__ACARD_API__;
 const $ = (s) => document.querySelector(s);
 const log = $("#log"), side = $("#side");
 let sid = null, busy = false, userKey = "";
@@ -91,9 +93,10 @@ const units = (v, d = 6) => (Number(v) / 10 ** d).toLocaleString("en-US", { maxi
 const add = (html, cls) => { const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; log.append(d); log.scrollTop = log.scrollHeight; return d; };
 
 async function start() {
+  if (window.__sandboxReady) { try { await window.__sandboxReady; } catch (e) { side.innerHTML = '<div class="err-line">The sandbox could not start in this browser: ' + esc(e.message) + "</div>"; return; } }
   try { sid = localStorage.getItem("acard-sbx"); } catch {}
-  if (sid && (await fetch("/sandbox/state", { headers: { "x-sandbox-session": sid } })).ok) return refresh();
-  const r = await fetch("/sandbox/session", { method: "POST" });
+  if (sid && (await fetch(API + "/sandbox/state", { headers: { "x-sandbox-session": sid } })).ok) return refresh();
+  const r = await fetch(API + "/sandbox/session", { method: "POST" });
   if (!r.ok) { side.innerHTML = '<div class="err-line">Could not start a sandbox. Try again shortly.</div>'; return; }
   sid = (await r.json()).session_id;
   try { localStorage.setItem("acard-sbx", sid); } catch {}
@@ -102,7 +105,7 @@ async function start() {
 
 async function refresh() {
   if (!sid) return;
-  const r = await fetch("/sandbox/state", { headers: { "x-sandbox-session": sid } });
+  const r = await fetch(API + "/sandbox/state", { headers: { "x-sandbox-session": sid } });
   if (!r.ok) return;
   const s = await r.json();
   $("#turns").textContent = s.turns_left + " messages left";
@@ -126,7 +129,7 @@ async function refresh() {
 side.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-id]"); if (!b) return;
   b.disabled = true;
-  await fetch("/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: b.dataset.k, id: b.dataset.id, decision: b.dataset.d }) });
+  await fetch(API + "/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: b.dataset.k, id: b.dataset.id, decision: b.dataset.d }) });
   add(`<i class="m">You ${b.dataset.d === "approve" ? "approved" : "declined"} it. Tell the agent to retry.</i>`, "bot");
   refresh();
 });
@@ -138,7 +141,7 @@ async function ask(text) {
   add(esc(text), "user");
   const tools = {};
   try {
-    const res = await fetch("/sandbox/chat", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ message: text, api_key: userKey || undefined }) });
+    const res = await fetch(API + "/sandbox/chat", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ message: text, api_key: userKey || undefined }) });
     if (!res.ok) { add(`<span class="err-line">${esc((await res.json()).error)}</span>`, "bot"); return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
     for (;;) {
@@ -167,6 +170,7 @@ $("#keycancel").onclick = () => dlg.close();
 $("#keysave").onclick = () => { const v = $("#keyin").value.trim(); if (v) { userKey = v; try { sessionStorage.setItem("acard-key", v); } catch {} } setMode(!!userKey); dlg.close(); };
 $("#keyclear").onclick = () => { userKey = ""; try { sessionStorage.removeItem("acard-key"); } catch {} setMode(false); dlg.close(); };
 $("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
+if (STANDALONE) { $("footer").innerHTML = "Sandbox: simulated card network, mock chain, no real money. Runs entirely in this page; nothing is sent to any server, and reloading resets it. Live card issuance launches with our issuing partner."; $("#dlg p").textContent = "Switches the chat to a live Claude agent. Your key is sent only from this browser straight to Anthropic, never to A-CARD, and stays in this tab until you close it or remove it. Usage is billed to your Anthropic account."; }
 start();
 </script>
 </body>
