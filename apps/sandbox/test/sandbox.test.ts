@@ -55,7 +55,7 @@ const texts = (events: any[]) => events.filter((e) => e.event === "text").map((e
 describe("demo mode (no model, no key)", () => {
   it("gives every visitor an account and all 21 tools", async () => {
     const s = await session();
-    expect(s.tools).toHaveLength(21);
+    expect(s.tools).toHaveLength(23);
     const st = await s.state();
     expect(st.chain.USDC).toBe("500000000");
   });
@@ -480,6 +480,30 @@ describe("wallets: fiat, crypto, the agent's wallet, and routing", () => {
     expect((await J(a.sid, "POST", "/sandbox/api/v1/afp/x402/pay", {})).status).toBe(404);
     expect((await J(a.sid, "GET", "/sandbox/crypto")).status).toBe(200);
     expect((await fetch(`${base}/sandbox/crypto`)).status).toBe(401);
+  });
+
+  it("lets the agent read the linked crypto wallets and quote a payment, but not change anything", async () => {
+    const s = await session();
+    expect(s.tools).toEqual(expect.arrayContaining(["list_crypto_wallets", "quote_payment"]));
+    expect(s.tools.filter((t) => /link|unlink|default/i.test(t))).toEqual([]);          // nothing that changes wallets
+    const l = await s.chat("what are my crypto wallets?");
+    expect(names(l.events)).toEqual(["list_crypto_wallets"]);
+    expect(texts(l.events)).toMatch(/3 linked wallets.*Ethereum embedded \(default\).*USDC/s);
+    expect(texts(l.events)).toMatch(/I can read these but not link, unlink or move them/);
+    // It sees wallets the owner links, and not another visitor's.
+    await J(s.sid, "POST", "/sandbox/api/v1/wallets/crypto/link", { chain: "ethereum", address: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e", connector: "metamask", label: "Treasury" });
+    expect(texts((await s.chat("show my linked wallets")).events)).toMatch(/4 linked wallets.*“Treasury”/s);
+    const o = await session();
+    expect(texts((await o.chat("show my linked wallets")).events)).toMatch(/3 linked wallets/);
+    // The quote explains the rails and moves nothing.
+    const q = await s.chat(`how should I pay $5 to ${base}/demo/weather`);
+    expect(names(q.events)).toEqual(["quote_payment"]);
+    expect(texts(q.events)).toMatch(/x402 payment.*lowest fee/s);
+    const before = Number((await J(s.sid, "GET", "/sandbox/crypto")).j.wallets.find((w: any) => w.chain === "ethereum").usdc);
+    expect(before).toBe(250_000_000);
+    expect((await J(s.sid, "GET", "/sandbox/api/v1/afp/transactions")).j.transactions).toEqual([]);
+    const z = await s.chat("how should I pay R120 to Rand Build Supply");
+    expect(texts(z.events)).toMatch(/No rail can carry that.*no active card in ZAR/s);
   });
 
   it("shows the agent wallet: balances, limits, what it has used, and what it did", async () => {

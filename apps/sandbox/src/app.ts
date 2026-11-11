@@ -17,6 +17,7 @@ import type { Model, ModelMessage, ToolDef } from "./model.js";
 import { seedCatalogue } from "./catalogue.js";
 import { createCardRail, createX402Rail, STABLECOIN_PROFILE, type RailAdapter } from "../../api/src/rails/index.js";
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import type { ForgePayEvent } from "@acard/agent-wallet";
 
 /**
@@ -82,7 +83,7 @@ Rules:
 - The catalogue (find_offers) covers groceries, pharmacy, electronics, office supplies, workwear and safety, cleaning, auto parts, catering, building materials, fuel and tyres, all around Johannesburg. Search with short keywords.
 - A visitor's cart checks out with a message starting "Checkout:". It lists one or more "buy … from <merchant> for R<amount> (merchant category <code>)" groups, one per supplier, then the fees. Do it exactly, on ONE card for the whole order: create_card with allowed_merchant_categories = [every merchant's code, "7399"], total_limit = all items + fees, per_transaction_limit = the largest single group; pay_checkout each merchant its own amount; then pay_checkout merchant_name "a·card fees", category "7399", for the fees; then close_card. Stop and tell the visitor if a payment is held or declined.
 - Several products in one request ("milk and eggs") means one find_offers search per product.
-- Besides cards, the visitor has fiat wallets (ZAR, USD), embedded and linked crypto wallets, and your own on-chain agent wallet (the wallet_* tools). They can see them on the Wallet screen.
+- Besides cards, the visitor has fiat wallets (ZAR, USD), embedded and linked crypto wallets, and your own on-chain agent wallet (the wallet_* tools). list_crypto_wallets shows their linked crypto wallets (read-only; you can't link or move them), and quote_payment shows which rail would carry a payment and why (quote only). They can see all of it on the Wallet screen.
 - Keep replies short and concrete. Use ZAR unless the visitor asks otherwise.`;
 
 const json = (v: unknown) => JSON.stringify(v);
@@ -228,6 +229,38 @@ export async function createSandbox(opts: SandboxOptions) {
     const holderId = me.account_holder.id as string;
     for (const chain of ["polygon", "solana"] as const) await service.recordEmbeddedWallet(holderId, chain, provision(holderId, chain));
     const server = createMcpServer(new AcardClient({ baseUrl: base, apiKey: agentKey }), { wallet });
+    const reply = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
+    // Read-only views of the human's crypto side. The agent can look, never link, unlink or move them.
+    server.registerTool(
+      "list_crypto_wallets",
+      {
+        title: "List crypto wallets",
+        description: "List the account's linked crypto wallets: the embedded wallet on each chain and any external wallets the owner linked. Shows chain, address, whether it is the default, and the USDC balance of embedded wallets. Read-only: you cannot link, unlink or move these wallets (your own on-chain wallet is the wallet_* tools).",
+        inputSchema: {},
+        annotations: { readOnlyHint: true },
+      },
+      async () => {
+        const ws = await service.listLinkedWallets(holderId);
+        return reply({ wallets: ws.map((w) => ({ id: w.id, kind: w.kind, chain: w.chain, address: w.address, is_default: w.isDefault, label: w.label ?? null, connector: w.connector ?? null, usdc: w.kind === "embedded" ? usdcUnits(providerBalances.get(`${w.chain}:${w.address}`) ?? 0n) : null })) });
+      },
+    );
+    server.registerTool(
+      "quote_payment",
+      {
+        title: "Quote a payment across rails",
+        description: "Ask which payment rails (card, stablecoin, x402) could carry a payment and which one routing would choose, with the reasons, fee, speed and finality of each. It only quotes; it moves no money. amount_cents is in minor units (cents). counterparty is a URL for an x402 API, a wallet address for a stablecoin transfer, or a merchant name for a card.",
+        inputSchema: { amount_cents: z.number().int().positive(), currency: z.enum(["ZAR", "USD"]), purpose: z.string().min(1), counterparty: z.string().min(1) },
+        annotations: { readOnlyHint: true },
+      },
+      async (a) => {
+        try {
+          const out = await call("POST", "/v1/afp/intents", sessionToken, { amount: a.amount_cents, currency: a.currency, purpose: a.purpose, counterparty: a.counterparty });
+          return reply({ chosen_rail: out.decision.chosenRail ?? null, scored: out.decision.scored.map((x: any) => ({ rail: x.rail, score: x.score, fee_cents: x.quote.costCents, eta_seconds: x.quote.etaSeconds, finality: x.finality, reasons: x.matchReasons })), rejected: out.decision.rejected });
+        } catch (e) {
+          return { content: [{ type: "text" as const, text: `Error — ${e instanceof Error ? e.message : String(e)}` }], isError: true as const };
+        }
+      },
+    );
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);
     const mcp = new Client({ name: "acard-sandbox", version: "0.1.0" });
@@ -377,7 +410,7 @@ export async function createSandbox(opts: SandboxOptions) {
       try {
         for (let calls = 0; ; ) {
           const reply = await model({ system: SYSTEM_PROMPT.replace("{BASE}", base), messages: s.history, tools: s.tools, base });
-          s.history.push({ role: "assistant", content: reply.content });
+          s.history.push({ role: "assistant", content: reply.content.filter((b) => b.type !== "text" || b.text.trim()).length ? reply.content.filter((b) => b.type !== "text" || b.text.trim()) : [{ type: "text", text: "(no reply)" }] });
           for (const block of reply.content) if (block.type === "text" && block.text.trim()) await send("text", { text: block.text });
           const uses = reply.content.filter((b) => b.type === "tool_use");
           if (!uses.length) break;
@@ -403,7 +436,13 @@ export async function createSandbox(opts: SandboxOptions) {
         }
         await send("done", { turns_left: maxTurns - s.turns });
       } catch (e) {
-        s.history.push({ role: "assistant", content: [{ type: "text", text: "(error)" }] });
+        // Leave the conversation valid for the next message: answer any dangling tool call, then close the turn.
+        const tail = s.history[s.history.length - 1];
+        if (tail?.role === "assistant" && Array.isArray(tail.content)) {
+          const uses = tail.content.filter((b) => b.type === "tool_use") as Array<{ id: string }>;
+          if (uses.length) s.history.push({ role: "user", content: uses.map((u) => ({ type: "tool_result" as const, tool_use_id: u.id, content: "Error — this step was interrupted.", is_error: true })) });
+        }
+        if (s.history[s.history.length - 1]?.role !== "assistant") s.history.push({ role: "assistant", content: [{ type: "text", text: "(error)" }] });
         await send("error", { message: e instanceof Error ? e.message : String(e) });
       } finally {
         s.busy = false;

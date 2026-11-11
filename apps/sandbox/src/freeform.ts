@@ -65,7 +65,7 @@ const quantity = (t: string) => {
 
 export type Intent =
   | { kind: "chat"; sub: "hi" | "thanks" | "help" }
-  | { kind: "close" | "swap" | "send" | "create" | "pay" | "balance" | "approvals" | "spending" | "cards" | "refuse-approve" }
+  | { kind: "wallets" | "route" | "close" | "swap" | "send" | "create" | "pay" | "balance" | "approvals" | "spending" | "cards" | "refuse-approve" }
   | { kind: "shop"; buy: boolean }
   | { kind: "other" };
 
@@ -87,9 +87,11 @@ export function classify(text: string): Intent {
   if (/\b(close|cancel|delete|deactivate|freeze)\b.*\bcards?\b/i.test(t)) return { kind: "close" };
   if (/\b(swap|convert|exchange)\b/i.test(t) && /usdc|zarp/i.test(t)) return { kind: "swap" };
   if (/\b(send|transfer|pay|move)\b/i.test(t) && /usdc|crypto|on-?chain/i.test(t)) return { kind: "send" };
+  if (/\b(how (should|can|do) i pay|which rail|best way to pay|cheapest way to pay|route|quote)\b/i.test(t) && (moneyAll(t).length > 0 || usdCents(t))) return { kind: "route" };
   if (/\b(pay|spend|charge|buy|purchase|put)\b/i.test(t) && moneyAll(t).length > 0 && (merchantName(t) || catGuess(t))) return { kind: "pay" };
   if (/\b(create|make|issue|open|set up|new|give me|get me)\b[^.?!]*\bcards?\b/i.test(t) || /\b(want|need|have)\b[^.?!]*\b(a|an|new)\b[^.?!]*\bcard\b/i.test(t)) return { kind: "create" };
   if (/\b(approve|authori[sz]e|confirm|allow)\b[^.?!]*\b(it|this|that|them|the (charge|payment|transfer|purchase))\b/i.test(t) && !/\b(i|i've|ive) (approved|authori[sz]ed)\b/i.test(t)) return { kind: "refuse-approve" };
+  if (/\b(crypto|linked|embedded|external|metamask)\b[^.?!]*\bwallets?\b|\bwallets?\b[^.?!]*\b(linked|embedded|addresses|address)\b|\bmy wallets\b|\bwhich wallets\b|\bwallet addresses\b/i.test(t) && !/\b(send|transfer|swap|balance)\b/i.test(t)) return { kind: "wallets" };
   if (/\b(balance|how much (money|cash|usdc|zarp|crypto|zar|rand)|funds|what do i have|money left|left (in|on))\b/i.test(t)) return { kind: "balance" };
   if (/\b(pending|waiting|outstanding|any)\b[^.?!]*\bapprovals?\b|\bapprovals?\b[^.?!]*\b(pending|waiting)\b/i.test(t)) return { kind: "approvals" };
   if (/\b(spent|spending|spend so far|transactions?|history|recent (charges|payments|activity)|declined|where did (my )?money)\b|\bwhat (did|have) (i|we) (spend|buy|pay|purchase)\b|\bhow much (did|have) (i|we)\b/i.test(t)) return { kind: "spending" };
@@ -108,7 +110,7 @@ export const HELP = `I'm the scripted demo agent: there's no AI model behind me,
 • Find or buy something from the catalogue: “find A4 paper”, “buy 10 hard hats”, “cheapest bread”, “gloves under R60”
 • Make a card: “create a R500 card for fuel, single-use”, “a USD card for software with approval above $100”
 • Pay a merchant: “spend R250 at Fresh Basket Market”, “pay R90 at a casino”
-• Look at your account: “what's my balance?”, “show my cards”, “what have I spent?”, “any approvals waiting?”, “close my cards”
+• Look at your account: “what are my crypto wallets?”, “how should I pay $5 to https://…”, “what's my balance?”, “show my cards”, “what have I spent?”, “any approvals waiting?”, “close my cards”
 • Use the wallet: “send 8 USDC to supplier-1”, “swap 3 USDC to ZARP”
 • Pay an API per call with x402
 
@@ -299,6 +301,29 @@ function wallet(t: string, kind: "send" | "swap", r: Results): Block[] {
 }
 
 function account(kind: Intent["kind"], t: string, r: Results): Block[] {
+  if (kind === "wallets") {
+    const l = last(r, "list_crypto_wallets");
+    if (!l) return [say("Looking at your linked crypto wallets."), call("list_crypto_wallets", {})];
+    const ws: any[] = l.output?.wallets ?? [];
+    if (!ws.length) return [say("No crypto wallets are linked yet.")];
+    const line = (w: any) => `${w.chain[0].toUpperCase()}${w.chain.slice(1)} ${w.kind}${w.label ? ` “${w.label}”` : ""}${w.is_default ? " (default)" : ""} ${w.address.slice(0, 6)}…${w.address.slice(-4)}${w.usdc != null ? `, ${w.usdc} USDC` : ""}`;
+    return [say(`You have ${ws.length} linked wallet${ws.length === 1 ? "" : "s"}: ${ws.map(line).join("; ")}. I can read these but not link, unlink or move them: that's yours to do on the Wallet screen. My own on-chain wallet is separate (ask “what's my balance?”).`)];
+  }
+  if (kind === "route") {
+    const q = last(r, "quote_payment");
+    const usd = usdCents(t), cents = usd ?? moneyAll(t)[0]?.cents;
+    if (!cents) return [say("How much, and to whom? For example “how should I pay $5 to https://…/weather”.")];
+    if (!q) {
+      const url = /https?:\/\/\S+/.exec(t)?.[0], addr = /0x[0-9a-fA-F]{40}/.exec(t)?.[0];
+      return [say(`I'll ask the payment rails what they'd do with ${usd ? usdCents(t) !== undefined ? `$${(cents / 100).toFixed(2)}` : "" : rands(cents)}. Quote only: nothing moves.`), call("quote_payment", { amount_cents: cents, currency: usd ? "USD" : "ZAR", purpose: "Payment", counterparty: url ?? addr ?? merchantName(t) ?? "Merchant" })];
+    }
+    const o = q.output;
+    if (!o || typeof o !== "object" || !("scored" in o)) return [say(`The quote didn't come back: ${q.raw.replace(/^Error\s*—\s*/, "").slice(0, 160)}`)];
+    const label: Record<string, string> = { card: "an A-CARD card", stablecoin: "a stablecoin transfer", x402: "an x402 payment" };
+    if (!o.chosen_rail) return [say(`No rail can carry that as stated: ${o.rejected.map((x: any) => `${x.rail} (${x.reason})`).join("; ")}.`)];
+    const best = o.scored[0];
+    return [say(`Best is ${label[o.chosen_rail] ?? o.chosen_rail}: ${best.reasons.join(", ")}${best.finality?.kind === "reversal_window" ? `, reversible for ${best.finality.reversalWindowDays} days` : ""}.${o.scored.length > 1 ? ` Also possible: ${o.scored.slice(1).map((x: any) => label[x.rail] ?? x.rail).join(", ")}.` : ""}${o.rejected.length ? ` Not possible: ${o.rejected.map((x: any) => `${x.rail} (${x.reason})`).join("; ")}.` : ""} You can pay it from Wallet → Pay & routing.`)];
+  }
   if (kind === "balance") {
     const w = last(r, "get_wallet"), b = last(r, "get_balances");
     if (!w) return [say("Checking your wallets."), call("get_wallet", {}), call("get_balances", { chain: "mock" })];
@@ -353,7 +378,7 @@ export function freeform(text: string, r: Results, _ctx: Ctx): Block[] {
     case "pay": return payMerchant(text, r);
     case "send": return wallet(text, "send", r);
     case "swap": return wallet(text, "swap", r);
-    case "balance": case "cards": case "close": case "spending": case "approvals": return account(it.kind, text, r);
+    case "wallets": case "route": case "balance": case "cards": case "close": case "spending": case "approvals": return account(it.kind, text, r);
     default: return [say(OUT_OF_SCOPE(text))];
   }
 }

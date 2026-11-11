@@ -224,9 +224,88 @@ table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-t
 #mnav{display:none}
 @media (max-width:980px){.cols,.stats3{grid-template-columns:1fr}#mnav{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;border-bottom:1px solid var(--border-soft);background:var(--sidebar)}#mnav button{white-space:nowrap;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:999px;padding:6px 12px;font-size:12.5px}#mnav button.active{color:var(--ink);border-color:var(--green);background:var(--green-bg)}}
 @media (max-width:980px){#app{grid-template-columns:1fr;height:auto;min-height:100vh}.sidebar{display:none}.work{grid-template-columns:minmax(0,1fr)}#chat{border-right:0;border-bottom:1px solid var(--border-soft);min-height:70vh}#log,form{padding-left:16px;padding-right:16px}}
+
+/* ---- clean, chat-first layout ---- */
+body,#app{height:100vh;height:100dvh}
+.topbar{padding:10px 20px;gap:10px;flex-wrap:nowrap;min-height:56px;align-items:center}
+.brand{display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--ink);white-space:nowrap}
+.brand .wordmark{font-size:16px}.brand-sub{font-size:15px;color:var(--muted);font-weight:500}
+.crumbs{display:none}body:not(.agent) .crumbs{display:flex}
+.tag-sbx{font-size:10.5px;padding:2px 8px;white-space:nowrap}
+#reset .short{display:none}
+body.agent #app{grid-template-columns:minmax(0,1fr)}
+body.agent .sidebar,body.agent #side{display:none}
+body.agent .work{grid-template-columns:minmax(0,1fr)}
+body.agent #chat{border-right:0}
+body.agent #log{padding:22px max(20px,calc((100% - 760px)/2))}
+#dock{flex:0 0 auto}#apdock{padding:0 28px}#apdock .verify{max-width:760px;margin:0 auto 10px;box-shadow:var(--shadow-chip)}
+#intro h1{font-size:40px;margin-top:10px}
+.chips.compact{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chips.compact button{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:999px;padding:9px 15px;font-size:13.5px;text-align:left;box-shadow:var(--shadow-chip);min-height:40px}
+.chips.compact button:hover{border-color:var(--green)}
+.more-btn{margin-top:14px;background:none;border:none;color:var(--muted);font-size:13px;padding:6px 0}
+.menu{display:none;position:fixed;top:56px;right:16px;z-index:70;width:min(320px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:12px;gap:10px;flex-direction:column}
+.menu.open{display:flex}.menu .row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--muted)}.menu .icon-btn{height:40px;width:100%;text-align:left}
+details.tool{box-shadow:none;background:transparent;border:1px solid var(--border-soft);font:12.5px/1.4 var(--font-sans);border-radius:12px}
+details.tool summary{padding:7px 12px;color:var(--muted);display:flex;gap:8px;align-items:center;list-style:none}
+details.tool summary::-webkit-details-marker{display:none}
+details.tool summary .g{font-family:var(--font-mono);width:14px;text-align:center}
+details.tool summary .st{margin-left:auto;float:none;font-family:var(--font-mono);font-size:11px}
+.g.ok{color:var(--green)}.g.no{color:var(--red)}.g.hold{color:var(--amber)}
+details.tool pre{font:11.5px/1.45 var(--font-mono)}
+.timing{display:none}
+.cart{border-radius:16px;margin-bottom:10px}.cart.closed .cart-head{padding:10px 16px}
+.cart-head .tot{margin-left:auto;font-family:var(--font-mono);color:var(--green-deep);font-weight:500}
+.cart-head .chev{margin-left:10px}
+@media (max-width:700px){
+  input,select,textarea{font-size:16px!important}
+  .topbar{padding:8px 12px;gap:8px;min-height:52px}
+  .brand-sub{display:none}.tag-sbx{font-size:10px;padding:2px 7px}
+  #reset .long{display:none}#reset .short{display:inline}
+  #consolebtn,#menubtn{height:36px;padding:0 11px}
+  body.agent #log,#log{padding:16px 14px}
+  .msg{max-width:94%;font-size:15px}
+  #intro h1{font-size:31px}
+  #cartwrap,#apdock{padding:0 12px}
+  form{padding:6px 12px calc(10px + env(safe-area-inset-bottom))}
+  .composer textarea{height:64px;padding:12px 56px 12px 14px}
+  .foot-credit{display:none}
+  #cta{display:none!important}
+  .tray{scroll-snap-type:x mandatory;padding:8px}.pcard{flex:0 0 76vw;scroll-snap-align:start}
+  .chips.compact button{flex:1 1 100%}
+  #v-other{padding:16px 14px 90px}.page-title{font-size:32px}
+  .panel{overflow-x:auto}.panel-head{flex-wrap:wrap}
+  .ctabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.ctab{white-space:nowrap}
+  table.grid.wide td,table.grid th{padding:8px 6px}
+  #dlg{width:calc(100vw - 24px);padding:18px}
+  .menu{top:52px;right:12px}
+  .cart-body{max-height:46vh;overflow-y:auto}
+}
+
+[hidden]{display:none!important}
+body.agent #mnav{display:none!important}
+.steps{display:flex;flex-direction:column;gap:4px;align-self:flex-start;width:100%;max-width:720px}
+.steps details.tool{width:100%;max-width:none}
+.topbar .icon-btn,.topbar .btn{white-space:nowrap}
+@media (max-width:700px){
+  .crumbs{display:none!important}
+  body:not(.agent) .tag-sbx{display:none}
+  .topbar{gap:6px}
+  table.grid.wide,table.grid.wide tbody{display:block;width:100%}
+  table.grid.wide thead{display:none}
+  table.grid.wide tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:12px 2px;border-top:1px solid var(--border-soft)}
+  table.grid.wide tr:first-child{border-top:none}
+  table.grid.wide td{display:block;border:0!important;padding:0!important;max-width:100%;background:none!important}
+  table.grid.wide td.right{margin-left:auto}
+  table.grid.wide td:has(.ctrl-chip){flex:1 1 100%;order:5}
+  .stat .val{font-size:22px}
+  .kv{grid-template-columns:1fr;gap:2px 0}.kv .v{text-align:left}
+  .filters{flex-direction:column}.filters input,.filters select,.filters .btn{width:100%}
+  .cols{grid-template-columns:1fr}
+}
 </style>
 </head>
-<body>
+<body class="agent">
 <div id="app">
   <aside class="sidebar">
     <div class="wordmark">a<span class="dot">·</span>card</div>
@@ -238,14 +317,13 @@ table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-t
   </aside>
   <div class="main-col">
     <div class="topbar">
-      <div class="crumbs"><span>Sandbox</span><span class="sep">/</span><span class="cur" id="crumb">Agent</span></div>
+      <a class="brand" href="#agent"><span class="wordmark">a<span class="dot">·</span>card</span><span class="brand-sub">sandbox</span></a>
+      <div class="crumbs"><span class="sep">/</span><span class="cur" id="crumb">Agent</span></div>
       <div class="spacer"></div>
-      <span class="tag-sbx">SANDBOX · TEST MONEY</span>
-      <span id="mode" class="mode">Demo agent · scripted</span>
-      <span id="turns" class="empty"></span>
-      <button class="icon-btn" id="keybtn">Use your Claude key</button>
-      <button class="icon-btn" id="theme" title="Toggle light / dark">Theme</button>
-      <button class="icon-btn" id="reset">New session</button>
+      <span class="tag-sbx">Test money</span>
+      <button class="icon-btn" id="consolebtn">Console</button>
+      <button class="icon-btn" id="menubtn" aria-label="Settings" aria-expanded="false">⋯</button>
+      <button class="btn btn-green btn-sm" id="reset"><span class="long">New conversation</span><span class="short">New</span></button>
     </div>
     <div id="mnav"></div>
     <div id="v-other"><div class="wrap" id="vo"></div></div>
@@ -253,20 +331,27 @@ table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-t
       <section id="chat">
         <div id="log">
           <div id="intro">
-            <div class="eyebrow">SANDBOX</div>
             <h1>Give an AI agent a budget. <span class="em">Watch the controls hold.</span></h1>
-            <p>A scripted demo agent, with no AI model or key needed, makes real calls to the platform on test money. For a live Claude agent that handles anything you ask, add your own Anthropic key (top right).</p>
-            <p>Your own sandbox account: R20 000 and US$500, plus 500 test USDC. Approvals land on the right, and only you can decide them.</p>
-            <div class="chips" id="chips"></div>
+            <p>Ask it to buy things, make cards, pay merchants or move crypto. Every action is a real call to the platform, on test money. Approvals appear right here, and only you can decide them.</p>
+            <div class="chips compact" id="chips"></div>
+            <button class="more-btn" id="morebtn">More ideas ▾</button>
+            <div class="chips" id="chips2" hidden></div>
           </div>
         </div>
-        <div id="cartwrap"></div>
+        <div id="dock"><div id="apdock"></div><div id="cartwrap"></div></div>
         <form id="f"><div class="composer"><textarea id="q" placeholder="Ask the agent to buy something…" maxlength="2000"></textarea><button class="send" id="send" aria-label="Send" type="submit">↑</button></div></form>
         <div class="foot-credit">Product by <b>a·card</b> · sandbox, test money</div>
       </section>
       <aside id="side"><div class="empty">Starting your sandbox…</div></aside>
     </div>
   </div>
+</div>
+<div id="menu" class="menu" role="menu">
+  <div class="row"><span>Agent</span><span id="mode" class="mode">Demo agent · scripted</span></div>
+  <button class="icon-btn" id="keybtn">Use your Claude key</button>
+  <div class="row"><span>Messages left</span><span id="turns" class="empty"></span></div>
+  <button class="icon-btn" id="theme">Switch light / dark</button>
+  <button class="icon-btn" id="buildbtn">Build this into your agent</button>
 </div>
 <div id="cta"><div class="pop"><h3>Build this into your agent</h3><div class="hint">Give your own agent the same cards, limits and approvals.</div><div id="ctacmds"></div><a href="#connect" id="ctamore">More ways to connect →</a></div><button class="pill-cta" id="ctabtn"><span class="g">[*]</span> Build this into your agent <span id="ctachev">⌃</span></button></div>
 <div class="toast" id="toast"></div>
@@ -294,11 +379,14 @@ const prompts = [
   ["Money", "Send 20 USDC from the wallet to merchant-1, then try 90."],
   ["Money", "Swap 5 USDC to ZARP and show my balances."],
 ];
+const QUICK = ["Show me bread and milk offers near Johannesburg.", "Buy 5 reams of A4 paper", "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it.", "Create a card that needs my approval above R1 000 and spend R1 500 at Rand Build Supply."];
+for (const q of QUICK) { const b = document.createElement("button"); b.textContent = q.length > 62 ? q.slice(0, 59).replace(/[ ,]+\S*$/, "") + "…" : q; b.title = q; b.onclick = () => ask(q); $("#chips").append(b); }
 let lastGroup = "";
 prompts.forEach(([g, p], i) => {
-  if (g !== lastGroup) { const h = document.createElement("div"); h.className = "group-t"; h.style.margin = "14px 0 2px"; h.textContent = g === "Shop" ? "Shop the catalogue" : g === "Controls" ? "See the controls hold" : "Money and wallet"; $("#chips").append(h); lastGroup = g; }
-  const b = document.createElement("button"); b.className = "scenario"; b.innerHTML = `<span class="ix">${String(i + 1).padStart(2, "0")}</span><span></span>`; b.lastChild.textContent = p; b.onclick = () => ask(p); $("#chips").append(b);
+  if (g !== lastGroup) { const h = document.createElement("div"); h.className = "group-t"; h.style.margin = "14px 0 2px"; h.textContent = g === "Shop" ? "Shop the catalogue" : g === "Controls" ? "See the controls hold" : "Money and wallet"; $("#chips2").append(h); lastGroup = g; }
+  const b = document.createElement("button"); b.className = "scenario"; b.innerHTML = `<span class="ix">${String(i + 1).padStart(2, "0")}</span><span></span>`; b.lastChild.textContent = p; b.onclick = () => ask(p); $("#chips2").append(b);
 });
+$("#morebtn").onclick = () => { const c = $("#chips2"); c.hidden = !c.hidden; $("#morebtn").textContent = c.hidden ? "More ideas ▾" : "Fewer ideas ▴"; };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (c, cur = "ZAR") => (cur === "ZAR" ? "R " : cur === "USD" ? "$" : cur + " ") + (Number(c) / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -350,6 +438,7 @@ async function refresh() {
   const txStatus = (t) => (/pending_human_approval|pending_approval/.test(String(t.declineReason ?? t.decline_reason ?? "")) ? ["pending", "held"] : [t.status, t.status]);
   const tx = (s.transactions.transactions ?? []).slice(0, 10).map((t) => { const [cls, label] = txStatus(t); return `<tr><td>${esc(t.merchantName ?? t.merchant_name ?? t.description ?? t.type ?? "")}</td><td class="right mono">${money(t.amount, t.currency)}</td><td class="right"><span class="pill ${esc(cls)}">${esc(label)}</span></td></tr>`; }).join("");
   const onchain = Object.entries(chain).map(([a, v]) => `<div class="stat"><div class="lbl">${esc(a)} · mock chain</div><div class="val">${units(v)}</div></div>`).join("");
+  const apBefore = $("#apdock").innerHTML; $("#apdock").innerHTML = ap; if (ap !== apBefore) requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
   side.innerHTML = `
     ${ap ? `<div class="panel"><h2>Needs your approval</h2><div style="display:grid;gap:10px">${ap}</div></div>` : ""}
     ${pipeHtml()}
@@ -358,7 +447,7 @@ async function refresh() {
     <div class="panel"><h2>Transactions</h2>${tx ? `<table class="grid"><tbody>${tx}</tbody></table>` : '<div class="empty">None yet.</div>'}</div>`;
 }
 
-side.addEventListener("click", async (e) => {
+for (const host of [side, $("#apdock")]) host.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-id]"); if (!b) return;
   b.disabled = true;
   await fetch(API + "/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: b.dataset.k, id: b.dataset.id, decision: b.dataset.d }) });
@@ -385,8 +474,8 @@ async function ask(text) {
         const ev = /event: (\w+)/.exec(chunk)?.[1]; const data = JSON.parse(/data: (.*)/.exec(chunk)?.[1] ?? "{}");
         if (ev === "mode") setMode(data.mode === "live");
         if (ev === "text") { add(esc(data.text), "bot"); if (/Claude key/.test(data.text)) { const b = document.createElement("button"); b.className = "btn btn-outline btn-sm"; b.style.alignSelf = "flex-start"; b.textContent = "Use your Claude key"; b.onclick = () => $("#keybtn").click(); log.append(b); } addTiming(t0); ensureTyping(); }
-        if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); if (data.name === "find_offers") d.dataset.q = data.input?.query ?? ""; tools[data.id] = d; log.scrollTop = log.scrollHeight; ensureTyping(); }
-        if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } judge(data.name, data.output, data.is_error); if (data.name === "find_offers" && !data.is_error) showOffers(data.output, t0, tools[data.id]?.dataset.q); ensureTyping(); refresh(); }
+        if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary><span class="g">…</span> ${esc(stepLabel(data.name, data.input))} <span class="st">working</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; d.dataset.input = JSON.stringify(data.input ?? {}); document.querySelector(".typing")?.remove(); let box = log.lastElementChild; if (!box || !box.classList.contains("steps")) { box = document.createElement("div"); box.className = "steps"; log.append(box); } box.append(d); if (data.name === "find_offers") d.dataset.q = data.input?.query ?? ""; tools[data.id] = d; log.scrollTop = log.scrollHeight; ensureTyping(); }
+        if (ev === "tool_result") { const d = tools[data.id]; if (d) { const [gl, gc] = stepGlyph(data.name, data.output, data.is_error); const gg = d.querySelector(".g"); gg.textContent = gl; gg.className = "g " + gc; d.querySelector(".st").textContent = gc === "hold" ? "held" : gc === "no" ? "refused" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } judge(data.name, data.output, data.is_error); if (data.name === "find_offers" && !data.is_error) showOffers(data.output, t0, tools[data.id]?.dataset.q); ensureTyping(); refresh(); }
         if (ev === "error") add(`<span class="err-line">${esc(data.message)}</span>`, "bot");
       }
     }
@@ -396,6 +485,11 @@ async function ask(text) {
 
 $("#f").onsubmit = (e) => { e.preventDefault(); ask($("#q").value); };
 $("#q").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask($("#q").value); } };
+$("#consolebtn").onclick = () => { location.hash = view === "agent" ? lastConsole : "agent"; };
+$("#menubtn").onclick = (e) => { e.stopPropagation(); const m = $("#menu"); m.classList.toggle("open"); $("#menubtn").setAttribute("aria-expanded", m.classList.contains("open")); };
+document.addEventListener("click", (e) => { if (!e.target.closest("#menu") && !e.target.closest("#menubtn")) $("#menu").classList.remove("open"); });
+$("#buildbtn").onclick = () => { $("#menu").classList.remove("open"); location.hash = "connect"; };
+$("#keybtn").addEventListener("click", () => $("#menu").classList.remove("open"));
 const dlg = $("#dlg");
 $("#keybtn").onclick = () => { $("#keyin").value = ""; $("#keystat").textContent = ""; dlg.showModal(); };
 $("#keycancel").onclick = () => dlg.close();
@@ -471,7 +565,7 @@ const artFor = (name) => { const r = ART_RULES.find(([re]) => re.test(String(nam
 const catTint = { "5411": "#e3efe2", "5912": "#e1ecf2", "5732": "#e4e3f3", "5943": "#f3ecdc", "5699": "#f4e6d8", "5169": "#e0f0ee", "5533": "#ece4e0", "5812": "#f4e3e1", "5211": "#e9e6dc", "5251": "#e9e6dc", "5541": "#f1e8d2", "7399": "#e6efe6" };
 
 const OFFERS = [];
-let cart = { lines: [], open: true };
+let cart = { lines: [], open: false };
 const pimg = (itemName, cat) => `<div class="pimg" style="background:${catTint[cat] || "#eceae0"}" data-cat="${esc(cat ? mcc(cat) : "")}"><svg viewBox="0 0 100 80" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${artFor(itemName)}</svg></div>`;
 /* Illustrative sandbox fee schedule. A-CARD has no card-payment pricing yet, so these are placeholders:
    change them here. They are real ledger entries in the sandbox, paid to "a·card fees". */
@@ -480,6 +574,9 @@ const cartCents = () => cart.lines.reduce((a, l) => a + l.qty * l.unit, 0);
 const feeLines = () => { const items = cartCents(); const proc = Math.round((items * FEES.processingBps) / 10000); return { order: FEES.orderCents, proc, total: FEES.orderCents + proc }; };
 const elapsed = (t0) => `${((performance.now() - t0) / 1000).toFixed(1)}s`;
 const addTiming = (t0) => { if (performance.now() - t0 < 300) return; const d = document.createElement("div"); d.className = "timing"; d.textContent = elapsed(t0); log.append(d); };
+const STEP = { find_offers: (i) => `Searched “${i.query ?? ""}”`, create_card: (i) => `Created a card${i.label ? ` · ${i.label}` : ""}`, pay_checkout: (i) => `Payment · ${i.merchant_name ?? ""}`, pay_x402: () => "Paid an API", close_card: () => "Closed the card", get_wallet: () => "Checked wallets", get_balances: () => "Checked the agent wallet", list_cards: () => "Listed cards", list_transactions: () => "Listed transactions", send_preview: () => "Previewed a transfer", send_execute: () => "Sent a transfer", swap_quote: () => "Quoted a swap", swap_execute: () => "Swapped", list_crypto_wallets: () => "Looked at crypto wallets", quote_payment: () => "Quoted payment rails", x402_preview: () => "Previewed an API payment", x402_pay: () => "Paid an API from the wallet", get_card: () => "Looked at a card", list_transactions_: () => "" };
+const stepLabel = (name, input) => (STEP[name] ? STEP[name](input ?? {}) : name.replace(/_/g, " "));
+const stepGlyph = (name, out, err) => { const t = String(out); if (/pending_human_approval|pending_approval|require_approval|approval_required/.test(t)) return ["!", "hold"]; if (err || /"approved"\s*:\s*false|"decision"\s*:\s*"deny"/.test(t)) return ["✕", "no"]; return ["✓", "ok"]; };
 const ensureTyping = () => { document.querySelector(".typing")?.remove(); if (busy) { const t = document.createElement("div"); t.className = "typing"; t.innerHTML = "<i></i><i></i><i></i>"; log.append(t); log.scrollTop = log.scrollHeight; } };
 
 function showOffers(output, t0, query) {
@@ -499,15 +596,15 @@ function addToCart(idx) {
   const id = `${m.id}:${o.item?.id ?? o.item?.name}`;
   const line = cart.lines.find((l) => l.id === id);
   if (line) line.qty += 1; else cart.lines.push({ id, merchant: m, name: o.item?.name ?? "Item", unit: o.unitPriceCents, qty: o.quantity || 1 });
-  cart.currency = o.currency; cart.open = true; renderCart();
+  cart.currency = o.currency; renderCart(); toast("Added to your cart");
 }
 const cartGroups = () => { const g = new Map(); for (const l of cart.lines) { const e = g.get(l.merchant.id) ?? { merchant: l.merchant, lines: [] }; e.lines.push(l); g.set(l.merchant.id, e); } return [...g.values()]; };
-const newCart = () => ({ lines: [], open: true });
+const newCart = () => ({ lines: [], open: false });
 function renderCart() {
-  const w = $("#cartwrap");
+  const w = $("#cartwrap"); requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
   if (!cart.lines.length) { w.innerHTML = ""; return; }
   const n = cart.lines.length, cur = cart.currency || "ZAR", groups = cartGroups();
-  w.innerHTML = `<div class="cart${cart.open ? "" : " closed"}"><button class="cart-head" data-cart="toggle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.7 12.4a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 7H6"/></svg><b>Cart</b><span class="sub">${n} item${n === 1 ? "" : "s"} · ${groups.length === 1 ? esc(groups[0].merchant.name) : groups.length + " suppliers"}</span><span class="chev">⌄</span></button><div class="cart-body">${groups.map((g) => `${groups.length > 1 ? `<div class="group-t" style="margin:10px 0 0">${esc(g.merchant.name)}</div>` : ""}${g.lines.map((l) => { const i = cart.lines.indexOf(l); return `<div class="cline">${pimg(l.name, l.merchant.mcc)}<div><div class="nm">${esc(l.name)}</div><div class="qty"><button data-cart="dec" data-i="${i}" aria-label="Fewer">−</button>${l.qty} ×<button data-cart="inc" data-i="${i}" aria-label="More">+</button><span>${money(l.unit, cur)} each</span></div></div><div class="amt">${money(l.qty * l.unit, cur)}</div></div>`; }).join("")}`).join("")}<div class="fees"><div><span>Order fee</span><span class="mono">${money(feeLines().order, cur)}</span></div><div><span>Card processing (${(FEES.processingBps / 100).toFixed(1)}%)</span><span class="mono">${money(feeLines().proc, cur)}</span></div></div><div class="ctotal"><div><div class="l">Estimated total</div><div class="n">Fees are an illustrative sandbox schedule, not A-CARD pricing. One card is created for the whole order, capped at this total.</div></div><div class="v">${money(cartCents() + feeLines().total, cur)}</div></div><div class="cart-actions"><button class="btn btn-outline btn-sm" data-cart="clear">Clear</button><button class="btn btn-green btn-sm" data-cart="checkout">Checkout with agent</button></div></div></div>`;
+  w.innerHTML = `<div class="cart${cart.open ? "" : " closed"}"><button class="cart-head" data-cart="toggle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.7 12.4a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 7H6"/></svg><b>Cart</b><span class="sub">${n} item${n === 1 ? "" : "s"} · ${groups.length === 1 ? esc(groups[0].merchant.name) : groups.length + " suppliers"}</span><span class="tot">${money(cartCents() + feeLines().total, cur)}</span><span class="chev">⌄</span></button><div class="cart-body">${groups.map((g) => `${groups.length > 1 ? `<div class="group-t" style="margin:10px 0 0">${esc(g.merchant.name)}</div>` : ""}${g.lines.map((l) => { const i = cart.lines.indexOf(l); return `<div class="cline">${pimg(l.name, l.merchant.mcc)}<div><div class="nm">${esc(l.name)}</div><div class="qty"><button data-cart="dec" data-i="${i}" aria-label="Fewer">−</button>${l.qty} ×<button data-cart="inc" data-i="${i}" aria-label="More">+</button><span>${money(l.unit, cur)} each</span></div></div><div class="amt">${money(l.qty * l.unit, cur)}</div></div>`; }).join("")}`).join("")}<div class="fees"><div><span>Order fee</span><span class="mono">${money(feeLines().order, cur)}</span></div><div><span>Card processing (${(FEES.processingBps / 100).toFixed(1)}%)</span><span class="mono">${money(feeLines().proc, cur)}</span></div></div><div class="ctotal"><div><div class="l">Estimated total</div><div class="n">Fees are an illustrative sandbox schedule, not A-CARD pricing. One card is created for the whole order, capped at this total.</div></div><div class="v">${money(cartCents() + feeLines().total, cur)}</div></div><div class="cart-actions"><button class="btn btn-outline btn-sm" data-cart="clear">Clear</button><button class="btn btn-green btn-sm" data-cart="checkout">Checkout with agent</button></div></div></div>`;
 }
 $("#cartwrap").addEventListener("click", (e) => {
   const b = e.target.closest("[data-cart]"); if (!b) return; const a = b.dataset.cart, i = Number(b.dataset.i);
@@ -539,7 +636,7 @@ const NAVS = [
 ];
 const MCC = { "5411": "Groceries", "5734": "Software", "4816": "Cloud", "7311": "Advertising", "4511": "Airlines", "5812": "Restaurants", "7995": "Gambling", "6051": "Crypto", "5211": "Building supplies", "5251": "Hardware", "5541": "Fuel", "5542": "Fuel", "5732": "Electronics", "5200": "Home supplies", "7538": "Auto service", "7372": "Software", "x402": "x402 APIs", "5912": "Pharmacy", "5943": "Office supplies", "5699": "Workwear", "5169": "Cleaning supplies", "5533": "Auto parts", "7399": "Fees & services" };
 const mcc = (c) => (MCC[c] ? `${MCC[c]} (${c})` : c);
-let view = "agent", pendingCount = 0, viewToken = 0;
+let view = "agent", pendingCount = 0, viewToken = 0, lastConsole = "cards";
 const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2400); };
 const api = async (path, init = {}) => {
   const r = await fetch(API + "/sandbox/api" + path, { ...init, headers: { "x-sandbox-session": sid, "content-type": "application/json" } });
@@ -567,7 +664,10 @@ function setView(v) {
   $("#mnav").innerHTML = NAVS.map(([k, l]) => `<button class="${k === v ? "active" : ""}" data-v="${k}">${l}</button>`).join("");
   $("#crumb").textContent = (NAVS.find((n) => n[0] === v) || [])[1];
   $("#v-agent").style.display = v === "agent" ? "" : "none";
-  $("#cta").style.display = v === "connect" ? "none" : "";
+  $("#cta").style.display = v === "agent" ? "" : "none";
+  document.body.classList.toggle("agent", v === "agent");
+  $("#consolebtn").textContent = v === "agent" ? "Console" : "← Chat";
+  if (v !== "agent") lastConsole = v;
   $("#v-other").style.display = v === "agent" ? "none" : "block";
   if (v !== "agent") renderView();
 }

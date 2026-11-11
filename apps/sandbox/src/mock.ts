@@ -87,7 +87,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
-    match: /x402|weather|api call|pay.*api|per.?call/i,
+    match: /\bx402\b/i,
     steps: [
       (_r, { base }) => [
         say("I'll make a US dollar card limited to x402 payments, then pay a metered weather API with a 1 cent ceiling."),
