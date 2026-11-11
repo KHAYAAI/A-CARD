@@ -77,6 +77,8 @@ Every write that moves money or creates something accepts an `Idempotency-Key` h
 | Code | Status | What it means | What to do |
 |---|---|---|---|
 | `invalid_request` | 400 | A field failed validation. See `issues`. | Fix the named fields |
+| `rate_limited` | 429 | Too many store applications from one address in an hour (`POST /v1/merchant-api/signup`) | Wait and try again later |
+| `too_large` | 413 | A catalogue CSV over 2 MB | Split the file; up to 500 rows per upload |
 | `unauthorized` | 401 | Missing, invalid or revoked credential | Check the `Authorization: Bearer` header and the key prefix (`ak_`, `sess_`, `mk_live_`) |
 | `forbidden` | 403 | Your role, key scope or shop role doesn't allow this | Use a higher role, a `full` / `read_write` key, or the shop owner |
 | `https_required` | 400 | The deployment enforces HTTPS and the request came over HTTP | Call the `https://` URL |
