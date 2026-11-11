@@ -1,0 +1,19 @@
+{
+  "name": "@acard/sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Public A-CARD sandbox: chat with an agent that uses the whole platform on test money",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "build": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@acard/agent-wallet": "*",
+    "@acard/core": "*",
+    "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "hono": "^4.6.0"
+  }
+}

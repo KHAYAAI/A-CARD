@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A-CARD Sandbox</title>
+<style>
+:root{--bg:#0b0f14;--panel:#111821;--line:#1f2a36;--ink:#e6edf3;--mute:#8aa0b4;--green:#4ade80;--amber:#facc15;--red:#f87171;--blue:#7cc4ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line)}
+header b{letter-spacing:1px}
+.badge{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#1a1300;background:var(--amber);padding:3px 8px;border-radius:99px}
+header .sp{flex:1}
+header button{background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;padding:6px 10px;cursor:pointer}
+main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
+#chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+#log{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:760px;white-space:pre-wrap}
+.user{align-self:flex-end;background:#1d2b3a;padding:10px 14px;border-radius:14px 14px 4px 14px}
+.bot{align-self:flex-start}
+details.tool{align-self:flex-start;max-width:760px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+details.tool summary{padding:8px 12px;cursor:pointer;color:var(--blue)}
+details.tool summary .st{float:right;color:var(--mute)}
+details.tool.err summary{color:var(--red)}
+details.tool pre{margin:0;padding:8px 12px;border-top:1px solid var(--line);overflow-x:auto;color:#c9d6e2;max-height:300px}
+.err-line{color:var(--red)}
+#intro{color:var(--mute);max-width:760px}
+#intro h1{color:var(--ink);font-size:26px;margin:8px 0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chips button{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:99px;padding:7px 12px;cursor:pointer;font-size:13.5px;text-align:left}
+.chips button:hover{border-color:var(--green)}
+form{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--line)}
+textarea{flex:1;resize:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;height:48px}
+form button{background:var(--green);color:#04210f;border:0;border-radius:10px;padding:0 18px;font-weight:700;cursor:pointer}
+form button:disabled{opacity:.5;cursor:default}
+#side{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--mute)}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;padding:3px 0}
+.row .m{color:var(--mute)}
+.ok{color:var(--green)}.held{color:var(--amber)}.no{color:var(--red)}
+.appr{border:1px solid var(--amber);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px}
+.appr .btns{display:flex;gap:6px;margin-top:6px}
+.appr button{flex:1;border:0;border-radius:7px;padding:6px;font-weight:700;cursor:pointer}
+.appr .y{background:var(--green);color:#04210f}.appr .n{background:#2a3644;color:var(--ink)}
+.empty{color:var(--mute);font-size:13px}
+footer{font-size:12px;color:var(--mute);padding:6px 20px;border-top:1px solid var(--line)}
+@media (max-width:900px){main{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) 40vh}#chat{border-right:0;border-bottom:1px solid var(--line)}#log,form{padding-left:16px;padding-right:16px}}
+</style>
+</head>
+<body>
+<header><b>A‑CARD</b><span class="badge">Sandbox · test money</span><span class="sp"></span><span id="turns" class="empty"></span><button id="reset">New session</button></header>
+<main>
+  <section id="chat">
+    <div id="log">
+      <div id="intro">
+        <h1>Give an AI agent a budget. Watch the controls hold.</h1>
+        Chat with a Claude agent that has every A‑CARD tool: per‑task virtual cards, merchant rules, human approval, A‑MERCHANT supply search, x402 pay‑per‑call APIs and an on‑chain wallet. You get your own sandbox account with R20 000 and US$500 of test money, and 500 test USDC. Approvals land on the right, and only you can decide them.
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+    <form id="f"><textarea id="q" placeholder="Ask the agent to buy, pay or move money…" maxlength="2000"></textarea><button id="send">Send</button></form>
+  </section>
+  <aside id="side"><div class="empty">Starting your sandbox…</div></aside>
+</main>
+<footer>Sandbox: simulated card network, mock chain, no real money. Live card issuance launches with our issuing partner. Conversations reset when the server restarts.</footer>
+<script>
+const $ = (s) => document.querySelector(s);
+const log = $("#log"), side = $("#side");
+let sid = null, busy = false;
+const prompts = [
+  "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers.",
+  "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it.",
+  "Create a card that needs my approval above R1 000 and spend R1 500 at Rand Build Supply.",
+  "Pay for the weather API with x402 from a USD card. Don't spend more than 1 cent.",
+  "Send 20 USDC from the wallet to merchant-1, then try 90.",
+  "Swap 5 USDC to ZARP and show my balances.",
+];
+for (const p of prompts) { const b = document.createElement("button"); b.textContent = p; b.onclick = () => ask(p); $("#chips").append(b); }
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const money = (c, cur = "ZAR") => (cur === "ZAR" ? "R " : cur === "USD" ? "$" : cur + " ") + (Number(c) / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const units = (v, d = 6) => (Number(v) / 10 ** d).toLocaleString("en-US", { maximumFractionDigits: 4 });
+const add = (html, cls) => { const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; log.append(d); log.scrollTop = log.scrollHeight; return d; };
+
+async function start() {
+  try { sid = localStorage.getItem("acard-sbx"); } catch {}
+  if (sid && (await fetch("/sandbox/state", { headers: { "x-sandbox-session": sid } })).ok) return refresh();
+  const r = await fetch("/sandbox/session", { method: "POST" });
+  if (!r.ok) { side.innerHTML = '<div class="err-line">Could not start a sandbox. Try again shortly.</div>'; return; }
+  sid = (await r.json()).session_id;
+  try { localStorage.setItem("acard-sbx", sid); } catch {}
+  refresh();
+}
+
+async function refresh() {
+  if (!sid) return;
+  const r = await fetch("/sandbox/state", { headers: { "x-sandbox-session": sid } });
+  if (!r.ok) return;
+  const s = await r.json();
+  $("#turns").textContent = s.turns_left + " messages left";
+  const wallets = (s.wallet.wallets ?? [s.wallet.wallet ?? s.wallet]).filter(Boolean);
+  const bal = wallets.map((w) => `<div class="row"><span>${esc(w.currency)} wallet</span><span>${money(w.balance ?? w.available ?? 0, w.currency)}</span></div>`).join("");
+  const chain = Object.entries(s.chain?.balances ?? s.chain ?? {}).map(([a, v]) => `<div class="row"><span>${esc(a)}</span><span>${units(v)}</span></div>`).join("");
+  const ap = [
+    ...s.card_approvals.map((a) => `<div class="appr"><b class="held">Card charge held</b><div>${money(a.amount, a.currency)} at ${esc(a.merchantName ?? a.merchant_name ?? "merchant")}</div><div class="btns"><button class="y" data-k="card" data-id="${esc(a.id)}" data-d="approve">Approve</button><button class="n" data-k="card" data-id="${esc(a.id)}" data-d="deny">Deny</button></div></div>`),
+    ...s.wallet_approvals.map((id) => `<div class="appr"><b class="held">Wallet transfer held</b><div class="m" style="font-size:12px">${esc(id)}</div><div class="btns"><button class="y" data-k="wallet" data-id="${esc(id)}" data-d="approve">Approve</button><button class="n" data-k="wallet" data-id="${esc(id)}" data-d="deny">Reject</button></div></div>`),
+  ].join("");
+  const cards = (s.cards.cards ?? []).map((c) => `<div class="row"><span>${esc(c.label ?? "card")} <span class="m">•${esc(c.last4 ?? "")}</span></span><span class="${c.status === "active" ? "ok" : "m"}">${esc(c.status)}</span></div>`).join("");
+  const tx = (s.transactions.transactions ?? []).slice(0, 12).map((t) => `<div class="row"><span>${esc(t.merchantName ?? t.merchant_name ?? t.description ?? t.type ?? "")}</span><span class="${t.status === "completed" ? "ok" : t.status === "pending" ? "held" : "no"}">${money(t.amount, t.currency)}</span></div>`).join("");
+  side.innerHTML = `
+    <div class="card"><h3>Approvals: yours to decide</h3>${ap || '<div class="empty">Nothing waiting.</div>'}</div>
+    <div class="card"><h3>Fiat wallet</h3>${bal || '<div class="empty">—</div>'}</div>
+    <div class="card"><h3>On‑chain wallet (mock chain)</h3>${chain || '<div class="empty">—</div>'}</div>
+    <div class="card"><h3>Cards</h3>${cards || '<div class="empty">No cards yet.</div>'}</div>
+    <div class="card"><h3>Transactions</h3>${tx || '<div class="empty">None yet.</div>'}</div>`;
+}
+
+side.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-id]"); if (!b) return;
+  b.disabled = true;
+  await fetch("/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: b.dataset.k, id: b.dataset.id, decision: b.dataset.d }) });
+  add(`<i class="m">You ${b.dataset.d === "approve" ? "approved" : "declined"} it. Tell the agent to retry.</i>`, "bot");
+  refresh();
+});
+
+async function ask(text) {
+  if (busy || !sid || !text.trim()) return;
+  $("#intro")?.remove();
+  busy = true; $("#send").disabled = true; $("#q").value = "";
+  add(esc(text), "user");
+  const tools = {};
+  try {
+    const res = await fetch("/sandbox/chat", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ message: text }) });
+    if (!res.ok) { add(`<span class="err-line">${esc((await res.json()).error)}</span>`, "bot"); return; }
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = /event: (\w+)/.exec(chunk)?.[1]; const data = JSON.parse(/data: (.*)/.exec(chunk)?.[1] ?? "{}");
+        if (ev === "text") add(esc(data.text), "bot");
+        if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); tools[data.id] = d; log.scrollTop = log.scrollHeight; }
+        if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } refresh(); }
+        if (ev === "error") add(`<span class="err-line">${esc(data.message)}</span>`, "bot");
+      }
+    }
+  } catch (e) { add(`<span class="err-line">Connection lost.</span>`, "bot"); }
+  finally { busy = false; $("#send").disabled = false; refresh(); }
+}
+
+$("#f").onsubmit = (e) => { e.preventDefault(); ask($("#q").value); };
+$("#q").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask($("#q").value); } };
+$("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
+start();
+</script>
+</body>
+</html>
