@@ -308,6 +308,21 @@ body.agent #mnav{display:none!important}
   .filters{flex-direction:column}.filters input,.filters select,.filters .btn{width:100%}
   .cols{grid-template-columns:1fr}
 }
+
+/* Custom dropdowns: native selects are kept (hidden) as the source of truth */
+.dd{position:relative;display:inline-block;min-width:150px}.filters .dd{flex:0 0 auto}.field .dd{display:block}
+.dd select{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;left:0;top:0}
+.dd-btn{width:100%;display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:11px;background:var(--surface-2);border:1px solid var(--border);color:var(--ink);font-size:14px;font-family:inherit;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.dd-btn:hover{border-color:var(--muted)}.dd.open .dd-btn,.dd-btn:focus-visible{border-color:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 22%,transparent);outline:none}
+.dd-btn .dd-l{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dd-chev{width:16px;height:16px;flex:none;color:var(--muted);transition:transform .15s}.dd.open .dd-chev{transform:rotate(180deg)}
+.dd-list{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 6px);min-width:100%;width:max-content;max-width:min(360px,86vw);max-height:280px;overflow:auto;padding:6px;margin:0;list-style:none;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+.dd:not(.open) .dd-list{display:none}.dd.up .dd-list{top:auto;bottom:calc(100% + 6px)}
+.dd-opt{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:14px;color:var(--ink)}
+.dd-opt:hover,.dd-opt.act{background:var(--surface-2)}.dd-opt[aria-selected=true]{background:var(--green-bg,var(--surface-2))}
+.dd-opt .dd-ck{margin-left:auto;width:15px;height:15px;color:var(--green);opacity:0}.dd-opt[aria-selected=true] .dd-ck{opacity:1}
+.dd-ico{width:22px;height:22px;flex:none;display:inline-grid;place-items:center}.dd-ico svg{width:22px;height:22px;display:block}
+@media (max-width:640px){.filters .dd{width:100%}.dd-list{max-width:100%;width:100%}}
 </style>
 </head>
 <body class="agent">
@@ -919,7 +934,7 @@ VIEWS.wallet = async function () {
     },
     fiat: () => `<div class="stats3" style="grid-template-columns:repeat(2,1fr);margin-bottom:18px">${d.fiat.map((x) => `<div class="stat"><div class="lbl">${esc(x.currency)} wallet</div><div class="val">${money(x.available, x.currency)}</div><div class="hint" style="margin-top:8px">held <b>${money(x.held, x.currency)}</b> · posted <b>${money(x.posted, x.currency)}</b></div><div style="margin-top:12px"><button class="btn btn-outline btn-sm" data-fund="${esc(x.currency)}">Add test funds</button></div></div>`).join("")}</div>
       <div class="panel"><h2>Recent card activity</h2>${d.cardTx.length ? `<table class="grid wide"><tbody>${d.cardTx.slice(0, 8).map((t) => `<tr><td class="mono hint">${when(t.createdAt)}</td><td>${esc(t.merchantName ?? "")}</td><td class="right mono">${money(t.amount, t.currency)}</td><td>${txPill(t)}</td></tr>`).join("")}</tbody></table>` : empty("Nothing yet. Cards draw from these wallets: held while a charge is pending, posted once it completes.")}<div class="hint" style="margin-top:10px">In a live deployment, ZAR is topped up through PayFast checkout. The sandbox credits test money instantly.</div></div>`,
-    crypto: () => `<div class="stack">${d.crypto.map((c) => `<div class="panel"><div class="panel-head"><div><b style="font-size:15px">${esc(c.label ?? (c.kind === "embedded" ? "Embedded wallet" : "Linked wallet"))}</b> <span class="pill ${c.kind === "embedded" ? "completed" : "pending"}">${esc(c.kind)}</span> ${c.isDefault ? '<span class="pill active">default</span>' : ""}<div class="hint" style="margin-top:4px"><span style="text-transform:capitalize">${esc(c.chain)}</span>${c.connector ? ` · ${esc(c.connector)}` : ""} · <span class="mono" title="${esc(c.address)}">${esc(short(c.address))}</span> <button class="cmd-copy" style="position:static;background:none;border:1px solid var(--border);color:var(--muted)" data-copy="${esc(c.address)}">Copy</button></div></div><div style="text-align:right"><div class="mono" style="font-size:22px">${c.usdc != null ? units(c.usdc) + " USDC" : "—"}</div><div class="hint">${c.usdc != null ? "test funds" : "held in your own wallet"}</div></div></div><div style="display:flex;gap:8px;flex-wrap:wrap">${c.kind === "embedded" ? `<button class="btn btn-outline btn-sm" data-wfund="${esc(c.id)}">Add 25 test USDC</button>` : ""}${c.isDefault ? "" : `<button class="btn btn-outline btn-sm" data-wdef="${esc(c.id)}">Make default</button>`}${c.kind === "external" ? `<button class="btn btn-outline btn-sm" data-wunlink="${esc(c.id)}">Unlink</button>` : ""}</div></div>`).join("")}
+    crypto: () => `<div class="stack">${d.crypto.map((c) => `<div class="panel"><div class="panel-head"><div><span style="vertical-align:-6px;margin-right:8px">${window.__ico?.(c.chain) ?? ""}</span><b style="font-size:15px">${esc(c.label ?? (c.kind === "embedded" ? "Embedded wallet" : "Linked wallet"))}</b> <span class="pill ${c.kind === "embedded" ? "completed" : "pending"}">${esc(c.kind)}</span> ${c.isDefault ? '<span class="pill active">default</span>' : ""}<div class="hint" style="margin-top:4px"><span style="text-transform:capitalize">${esc(c.chain)}</span>${c.connector ? ` · ${esc(c.connector)}` : ""} · <span class="mono" title="${esc(c.address)}">${esc(short(c.address))}</span> <button class="cmd-copy" style="position:static;background:none;border:1px solid var(--border);color:var(--muted)" data-copy="${esc(c.address)}">Copy</button></div></div><div style="text-align:right"><div class="mono" style="font-size:22px">${c.usdc != null ? units(c.usdc) + " USDC" : "—"}</div><div class="hint">${c.usdc != null ? "test funds" : "held in your own wallet"}</div></div></div><div style="display:flex;gap:8px;flex-wrap:wrap">${c.kind === "embedded" ? `<button class="btn btn-outline btn-sm" data-wfund="${esc(c.id)}">Add 25 test USDC</button>` : ""}${c.isDefault ? "" : `<button class="btn btn-outline btn-sm" data-wdef="${esc(c.id)}">Make default</button>`}${c.kind === "external" ? `<button class="btn btn-outline btn-sm" data-wunlink="${esc(c.id)}">Unlink</button>` : ""}</div></div>`).join("")}
       <div class="panel"><h2>Link a wallet you already control</h2><div class="hint" style="margin-bottom:6px">The platform checks the address format for the chain. The embedded wallet stays as your fallback and can't be unlinked.</div><div class="filters" style="margin-top:12px"><select id="lk-chain"><option>ethereum</option><option>polygon</option><option>solana</option></select><select id="lk-conn"><option>metamask</option><option>walletconnect</option><option>coinbase</option><option>other</option></select><input id="lk-label" placeholder="Label (optional)"></div><div class="filters"><input id="lk-addr" class="mono" placeholder="Address"><button class="btn btn-outline" id="lk-example">Use an example</button><button class="btn btn-green" id="lk-save">Link wallet</button></div></div></div>`,
     agent: () => {
       const a = d.agent, p = a.policy, usdc = p?.assets?.USDC, per24 = Number(usdc?.per24h ?? 0), used = Number(a.spent24h ?? 0);
@@ -978,6 +993,76 @@ new MutationObserver(() => { if (view === "connect" && $("#cc") && !$("#cc").inn
 
 if (STANDALONE) { document.querySelector(".side-note").textContent = "Sandbox: simulated card network, mock chain, no real money. Runs entirely in this page; nothing is sent to any server, and reloading resets it. Live card issuance launches with our issuing partner."; $("#dlg p").textContent = "Switches the chat to a live Claude agent. Your key is sent only from this browser straight to Anthropic, never to A-CARD, and stays in this tab until you close it or remove it. Usage is billed to your Anthropic account."; }
 start().then(() => setView(NAVS.some((n) => n[0] === location.hash.slice(1)) ? location.hash.slice(1) : "agent"));
+</script>
+<script>
+/* Dropdowns with brand marks. The marks are simplified stand-ins drawn here, not the companies' official artwork:
+   swap in the official assets (and follow each brand's guidelines) before anything public. */
+(() => {
+  const c = (bg, inner) => `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="${bg}"/>${inner}</svg>`;
+  const ICON = {
+    ethereum: c("#627eea", '<path d="M12 4l5 8-5 3-5-3z" fill="#fff"/><path d="M12 16l5-3-5 7-5-7z" fill="#fff" opacity=".8"/>'),
+    polygon: c("#8247e5", '<path d="M12 6l5 3v6l-5 3-5-3V9z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>'),
+    solana: c("#14151a", '<defs><linearGradient id="sg" x1="0" x2="1"><stop offset="0" stop-color="#9945ff"/><stop offset="1" stop-color="#14f195"/></linearGradient></defs><path d="M7 8.5h10l-1.6 2H5.4zM7 13h10l-1.6 2H5.4zM8.6 15.5h10L17 17.5H7z" fill="url(#sg)" transform="translate(0 -1.2)"/>'),
+    metamask: c("#f6851b", '<path d="M5 6l5 3.5h4L19 6l-1 6 1 4-3.5 2.5L12 17l-3.5 1.5L5 16l1-4z" fill="#fff" opacity=".92"/><circle cx="9.6" cy="12" r="1" fill="#f6851b"/><circle cx="14.4" cy="12" r="1" fill="#f6851b"/>'),
+    walletconnect: c("#3b99fc", '<path d="M6.5 10.5c3-3 8-3 11 0M9 13c1.8-1.7 4.2-1.7 6 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>'),
+    coinbase: c("#0052ff", '<circle cx="12" cy="12" r="5" fill="none" stroke="#fff" stroke-width="2.4"/><rect x="10" y="10" width="4" height="4" rx="1" fill="#fff"/>'),
+    other: c("#6b7f95", '<rect x="6" y="8" width="12" height="8" rx="2" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="15" cy="12" r="1.1" fill="#fff"/>'),
+    usd: c("#16a34a", '<text x="12" y="16.5" text-anchor="middle" font-size="12" font-weight="700" fill="#fff" font-family="system-ui">$</text>'),
+    zar: c("#0f766e", '<text x="12" y="16.5" text-anchor="middle" font-size="12" font-weight="700" fill="#fff" font-family="system-ui">R</text>'),
+    usdc: c("#2775ca", '<text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" font-family="system-ui">$</text>'),
+    demo: c("#7c3aed", '<path d="M8 8v3a4 4 0 0 0 8 0V8M10 8V6m4 2V6m-2 7v5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>'),
+    wallet: c("#0ea5e9", '<rect x="6" y="8" width="12" height="8" rx="2" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="15" cy="12" r="1.1" fill="#fff"/>'),
+    merchant: c("#f59e0b", '<path d="M6 10l1-3h10l1 3M7 10v7h10v-7M10 17v-3h4v3" fill="none" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"/>'),
+  };
+  window.__ico = (k) => (ICON[String(k).toLowerCase()] ? `<span class="dd-ico">${ICON[String(k).toLowerCase()]}</span>` : "");
+  const NAME = { ethereum: "Ethereum", polygon: "Polygon", solana: "Solana", metamask: "MetaMask", walletconnect: "WalletConnect", coinbase: "Coinbase Wallet", other: "Other wallet" };
+  const CHEV = '<svg class="dd-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+  const CHECK = '<svg class="dd-ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
+  const esc = (t) => String(t).replace(/[&<>"]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]));
+  const icoFor = (o) => { const k = String(o.value).toLowerCase(); return ICON[k] ? `<span class="dd-ico">${ICON[k]}</span>` : ""; };
+  const labelFor = (o) => NAME[String(o.value).toLowerCase()] ?? o.textContent;
+
+  function upgrade(sel) {
+    if (sel.dataset.dd || sel.multiple) return;
+    sel.dataset.dd = "1";
+    const wrap = document.createElement("div"); wrap.className = "dd";
+    if (sel.style.flex) wrap.style.flex = sel.style.flex;
+    sel.parentNode.insertBefore(wrap, sel); wrap.appendChild(sel); sel.tabIndex = -1; sel.setAttribute("aria-hidden", "true");
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "dd-btn"; btn.setAttribute("aria-haspopup", "listbox"); btn.setAttribute("aria-expanded", "false");
+    const lab = sel.id ? document.querySelector(`label[for="${sel.id}"]`) : null; if (lab) btn.setAttribute("aria-labelledby", lab.id || (lab.id = sel.id + "-lbl"));
+    const list = document.createElement("ul"); list.className = "dd-list"; list.setAttribute("role", "listbox"); list.tabIndex = -1;
+    wrap.append(btn, list);
+    let active = -1;
+    const opts = () => [...sel.options];
+    const paint = () => {
+      const cur = sel.selectedOptions[0] ?? sel.options[0];
+      btn.innerHTML = `${cur ? icoFor(cur) : ""}<span class="dd-l">${cur ? esc(labelFor(cur)) : ""}</span>${CHEV}`;
+      list.innerHTML = opts().map((o, i) => `<li class="dd-opt${i === active ? " act" : ""}" role="option" id="${(sel.id || "dd") + "-o" + i}" data-i="${i}" aria-selected="${o === cur}">${icoFor(o)}<span>${esc(labelFor(o))}</span>${CHECK}</li>`).join("");
+    };
+    const setOpen = (v) => {
+      wrap.classList.toggle("open", v); btn.setAttribute("aria-expanded", String(v));
+      if (v) { active = sel.selectedIndex; paint(); const r = wrap.getBoundingClientRect(); wrap.classList.toggle("up", innerHeight - r.bottom < 300 && r.top > 300); list.querySelector(".act,[aria-selected=true]")?.scrollIntoView({ block: "nearest" }); }
+    };
+    const choose = (i) => { if (i < 0 || i >= sel.options.length) return; sel.selectedIndex = i; sel.dispatchEvent(new Event("input", { bubbles: true })); sel.dispatchEvent(new Event("change", { bubbles: true })); setOpen(false); paint(); };
+    btn.addEventListener("click", () => setOpen(!wrap.classList.contains("open")));
+    list.addEventListener("mousedown", (e) => e.preventDefault());
+    list.addEventListener("click", (e) => { const li = e.target.closest("[data-i]"); if (li) { choose(Number(li.dataset.i)); btn.focus(); } });
+    btn.addEventListener("keydown", (e) => {
+      const open = wrap.classList.contains("open"), n = sel.options.length;
+      if (e.key === "Escape" && open) { e.preventDefault(); setOpen(false); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (!open) setOpen(true); else { active = (active + (e.key === "ArrowDown" ? 1 : -1) + n) % n; paint(); list.querySelector(".act")?.scrollIntoView({ block: "nearest" }); } }
+      else if ((e.key === "Enter" || e.key === " ") && open) { e.preventDefault(); choose(active); }
+      else if (e.key.length === 1 && /\S/.test(e.key)) { const i = opts().findIndex((o) => labelFor(o).toLowerCase().startsWith(e.key.toLowerCase())); if (i >= 0) { if (open) { active = i; paint(); } else choose(i); } }
+    });
+    btn.addEventListener("blur", () => setTimeout(() => { if (!wrap.contains(document.activeElement)) setOpen(false); }, 120));
+    sel.addEventListener("change", paint);
+    paint();
+  }
+  const sweep = () => document.querySelectorAll("select:not([data-dd])").forEach(upgrade);
+  new MutationObserver(sweep).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener("click", (e) => { document.querySelectorAll(".dd.open").forEach((d) => { if (!e.composedPath().includes(d)) d.classList.remove("open"); }); });
+  sweep();
+})();
 </script>
 </body>
 </html>
