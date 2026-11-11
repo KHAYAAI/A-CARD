@@ -276,7 +276,7 @@ export async function createSandbox(opts: SandboxOptions) {
               text = (r.content ?? []).map((x: any) => x.text ?? "").join("");
               isError = !!r.isError;
             }
-            await send("tool_result", { id: u.id, name: u.name, output: text.slice(0, 4000), is_error: isError });
+            await send("tool_result", { id: u.id, name: u.name, output: text.slice(0, 24000), is_error: isError });
             results.push({ type: "tool_result" as const, tool_use_id: u.id, content: text.slice(0, 8000), is_error: isError });
           }
           s.history.push({ role: "user", content: results });

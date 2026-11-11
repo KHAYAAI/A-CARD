@@ -87,7 +87,55 @@ const verdict = (x?: { raw: string; output: any }) => {
 
 const weather = (base: string) => `${base}/demo/weather`;
 
+const BROWSE: Record<string, { query: string; quantity: number; label: string }> = {
+  cement: { query: "cement", quantity: 50, label: "cement" },
+  sand: { query: "plaster sand", quantity: 5, label: "plaster sand" },
+  diesel: { query: "diesel", quantity: 200, label: "diesel" },
+  tyre: { query: "tyre", quantity: 4, label: "truck tyres" },
+};
+
 const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
+  {
+    // The cart's "Checkout": buy exactly what is in it, on a card scoped to that merchant's category.
+    match: /^checkout:/i,
+    steps: [
+      (_r, { history }) => {
+        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
+        const m = /buy (\d+) × (.+?) from (.+?) for R([\d.]+) \(merchant category (\w+)\)/i.exec(t);
+        if (!m) return [say("I couldn't read that cart. Try adding the item again.")];
+        const cents = Math.round(Number(m[4]) * 100);
+        return [
+          say(`Checking out: ${m[1]} × ${m[2]} from ${m[3]} for ${rands(cents)}. I'll create a single-use card capped at exactly that amount and limited to the merchant's category.`),
+          call("create_card", { label: `${m[2]} · ${m[3]}`, single_use: true, total_limit: cents, per_transaction_limit: cents, allowed_merchant_categories: [m[5]!] }),
+        ];
+      },
+      (r, { history }) => {
+        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
+        const m = /from (.+?) for R([\d.]+) \(merchant category (\w+)\)/i.exec(t)!;
+        return [call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: Math.round(Number(m[2]) * 100), merchant_name: m[1]!, merchant_category: m[3]! })];
+      },
+      (r) => {
+        const v = verdict(last(r, "pay_checkout"));
+        return [say(`A-CARD ${v}. ${v === "approved" ? "The card was single-use, so it's already closed. See Track spending for the record." : "Nothing was spent."}`)];
+      },
+    ],
+  },
+  {
+    // Browse without buying: show ranked offers as cards.
+    match: /^(?!.*\b(buy|purchase|pay|checkout)\b).*\b(show|browse|search|compare|options|offers)\b.*\b(cement|sand|diesel|tyres?)\b/i,
+    steps: [
+      (_r, { history }) => {
+        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
+        const key = Object.keys(BROWSE).find((k) => new RegExp(`\\b${k}`, "i").test(t)) ?? "cement";
+        const b = BROWSE[key]!;
+        return [say(`Searching A-MERCHANT for verified suppliers of ${b.label} near Johannesburg.`), call("find_offers", { query: b.query, quantity: b.quantity, lat: -26.2309, lng: 28.1772, radius_km: 60 })];
+      },
+      (r) => {
+        const n = (last(r, "find_offers")?.output?.offers ?? []).length;
+        return [say(n ? `${n} verified supplier${n === 1 ? "" : "s"}, ranked by price, distance and how fresh their stock count is. Tap “Add” to put one in your cart, then check out and I'll pay with a card scoped to that purchase.` : "No verified supplier matched that.")];
+      },
+    ],
+  },
   {
     // Retry after approving: re-run whatever is waiting.
     match: /\b(approved|retry|try again|go ahead|i approved|execute)\b/i,
@@ -203,6 +251,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
 
 const HELP = `I'm the scripted demo agent: no AI model is running, but every action I take is a real call to the sandbox platform, on test money. I can show you:
 
+• Browse supplier offers as cards, add one to your cart and check out ("show me cement offers")
 • Find supplier offers and buy with a scoped card ("find cement near Johannesburg")
 • A fuel card refusing a TV ("fuel card, then try to buy a TV")
 • A charge held for your approval ("spend R1 500, needs my approval")

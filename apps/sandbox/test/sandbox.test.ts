@@ -66,6 +66,26 @@ describe("demo mode (no model, no key)", () => {
     expect((await s.state()).transactions.transactions.length).toBeGreaterThan(0);
   });
 
+  it("browses offers as results, then checks out exactly what was in the cart", async () => {
+    const s = await session();
+    const browse = await s.chat("Show me cement offers near Johannesburg.");
+    expect(names(browse.events)).toEqual(["find_offers"]);
+    const offers = JSON.parse(results(browse.events)[0]!.output).offers;
+    expect(offers.length).toBeGreaterThan(1);
+    expect(offers[0].merchant.name).toBeTruthy();
+    // The cart's checkout message names the merchant, total and category; the agent pays on a card capped at that.
+    const o = offers[0];
+    const msg = `Checkout: buy ${o.quantity} × ${o.item.name} from ${o.merchant.name} for R${(o.totalCents / 100).toFixed(2)} (merchant category ${o.merchant.merchantCategoryCode}). Use a single-use card limited to that category.`;
+    const buy = await s.chat(msg);
+    expect(names(buy.events)).toEqual(["create_card", "pay_checkout"]);
+    const card = JSON.parse(results(buy.events)[0]!.output);
+    expect(card.singleUse).toBe(true);
+    expect(card.limits.total).toBe(o.totalCents);
+    expect(card.allowedMerchantCategories).toEqual([o.merchant.merchantCategoryCode]);
+    expect(results(buy.events)[1]!.is_error).toBe(false);
+    expect(texts(buy.events)).toMatch(/approved/);
+  });
+
   it("a fuel card cannot buy a TV", async () => {
     const s = await session();
     const { events } = await s.chat("Make me a R1 000 fuel card, then try to buy a TV with it.");

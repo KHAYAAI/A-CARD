@@ -69,7 +69,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .icon-btn{background:transparent;border:1px solid var(--border);color:var(--muted);height:32px;border-radius:9px;padding:0 11px;font-size:12.5px}.icon-btn:hover{color:var(--ink);border-color:var(--muted)}
 
 .work{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
-#chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border-soft)}
+#chat{display:flex;flex-direction:column;min-height:0;min-width:0;border-right:1px solid var(--border-soft)}
 #log{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:12px}
 .msg{max-width:720px;white-space:pre-wrap;font-size:14.5px}
 .user{align-self:flex-end;background:var(--ink);color:var(--bg);padding:10px 15px;border-radius:16px 16px 4px 16px}
@@ -135,6 +135,65 @@ table.grid tr:first-child td{border-top:none}
 #dlg input{width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:11px 13px;font:13px var(--font-mono);margin:10px 0}
 #dlg .b{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 
+
+/* ---- conversational shopping components ---- */
+#chat{background:radial-gradient(circle at 1px 1px,color-mix(in srgb,var(--faint) 22%,transparent) 1px,transparent 0) 0 0/22px 22px,var(--bg)}
+.bot{background:var(--surface-2);border:1px solid var(--border-soft);padding:9px 14px;border-radius:16px 16px 16px 4px;max-width:640px}
+.bot.note{background:none;border:none;padding:0}
+.bot::before{display:none}
+#log>*{flex-shrink:0}
+.timing{align-self:flex-start;font-family:var(--font-mono);font-size:11px;color:var(--faint);margin:-6px 0 0 4px}
+.typing{align-self:flex-start;display:flex;gap:5px;padding:10px 14px}
+.typing i{width:7px;height:7px;border-radius:99px;background:var(--green);opacity:.35;animation:blink 1.1s infinite ease-in-out}
+.typing i:nth-child(2){animation-delay:.18s}.typing i:nth-child(3){animation-delay:.36s}
+@keyframes blink{0%,80%,100%{opacity:.25;transform:scale(.85)}40%{opacity:1;transform:scale(1)}}
+.tray{align-self:stretch;min-width:0;max-width:100%;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:20px;padding:10px;display:flex;gap:10px;overflow-x:auto}
+.pcard{position:relative;flex:0 0 208px;background:var(--surface);border:1px solid var(--border-soft);border-radius:16px;padding:10px 10px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--shadow-chip)}
+.pcard.best{border-color:var(--green)}
+.pcard .best-tag{position:absolute;top:10px;left:10px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.05em;background:var(--green);color:#fff;border-radius:99px;padding:2px 8px;z-index:2}
+.pcard .go{position:absolute;top:10px;right:10px;color:var(--muted);font-size:14px;text-decoration:none;z-index:2}
+.pimg{height:104px;border-radius:12px;display:grid;place-items:center;font-family:var(--font-display);font-size:34px;color:color-mix(in srgb,var(--ink) 70%,transparent);position:relative;overflow:hidden}
+.pimg::after{content:attr(data-cat);position:absolute;bottom:6px;left:8px;font-family:var(--font-mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;opacity:.6}
+.pcard .pt{font-size:13px;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:34px}
+.pcard .pm{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px;color:var(--muted)}
+.price{font-family:var(--font-mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:99px;padding:2px 9px;color:var(--ink);white-space:nowrap}
+.pcard .pf{font-family:var(--font-mono);font-size:10.5px;color:var(--faint)}
+.pcard .add{margin-top:2px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:99px;padding:6px 12px;font-size:12.5px;font-weight:600;align-self:flex-start}
+.pcard .add:hover{border-color:var(--green);color:var(--green-deep)}
+.pcard .add.in{background:var(--green-bg);color:var(--green-deep);border-color:transparent}
+#cartwrap{padding:0 28px}
+.cart{max-width:760px;margin:0 auto 12px;background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+.cart-head{display:flex;align-items:center;gap:10px;padding:12px 16px;width:100%;background:linear-gradient(var(--green-bg),transparent);border:none;text-align:left;color:var(--ink);font-size:14px}
+.cart-head b{font-weight:600}.cart-head .sub{color:var(--muted)}.cart-head .chev{margin-left:auto;color:var(--muted);transition:transform .2s}
+.cart.closed .chev{transform:rotate(180deg)}.cart.closed .cart-body{display:none}
+.cart-body{padding:4px 16px 16px;border-top:1px solid var(--border-soft)}
+.cline{display:grid;grid-template-columns:46px 1fr auto;gap:12px;align-items:center;padding:10px 0}
+.cline .pimg{height:46px;width:46px;font-size:16px;border-radius:10px}.cline .pimg::after{display:none}
+.cline .nm{font-size:13.5px;line-height:1.3}.cline .qty{display:inline-flex;align-items:center;gap:6px;margin-top:4px;font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.cline .qty button{width:22px;height:22px;border-radius:99px;border:1px solid var(--border);background:var(--surface);color:var(--ink);line-height:1}
+.cline .amt{font-family:var(--font-mono);font-size:14px}
+.ctotal{background:var(--green-bg);border:1px solid color-mix(in srgb,var(--green) 22%,transparent);border-radius:14px;padding:14px 16px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ctotal .l{font-weight:600}.ctotal .n{font-size:12px;color:var(--muted);margin-top:2px;max-width:340px}
+.ctotal .v{font-family:var(--font-mono);font-size:26px;font-weight:500;color:var(--green-deep)}
+.cart-actions{display:flex;gap:10px;margin-top:12px;justify-content:flex-end}
+form{padding:6px 28px 12px;border-top:none;background:transparent;display:block}
+.composer{position:relative;max-width:760px;margin:0 auto}
+.composer textarea{width:100%;height:88px;border-radius:18px;padding:14px 64px 14px 16px;font-size:15px;border:1.5px solid var(--border);box-shadow:var(--shadow)}
+.composer textarea:focus{border-color:var(--green);outline:none}
+.composer .send{position:absolute;right:12px;bottom:12px;width:40px;height:40px;border-radius:12px;border:none;background:var(--green);color:#fff;font-size:20px;display:grid;place-items:center}
+.composer .send:disabled{opacity:.55;cursor:default}
+.composer .send.busy{font-size:0}.composer .send.busy::after{content:"";width:16px;height:16px;border-radius:99px;border:2px solid #fff;border-right-color:transparent;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.foot-credit{text-align:center;font-family:var(--font-mono);font-size:11px;color:var(--faint);padding:0 0 10px}
+.foot-credit b{color:var(--muted);font-weight:500}
+#cta{position:fixed;right:24px;bottom:22px;z-index:40}
+#cta .pill-cta{display:flex;align-items:center;gap:10px;background:var(--ink);color:var(--bg);border:none;border-radius:999px;padding:12px 18px;font-weight:600;font-size:14px;box-shadow:var(--shadow)}
+#cta .pill-cta .g{font-family:var(--font-mono);color:var(--mint)}
+#cta .pop{display:none;position:absolute;right:0;bottom:56px;width:360px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:14px}
+#cta.open .pop{display:block}#cta .pop h3{margin:0 0 8px;font-family:var(--font-display);font-weight:400;font-size:19px}
+#cta .pop .cmd{margin-top:8px;font-size:11.5px;padding:10px 70px 10px 12px}
+#cta .pop a{font-size:12.5px;color:var(--green-deep);font-weight:600;text-decoration:none;display:inline-block;margin-top:10px}
+@media (max-width:980px){#cartwrap,form{padding-left:16px;padding-right:16px}#cta{right:14px;bottom:14px}.pcard{flex-basis:180px}}
 #v-other{flex:1;overflow-y:auto;padding:26px 28px 70px;display:none;min-height:0}
 #v-other .wrap{max-width:1120px}
 .page-head{margin-bottom:20px}.page-title{font-family:var(--font-display);font-weight:400;font-size:40px;line-height:1.02}
@@ -162,7 +221,7 @@ table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-t
 .badge-n{margin-left:auto;font-family:var(--font-mono);font-size:11px;background:var(--amber-bg);color:var(--amber);border-radius:999px;padding:1px 7px}
 #mnav{display:none}
 @media (max-width:980px){.cols,.stats3{grid-template-columns:1fr}#mnav{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;border-bottom:1px solid var(--border-soft);background:var(--sidebar)}#mnav button{white-space:nowrap;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:999px;padding:6px 12px;font-size:12.5px}#mnav button.active{color:var(--ink);border-color:var(--green);background:var(--green-bg)}}
-@media (max-width:980px){#app{grid-template-columns:1fr;height:auto;min-height:100vh}.sidebar{display:none}.work{grid-template-columns:1fr}#chat{border-right:0;border-bottom:1px solid var(--border-soft);min-height:70vh}#log,form{padding-left:16px;padding-right:16px}}
+@media (max-width:980px){#app{grid-template-columns:1fr;height:auto;min-height:100vh}.sidebar{display:none}.work{grid-template-columns:minmax(0,1fr)}#chat{border-right:0;border-bottom:1px solid var(--border-soft);min-height:70vh}#log,form{padding-left:16px;padding-right:16px}}
 </style>
 </head>
 <body>
@@ -199,12 +258,15 @@ table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-t
             <div class="chips" id="chips"></div>
           </div>
         </div>
-        <form id="f"><textarea id="q" placeholder="Ask the agent to buy, pay or move money…" maxlength="2000"></textarea><button class="btn btn-green" id="send">Send</button></form>
+        <div id="cartwrap"></div>
+        <form id="f"><div class="composer"><textarea id="q" placeholder="Ask the agent to buy something…" maxlength="2000"></textarea><button class="send" id="send" aria-label="Send" type="submit">↑</button></div></form>
+        <div class="foot-credit">Product by <b>a·card</b> · sandbox, test money</div>
       </section>
       <aside id="side"><div class="empty">Starting your sandbox…</div></aside>
     </div>
   </div>
 </div>
+<div id="cta"><div class="pop"><h3>Build this into your agent</h3><div class="hint">Give your own agent the same cards, limits and approvals.</div><div id="ctacmds"></div><a href="#connect" id="ctamore">More ways to connect →</a></div><button class="pill-cta" id="ctabtn"><span class="g">[*]</span> Build this into your agent <span id="ctachev">⌃</span></button></div>
 <div class="toast" id="toast"></div>
 <dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button class="btn btn-outline btn-sm" id="keyclear">Remove key</button><button class="btn btn-outline btn-sm" id="keycancel">Cancel</button><button class="btn btn-green btn-sm" id="keysave">Use key</button></div></dialog>
 <script>
@@ -217,6 +279,7 @@ try { userKey = sessionStorage.getItem("acard-key") || ""; } catch {}
 const setMode = (live) => { const m = $("#mode"); m.className = "mode" + (live ? " live" : ""); m.textContent = live ? "Live · your Claude key" : "Demo agent · scripted"; $("#keybtn").textContent = userKey ? "Change key" : "Use your Claude key"; };
 setMode(!!userKey);
 const prompts = [
+  "Show me cement offers near Johannesburg.",
   "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers.",
   "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it.",
   "Try to spend R500 at an online casino on a general card.",
@@ -296,8 +359,8 @@ side.addEventListener("click", async (e) => {
 async function ask(text) {
   if (busy || !sid || !text.trim()) return;
   $("#intro")?.remove();
-  busy = true; $("#send").disabled = true; $("#q").value = "";
-  add(esc(text), "user");
+  busy = true; $("#send").disabled = true; $("#send").classList.add("busy"); $("#q").value = "";
+  add(esc(text), "user"); const t0 = performance.now(); ensureTyping();
   const tools = {};
   try {
     const res = await fetch(API + "/sandbox/chat", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ message: text, api_key: userKey || undefined }) });
@@ -311,14 +374,14 @@ async function ask(text) {
         const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
         const ev = /event: (\w+)/.exec(chunk)?.[1]; const data = JSON.parse(/data: (.*)/.exec(chunk)?.[1] ?? "{}");
         if (ev === "mode") setMode(data.mode === "live");
-        if (ev === "text") add(esc(data.text), "bot");
-        if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); tools[data.id] = d; log.scrollTop = log.scrollHeight; }
-        if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } judge(data.name, data.output, data.is_error); refresh(); }
+        if (ev === "text") { add(esc(data.text), "bot"); addTiming(t0); ensureTyping(); }
+        if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); tools[data.id] = d; log.scrollTop = log.scrollHeight; ensureTyping(); }
+        if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } judge(data.name, data.output, data.is_error); if (data.name === "find_offers" && !data.is_error) showOffers(data.output, t0); ensureTyping(); refresh(); }
         if (ev === "error") add(`<span class="err-line">${esc(data.message)}</span>`, "bot");
       }
     }
   } catch (e) { add(`<span class="err-line">Connection lost.</span>`, "bot"); }
-  finally { busy = false; $("#send").disabled = false; refresh(); }
+  finally { busy = false; $("#send").disabled = false; $("#send").classList.remove("busy"); document.querySelector(".typing")?.remove(); refresh(); }
 }
 
 $("#f").onsubmit = (e) => { e.preventDefault(); ask($("#q").value); };
@@ -330,6 +393,65 @@ $("#keysave").onclick = () => { const v = $("#keyin").value.trim(); if (v) { use
 $("#keyclear").onclick = () => { userKey = ""; try { sessionStorage.removeItem("acard-key"); } catch {} setMode(false); dlg.close(); };
 $("#theme").onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark ? "light" : "dark"; };
 $("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
+
+/* ---------------- conversational shopping: offers, cart, timing ---------------- */
+const OFFERS = [];
+let cart = { merchant: null, lines: [], open: true };
+const tint = (str) => { let h = 0; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 38% 90%)`; };
+const initials = (n) => String(n).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+const pimg = (name, cat) => `<div class="pimg" style="background:${tint(name)}" data-cat="${esc(cat ? mcc(cat) : "")}">${esc(initials(name))}</div>`;
+const cartCents = () => cart.lines.reduce((a, l) => a + l.qty * l.unit, 0);
+const elapsed = (t0) => `${((performance.now() - t0) / 1000).toFixed(1)}s`;
+const addTiming = (t0) => { if (performance.now() - t0 < 300) return; const d = document.createElement("div"); d.className = "timing"; d.textContent = elapsed(t0); log.append(d); };
+const ensureTyping = () => { document.querySelector(".typing")?.remove(); if (busy) { const t = document.createElement("div"); t.className = "typing"; t.innerHTML = "<i></i><i></i><i></i>"; log.append(t); log.scrollTop = log.scrollHeight; } };
+
+function showOffers(output, t0) {
+  let r; try { r = JSON.parse(output); } catch { return; }
+  const offers = (r.offers ?? []).slice(0, 8); if (!offers.length) return;
+  const tray = document.createElement("div"); tray.className = "tray";
+  tray.innerHTML = offers.map((o, i) => {
+    const idx = OFFERS.push(o) - 1;
+    return `<div class="pcard${i === 0 ? " best" : ""}">${i === 0 ? '<span class="best-tag">TOP MATCH</span>' : ""}<a class="go" href="#merchants" title="See in Merchants">↗</a>${pimg(o.merchant?.name ?? "Supplier", o.merchant?.merchantCategoryCode)}<div class="pt">${esc(o.item?.name ?? "")}</div><div class="pm"><span>${esc(o.merchant?.name ?? "")}</span><span class="price">${money(o.totalCents, o.currency)}</span></div><div class="pf">${o.distanceKm != null ? Math.round(o.distanceKm) + " km · " : ""}${o.leadTimeDays}d lead · ${esc(o.freshness ?? "")} stock</div><button class="add" data-add="${idx}">+ Add</button></div>`;
+  }).join("");
+  log.append(tray); addTiming(t0); log.scrollTop = log.scrollHeight;
+}
+function addToCart(idx) {
+  const o = OFFERS[idx]; if (!o) return;
+  const m = { id: o.merchant?.id, name: o.merchant?.name, mcc: o.merchant?.merchantCategoryCode ?? "5999", currency: o.currency };
+  if (cart.merchant && cart.merchant.id !== m.id) { cart = { merchant: null, lines: [], open: true }; toast("The cart holds one merchant at a time, so it was replaced."); }
+  cart.merchant = m;
+  const id = o.item?.id ?? o.item?.name;
+  const line = cart.lines.find((l) => l.id === id);
+  if (line) line.qty += 1; else cart.lines.push({ id, name: o.item?.name ?? "Item", unit: o.unitPriceCents, qty: o.quantity || 1, cat: m.mcc });
+  cart.open = true; renderCart();
+}
+function renderCart() {
+  const w = $("#cartwrap");
+  if (!cart.lines.length) { w.innerHTML = ""; return; }
+  const n = cart.lines.length, cur = cart.merchant.currency;
+  w.innerHTML = `<div class="cart${cart.open ? "" : " closed"}"><button class="cart-head" data-cart="toggle"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.7 12.4a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 7H6"/></svg><b>Cart</b><span class="sub">${n} item${n === 1 ? "" : "s"} · ${esc(cart.merchant.name)}</span><span class="chev">⌄</span></button><div class="cart-body">${cart.lines.map((l, i) => `<div class="cline">${pimg(cart.merchant.name, l.cat)}<div><div class="nm">${esc(l.name)}</div><div class="qty"><button data-cart="dec" data-i="${i}" aria-label="Fewer">−</button>${l.qty} ×<button data-cart="inc" data-i="${i}" aria-label="More">+</button><span>${money(l.unit, cur)} each</span></div></div><div class="amt">${money(l.qty * l.unit, cur)}</div></div>`).join("")}<div class="ctotal"><div><div class="l">Estimated total</div><div class="n">Final price is confirmed when the agent pays. The card it creates is capped at this amount.</div></div><div class="v">${money(cartCents(), cur)}</div></div><div class="cart-actions"><button class="btn btn-outline btn-sm" data-cart="clear">Clear</button><button class="btn btn-green btn-sm" data-cart="checkout">Checkout with agent</button></div></div></div>`;
+}
+$("#cartwrap").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-cart]"); if (!b) return; const a = b.dataset.cart, i = Number(b.dataset.i);
+  if (a === "toggle") cart.open = !cart.open;
+  else if (a === "clear") cart = { merchant: null, lines: [], open: true };
+  else if (a === "inc") cart.lines[i].qty += 1;
+  else if (a === "dec") { cart.lines[i].qty -= 1; if (cart.lines[i].qty <= 0) cart.lines.splice(i, 1); if (!cart.lines.length) cart = { merchant: null, lines: [], open: true }; }
+  else if (a === "checkout") {
+    const l = cart.lines.map((x) => `${x.qty} × ${x.name}`).join(" and ");
+    const q = `Checkout: buy ${l} from ${cart.merchant.name} for R${(cartCents() / 100).toFixed(2)} (merchant category ${cart.merchant.mcc}). Use a single-use card limited to that category.`;
+    cart = { merchant: null, lines: [], open: true }; renderCart(); ask(q); return;
+  }
+  renderCart();
+});
+log.addEventListener("click", (e) => { const b = e.target.closest("[data-add]"); if (b) { addToCart(Number(b.dataset.add)); b.classList.add("in"); b.textContent = "✓ In cart"; } });
+
+/* floating "build this into your agent" */
+const CTA = ["/plugin marketplace add khayaai/a-card", "/plugin install acard@a-card", "openclaw plugins install ./plugins/acard"];
+$("#ctacmds").innerHTML = CTA.map((c) => `<div class="cmd">${esc(c)}<button class="cmd-copy" data-copy="${esc(c)}">Copy</button></div>`).join("");
+$("#ctabtn").onclick = () => { $("#cta").classList.toggle("open"); $("#ctachev").textContent = $("#cta").classList.contains("open") ? "⌄" : "⌃"; };
+$("#cta").addEventListener("click", (e) => { const c = e.target.closest("[data-copy]"); if (c) { navigator.clipboard?.writeText(c.dataset.copy).catch(() => {}); toast("Copied."); } if (e.target.id === "ctamore") $("#cta").classList.remove("open"); });
+
 /* ---------------- console screens ---------------- */
 const setNavBadge = () => { const b = document.querySelector('[data-v="approvals"]'); if (!b) return; b.querySelector(".badge-n")?.remove(); if (pendingCount) b.insertAdjacentHTML("beforeend", `<span class="badge-n">${pendingCount}</span>`); };
 const NAVS = [
@@ -366,6 +488,7 @@ function setView(v) {
   $("#mnav").innerHTML = NAVS.map(([k, l]) => `<button class="${k === v ? "active" : ""}" data-v="${k}">${l}</button>`).join("");
   $("#crumb").textContent = (NAVS.find((n) => n[0] === v) || [])[1];
   $("#v-agent").style.display = v === "agent" ? "" : "none";
+  $("#cta").style.display = v === "connect" ? "none" : "";
   $("#v-other").style.display = v === "agent" ? "none" : "block";
   if (v !== "agent") renderView();
 }
@@ -443,8 +566,9 @@ $("#vo").addEventListener("click", async (e) => {
     else if (t.id === "msearch") {
       const q = encodeURIComponent($("#mq").value.trim()); const r = await api(`/v1/merchants/search?q=${q}&lat=-26.2309&lng=28.1772&radius_km=60&quantity=50`);
       const offers = r.offers ?? [];
-      $("#mres").innerHTML = offers.length ? `<table class="grid wide"><thead><tr><th>#</th><th>Supplier</th><th>Item</th><th class="right">Total</th><th>Distance</th><th>Lead</th><th>Stock</th></tr></thead><tbody>${offers.map((o, i) => `<tr class="${i ? "" : "row-hl"}"><td class="mono">${i + 1}</td><td><b>${esc(o.merchant?.name ?? "")}</b><div class="hint">${esc((o.matchReasons ?? []).slice(0, 2).join(" · "))}</div></td><td>${esc(o.item?.name ?? "")}</td><td class="right mono">${money(o.totalCents, o.currency)}</td><td class="mono">${o.distanceKm != null ? o.distanceKm.toFixed(0) + " km" : "—"}</td><td class="mono">${o.leadTimeDays}d</td><td><span class="pill ${o.freshness === "fresh" ? "completed" : "pending"}">${esc(o.freshness ?? "")}</span></td></tr>`).join("")}</tbody></table>${(r.excluded ?? r.exclusions ?? []).length ? `<div class="hint" style="margin-top:10px">${(r.excluded ?? r.exclusions).length} other candidate(s) excluded, with reasons the agent can see.</div>` : ""}` : "No supplier matched that search.";
+      $("#mres").innerHTML = offers.length ? `<table class="grid wide"><thead><tr><th>#</th><th>Supplier</th><th>Item</th><th class="right">Total</th><th>Distance</th><th>Lead</th><th>Stock</th><th></th></tr></thead><tbody>${offers.map((o, i) => `<tr class="${i ? "" : "row-hl"}"><td class="mono">${i + 1}</td><td><b>${esc(o.merchant?.name ?? "")}</b><div class="hint">${esc((o.matchReasons ?? []).slice(0, 2).join(" · "))}</div></td><td>${esc(o.item?.name ?? "")}</td><td class="right mono">${money(o.totalCents, o.currency)}</td><td class="mono">${o.distanceKm != null ? o.distanceKm.toFixed(0) + " km" : "—"}</td><td class="mono">${o.leadTimeDays}d</td><td><span class="pill ${o.freshness === "fresh" ? "completed" : "pending"}">${esc(o.freshness ?? "")}</span></td><td class="right"><button class="btn btn-outline btn-sm" data-addm="${OFFERS.push(o) - 1}">+ Add</button></td></tr>`).join("")}</tbody></table>${(r.excluded ?? r.exclusions ?? []).length ? `<div class="hint" style="margin-top:10px">${(r.excluded ?? r.exclusions).length} other candidate(s) excluded, with reasons the agent can see.</div>` : ""}` : "No supplier matched that search.";
     }
+    else if (t.dataset.addm) { addToCart(Number(t.dataset.addm)); toast("Added to your cart. Check out from the Agent screen."); }
     else if (t.dataset.t) showConnect(t.dataset.t);
     else if (t.dataset.copy) { navigator.clipboard?.writeText(t.dataset.copy).catch(() => {}); toast("Copied."); }
   } catch (err) { toast(err.message); }
