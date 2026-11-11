@@ -34,7 +34,10 @@ import type { Model, ModelMessage, ToolDef } from "./model.js";
 export interface SandboxOptions {
   /** How this process reaches itself (the API, the demo x402 API), e.g. http://127.0.0.1:8080. */
   baseUrl: string;
-  model: Model;
+  /** Demo mode: the scripted agent. Used when a visitor has not brought a key. */
+  mockModel: Model;
+  /** Live mode: build a model from a visitor's own key. The key is used for that request only. */
+  liveModel: (apiKey: string) => Model;
   /** Messages a visitor may send per session. Default 40. */
   maxTurnsPerSession?: number;
   /** Tool calls per message. Default 12. */
@@ -213,7 +216,10 @@ export async function createSandbox(opts: SandboxOptions) {
   app.post("/sandbox/chat", async (c) => {
     const s = get(c);
     if (!s) return c.json({ error: "no session" }, 401);
-    const { message } = (await c.req.json()) as { message?: string };
+    const { message, api_key: apiKey } = (await c.req.json()) as { message?: string; api_key?: string };
+    const live = typeof apiKey === "string" && apiKey.trim().length > 0;
+    if (live && !/^sk-ant-[\w-]{20,}$/.test(apiKey!.trim())) return c.json({ error: "That doesn't look like an Anthropic API key (it starts with sk-ant-)." }, 400);
+    const model = live ? opts.liveModel(apiKey!.trim()) : opts.mockModel;
     if (!message || typeof message !== "string" || message.length > 2000) return c.json({ error: "message must be 1–2000 characters" }, 400);
     if (s.turns >= maxTurns) return c.json({ error: "This sandbox session has used all its messages. Start a new one." }, 429);
     if (s.busy) return c.json({ error: "still working on the last message" }, 409);
@@ -222,9 +228,10 @@ export async function createSandbox(opts: SandboxOptions) {
     s.history.push({ role: "user", content: message });
     return streamSSE(c, async (stream) => {
       const send = (event: string, data: unknown) => stream.writeSSE({ event, data: json(data) });
+      await send("mode", { mode: live ? "live" : "demo" });
       try {
         for (let calls = 0; ; ) {
-          const reply = await opts.model({ system: SYSTEM_PROMPT.replace("{BASE}", base), messages: s.history, tools: s.tools });
+          const reply = await model({ system: SYSTEM_PROMPT.replace("{BASE}", base), messages: s.history, tools: s.tools, base });
           s.history.push({ role: "assistant", content: reply.content });
           for (const block of reply.content) if (block.type === "text" && block.text.trim()) await send("text", { text: block.text });
           const uses = reply.content.filter((b) => b.type === "tool_use");

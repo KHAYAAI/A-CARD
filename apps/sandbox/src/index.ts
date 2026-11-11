@@ -3,25 +3,18 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { createSandbox } from "./app.js";
 import { anthropicModel } from "./model.js";
+import { mockModel } from "./mock.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
-// The model key comes from the environment, or from a file only the host's owner can write
-// (ACARD_SANDBOX_KEY_FILE, default ~/.acard-sandbox-key). Never from code or a request.
-const keyFile = process.env.ACARD_SANDBOX_KEY_FILE ?? `${process.env.HOME ?? "."}/.acard-sandbox-key`;
-const readKey = () => {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
-  try { return readFileSync(keyFile, "utf8").trim() || undefined; } catch { return undefined; }
-};
+// Demo mode (scripted, no key) is the default. A visitor can add their own Anthropic key in the
+// page for a live agent: it travels with their request, is used for that call, and is never stored
+// or logged. This server holds no model key.
 const modelName = process.env.SANDBOX_MODEL ?? "claude-sonnet-5-5";
 
 const sandbox = await createSandbox({
   baseUrl: `http://127.0.0.1:${PORT}`,
-  // Read the key per call, so it can be added or rotated without a restart.
-  model: (req) => {
-    const apiKey = readKey();
-    if (!apiKey) throw new Error("The sandbox agent is offline: no model key is configured on this server yet.");
-    return anthropicModel({ apiKey, model: modelName })(req);
-  },
+  mockModel,
+  liveModel: (apiKey) => anthropicModel({ apiKey, model: modelName }),
   maxTurnsPerSession: Number(process.env.SANDBOX_MAX_TURNS ?? 40),
 });
 

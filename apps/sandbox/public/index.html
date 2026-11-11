@@ -12,6 +12,8 @@ header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:
 header b{letter-spacing:1px}
 .badge{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#1a1300;background:var(--amber);padding:3px 8px;border-radius:99px}
 header .sp{flex:1}
+.pill{font-size:12px;border-radius:99px;padding:3px 10px;border:1px solid var(--line)}.pill.demo{color:var(--mute)}.pill.live{color:#04210f;background:var(--green);border-color:var(--green);font-weight:700}
+#dlg{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:14px;max-width:460px;padding:20px}#dlg::backdrop{background:#000a}#dlg h2{margin:0 0 8px;font-size:18px}#dlg p{color:var(--mute);font-size:13.5px;margin:6px 0}#dlg input{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:13px ui-monospace,Menlo,monospace;margin:8px 0}#dlg .b{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}#dlg button{border-radius:8px;padding:7px 14px;border:1px solid var(--line);background:none;color:var(--ink);cursor:pointer}#dlg button.go{background:var(--green);color:#04210f;border:0;font-weight:700}
 header button{background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;padding:6px 10px;cursor:pointer}
 main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
 #chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
@@ -50,13 +52,13 @@ footer{font-size:12px;color:var(--mute);padding:6px 20px;border-top:1px solid va
 </style>
 </head>
 <body>
-<header><b>A‑CARD</b><span class="badge">Sandbox · test money</span><span class="sp"></span><span id="turns" class="empty"></span><button id="reset">New session</button></header>
+<header><b>A‑CARD</b><span class="badge">Sandbox · test money</span><span class="sp"></span><span id="mode" class="pill demo">Demo agent · scripted</span><span id="turns" class="empty"></span><button id="keybtn">Use your Claude key</button><button id="reset">New session</button></header>
 <main>
   <section id="chat">
     <div id="log">
       <div id="intro">
         <h1>Give an AI agent a budget. Watch the controls hold.</h1>
-        Chat with a Claude agent that has every A‑CARD tool: per‑task virtual cards, merchant rules, human approval, A‑MERCHANT supply search, x402 pay‑per‑call APIs and an on‑chain wallet. You get your own sandbox account with R20 000 and US$500 of test money, and 500 test USDC. Approvals land on the right, and only you can decide them.
+        A scripted demo agent, with no AI model or key needed, makes real calls to the platform on test money. For a live Claude agent that handles anything you ask, add your own Anthropic key (top right). It has every A‑CARD tool: per‑task virtual cards, merchant rules, human approval, A‑MERCHANT supply search, x402 pay‑per‑call APIs and an on‑chain wallet. You get your own sandbox account with R20 000 and US$500 of test money, and 500 test USDC. Approvals land on the right, and only you can decide them.
         <div class="chips" id="chips"></div>
       </div>
     </div>
@@ -64,11 +66,15 @@ footer{font-size:12px;color:var(--mute);padding:6px 20px;border-top:1px solid va
   </section>
   <aside id="side"><div class="empty">Starting your sandbox…</div></aside>
 </main>
+<dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button id="keyclear">Remove key</button><button id="keycancel">Cancel</button><button class="go" id="keysave">Use key</button></div></dialog>
 <footer>Sandbox: simulated card network, mock chain, no real money. Live card issuance launches with our issuing partner. Conversations reset when the server restarts.</footer>
 <script>
 const $ = (s) => document.querySelector(s);
 const log = $("#log"), side = $("#side");
-let sid = null, busy = false;
+let sid = null, busy = false, userKey = "";
+try { userKey = sessionStorage.getItem("acard-key") || ""; } catch {}
+const setMode = (live) => { const m = $("#mode"); m.className = "pill " + (live ? "live" : "demo"); m.textContent = live ? "Live · your Claude key" : "Demo agent · scripted"; $("#keybtn").textContent = userKey ? "Change key" : "Use your Claude key"; };
+setMode(!!userKey);
 const prompts = [
   "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers.",
   "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it.",
@@ -132,7 +138,7 @@ async function ask(text) {
   add(esc(text), "user");
   const tools = {};
   try {
-    const res = await fetch("/sandbox/chat", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ message: text }) });
+    const res = await fetch("/sandbox/chat", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ message: text, api_key: userKey || undefined }) });
     if (!res.ok) { add(`<span class="err-line">${esc((await res.json()).error)}</span>`, "bot"); return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
     for (;;) {
@@ -142,6 +148,7 @@ async function ask(text) {
       while ((i = buf.indexOf("\n\n")) >= 0) {
         const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
         const ev = /event: (\w+)/.exec(chunk)?.[1]; const data = JSON.parse(/data: (.*)/.exec(chunk)?.[1] ?? "{}");
+        if (ev === "mode") setMode(data.mode === "live");
         if (ev === "text") add(esc(data.text), "bot");
         if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); tools[data.id] = d; log.scrollTop = log.scrollHeight; }
         if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } refresh(); }
@@ -154,6 +161,11 @@ async function ask(text) {
 
 $("#f").onsubmit = (e) => { e.preventDefault(); ask($("#q").value); };
 $("#q").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask($("#q").value); } };
+const dlg = $("#dlg");
+$("#keybtn").onclick = () => { $("#keyin").value = ""; dlg.showModal(); };
+$("#keycancel").onclick = () => dlg.close();
+$("#keysave").onclick = () => { const v = $("#keyin").value.trim(); if (v) { userKey = v; try { sessionStorage.setItem("acard-key", v); } catch {} } setMode(!!userKey); dlg.close(); };
+$("#keyclear").onclick = () => { userKey = ""; try { sessionStorage.removeItem("acard-key"); } catch {} setMode(false); dlg.close(); };
 $("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
 start();
 </script>

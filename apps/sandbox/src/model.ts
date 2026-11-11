@@ -13,9 +13,9 @@ export interface ModelMessage {
   role: "user" | "assistant";
   content: string | Block[];
 }
-export type Model = (req: { system: string; messages: ModelMessage[]; tools: ToolDef[] }) => Promise<{ content: Block[] }>;
+export type Model = (req: { system: string; messages: ModelMessage[]; tools: ToolDef[]; base?: string }) => Promise<{ content: Block[] }>;
 
-/** Claude over the Messages API. The key comes from the environment (a Fly secret), never from code. */
+/** Claude over the Messages API, with a key the visitor supplied for this request. Never stored or logged. */
 export function anthropicModel(opts: { apiKey: string; model: string; maxTokens?: number; baseUrl?: string }): Model {
   return async ({ system, messages, tools }) => {
     const res = await fetch(`${opts.baseUrl ?? "https://api.anthropic.com"}/v1/messages`, {

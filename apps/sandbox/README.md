@@ -1,19 +1,21 @@
 # A-CARD public sandbox
 
-A chat page where anyone can try the whole platform on test money: a Claude agent with every A-CARD tool (cards, merchant rules, human approval, A-MERCHANT search, card and wallet x402, the on-chain wallet with transfers and swaps), next to a live panel of the visitor's own sandbox account, where the visitor, never the agent, decides approvals.
+A chat page where anyone can try the whole platform on test money, next to a live panel of the visitor's own sandbox account, where the visitor (never the agent) decides approvals.
 
-- Each visitor gets a fresh account: R20 000 and US$500 in the fiat wallet, 500 test USDC on a mock chain.
-- The real A-CARD API runs in-process (`/v1/*`), with a seeded A-MERCHANT directory and a paid x402 test API at `/demo/weather`.
-- Limits: 40 messages a session, 12 tool calls a message, 6 new sessions per IP per hour.
-- In memory: a restart resets everything. Run one instance.
+**Two modes, and the server needs no secrets for either:**
+
+- **Demo agent (default, free).** A scripted agent: no AI model, no key. It makes the same tool calls Claude would, to the real sandbox platform: supply search and a scoped single-use card, a fuel card refusing a TV, a charge held for approval then retried once, x402 pay-per-call, a 20 USDC transfer held and 90 USDC refused, a USDC to ZARP swap. Anything else gets a short list of what it can do. The page labels it "Demo agent · scripted".
+- **Live Claude (optional, bring your own key).** A visitor adds their own Anthropic key in the page. It travels with each request over HTTPS, is used for that call only, and is never stored or logged by the server (it stays in the visitor's browser tab). The agent then has all 21 tools and handles free-form requests. Usage bills to the visitor's own Anthropic account.
+
+Each visitor gets a fresh account: R20 000 and US$500 in the fiat wallet, 500 test USDC on a mock chain. The real A-CARD API runs in-process (`/v1/*`) with a seeded A-MERCHANT directory and a paid x402 test API at `/demo/weather`.
+
+Limits: 40 messages a session, 12 tool calls a message, 6 new sessions per IP per hour. Everything is in memory: a restart resets it, so run one instance.
 
 ## Run locally
 
 ```bash
-ANTHROPIC_API_KEY=… npm start -w @acard/sandbox     # http://localhost:8080
+npm start -w @acard/sandbox     # http://localhost:8080
 ```
-
-Without a key the page loads and the panel works, and the chat reports that the agent is offline. The key can also be put in `~/.acard-sandbox-key` (owner-only), and is re-read on every call.
 
 ## Deploy to Fly.io
 
@@ -21,11 +23,12 @@ From the repository root:
 
 ```bash
 fly apps create acard-sandbox
-fly secrets set ANTHROPIC_API_KEY=… --app acard-sandbox     # typed into your own terminal
 fly deploy --config apps/sandbox/fly.toml --dockerfile apps/sandbox/Dockerfile .
 fly scale count 1 --app acard-sandbox
 ```
 
+No secrets to set.
+
 ## Tests
 
-`npm test -w @acard/sandbox` drives the whole flow with a scripted stand-in for the model: supply search, a held card charge approved from the panel, wallet x402 against the demo API, a held wallet transfer, the message cap.
+`npm test -w @acard/sandbox` runs every demo scenario against the real platform (no model, no key), and checks that live mode uses a visitor's key for that request only and keeps nothing.
