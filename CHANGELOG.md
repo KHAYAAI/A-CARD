@@ -8,6 +8,15 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: A-MERCHANT self-serve stores and CSV upload
+
+### Added
+- **Open store signup**: `POST /v1/merchant-api/signup`, off unless `ACARD_SELF_SERVE_STORES=true`. A shop applies to list itself and gets a write-scoped `mk_` key once. The store is created `pending_kyb`: agents cannot find it and nobody can order from it until an operator verifies it, so an open door cannot list a fraud. Rate limited per address (5 an hour by default).
+- **CSV catalogue upload**: `PUT /v1/merchant-api/catalog/csv` (and `GET .../catalog/csv-template`). Header row with `sku`, `name`, `price` (rands); optional description, unit, currency, availability, quantity, lead time. Per-row errors (207); good rows still import; idempotent by SKU; up to 500 rows and 2 MB.
+- **Dashboard `/sell`**: a public three-step page (your shop, upload products, what happens next), linked from the console chooser. Mobile first.
+- **Dashboard wallet tabs**: the Wallet screen now has Fiat, Crypto (embedded wallet, link and unlink your own, default) and Pay & routing (compare rails by cost, speed and finality, pay, unified ledger).
+- **Sandbox "Sell on A-CARD"**: a visitor can open a test store from a CSV and have the chat agent buy from it. Verified automatically but allowlisted to the visitor's own session, so no one else sees it.
+
 ## [Unreleased]: self-hosted wallet provider and testnet USDC transfer
 
 ### Added

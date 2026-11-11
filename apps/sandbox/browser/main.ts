@@ -13,7 +13,7 @@ const realFetch = globalThis.fetch.bind(globalThis);
 let handler: (req: Request) => Response | Promise<Response>;
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   const req = new Request(input as any, init);
-  return req.url.startsWith(BASE) ? handler(req) : realFetch(req);
+  return req.url.startsWith(BASE) ? Promise.resolve(handler(req)) : realFetch(req);
 }) as typeof fetch;
 
 (window as any).__ACARD_API__ = BASE;

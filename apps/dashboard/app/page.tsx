@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CryptoWallets, PayRouting } from "./WalletTabs";
 
 const API_URL = process.env.NEXT_PUBLIC_ACARD_API_URL ?? "http://localhost:8787";
 
@@ -157,6 +158,7 @@ export default function Dashboard() {
   // modals & inputs
   const [showCreate, setShowCreate] = useState(false);
   const [showFund, setShowFund] = useState(false);
+  const [walletTab, setWalletTab] = useState<"fiat" | "crypto" | "pay">("fiat");
   const [cardLabel, setCardLabel] = useState("");
   const [cardCcy, setCardCcy] = useState("ZAR");
   const [cardDept, setCardDept] = useState("");
@@ -436,11 +438,12 @@ export default function Dashboard() {
               <span className="product-option-ico"><Icon name="building" size={20} /></span>
               <span>
                 <span className="product-option-name">A-MERCHANT</span>
-                <span className="product-option-desc">Run your shop's catalog and stock — you were invited here.</span>
+                <span className="product-option-desc">Run your shop's catalog and stock. Invited merchants sign in here.</span>
               </span>
               <Icon name="right" size={18} />
             </button>
           </div>
+          <a href="/sell" style={{ display: "block", textAlign: "center", marginTop: 16, fontSize: 14, color: "var(--green)", fontWeight: 600 }}>Own a shop? Open your store and upload your products →</a>
         </div>
       </section>
     );
@@ -788,11 +791,18 @@ export default function Dashboard() {
             <>
               <div className="page-head">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-                  <div><div className="page-title">Wallet</div><div className="page-sub">Prepaid balance, one wallet per currency.</div></div>
-                  {!readOnly && <button className="btn btn-green" onClick={() => setShowFund(true)}><Icon name="plus" /> Add funds</button>}
+                  <div><div className="page-title">Wallet</div><div className="page-sub">Fiat balances, crypto wallets, and how a payment is routed.</div></div>
+                  {!readOnly && walletTab === "fiat" && <button className="btn btn-green" onClick={() => setShowFund(true)}><Icon name="plus" /> Add funds</button>}
                 </div>
               </div>
-              <div className="panel panel-pad">
+              <div className="seg" role="tablist" style={{ marginBottom: 18, maxWidth: 420 }}>
+                {([["fiat", "Fiat"], ["crypto", "Crypto"], ["pay", "Pay & routing"]] as const).map(([k, l]) => (
+                  <button key={k} role="tab" aria-selected={walletTab === k} className={walletTab === k ? "sel" : ""} onClick={() => setWalletTab(k)}>{l}</button>
+                ))}
+              </div>
+              {walletTab === "crypto" && <CryptoWallets call={call} flash={flash} readOnly={readOnly} />}
+              {walletTab === "pay" && <PayRouting call={call} flash={flash} readOnly={readOnly} />}
+              {walletTab === "fiat" && <div className="panel panel-pad">
                 <div className="wallets">
                   {(wallets.length ? wallets : [{ available: 0, posted: 0, held: 0, currency: primaryCcy }]).map((w) => (
                     <div className="wallet" key={w.currency}>
@@ -802,7 +812,7 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
             </>
           )}
 

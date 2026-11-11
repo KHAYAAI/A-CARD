@@ -2220,6 +2220,84 @@ Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
 
 A merchant's POS or ERP, authenticated with an mk_live_ machine key.
 
+### `POST /v1/merchant-api/signup`
+
+**Apply to list your store (open signup)**
+
+Only mounted when the operator enables self-serve stores. Creates the store as `pending_kyb`: agents cannot discover it and no one can order from it until A-CARD verifies it. Returns a write-scoped `mk_` key once. Rate limited per address.
+
+Mounted when the A-MERCHANT directory is configured.
+
+- **Auth:** none
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `trading_name` | string |  |  |
+| `merchant_category_code` | string | yes |  |
+| `address` | object | yes |  |
+| `address.addressLine` | string | yes |  |
+| `address.city` | string | yes |  |
+| `address.province` | string | yes |  |
+| `address.country` | string |  |  |
+| `address.lat` | number | yes |  |
+| `address.lng` | number | yes |  |
+| `service_radius_km` | number |  |  |
+| `currency` | `ZAR` \| `USD` \| `NGN` \| `KES` |  |  |
+| `kyb` | object | yes |  |
+| `kyb.registration_number` | string | yes |  |
+| `kyb.vat_number` | string |  |  |
+| `kyb.contact_email` | string | yes |  |
+| `kyb.contact_phone` | string |  |  |
+| `items` | object[] |  |  |
+| `items[].sku` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].description` | string |  |  |
+| `items[].unit` | string |  |  |
+| `items[].unit_price_cents` | integer | yes |  |
+| `items[].currency` | `ZAR` \| `USD` \| `NGN` \| `KES` |  |  |
+| `items[].availability` | `in_stock` \| `low_stock` \| `out_of_stock` \| `made_to_order` |  |  |
+| `items[].quantity_available` | integer |  |  |
+| `items[].lead_time_days` | integer |  |  |
+
+**Response `201`**
+
+`object`
+
+Errors: `400` — see [errors.md](../reference/errors.md).
+
+### `PUT /v1/merchant-api/catalog/csv`
+
+**Upload your catalogue as a CSV**
+
+Send the file as a `text/csv` body (header row required: sku, name, price; optional description, unit, currency, availability, quantity, lead_time_days). Prices are in major units. Returns 207 with per-row errors when some rows are bad; the good rows are still imported. Up to 500 rows and 2 MB.
+
+Requires a `read_write` merchant key; a `read_only` key receives `forbidden`.
+
+Mounted when the A-MERCHANT directory is configured.
+
+- **Auth:** `merchantKey`
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/merchant-api/catalog/csv-template`
+
+**Download a CSV template**
+
+Mounted when the A-MERCHANT directory is configured.
+
+- **Auth:** none
+
+**Response `200`**
+
+`object`
+
 ### `GET /v1/merchant-api/me`
 
 **Identity, catalogue health and pending sales**

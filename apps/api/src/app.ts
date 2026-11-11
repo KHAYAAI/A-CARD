@@ -39,6 +39,7 @@ import { RailAmbiguousOutcomeError, type RailAdapter } from "./rails/index.js";
 import type { AfpLedgerPort } from "./afp/index.js";
 import { usdToAtomic, X402RequestError, type X402Outcome, type X402Payer, type X402Tab } from "./x402/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
+import { parseCatalogCsv, CSV_TEMPLATE } from "./merchant/csv.js";
 import { deliverMerchantWebhook, type MerchantWebhookEvent } from "./merchant/webhooks.js";
 import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
 import {
@@ -77,6 +78,7 @@ import {
   operatingHoursSchema,
   merchantApiKeySchema,
   catalogSyncSchema,
+  storeSignupSchema,
   bulkRestateSchema,
   blocklistEntrySchema,
   monitorTransactionSchema,
@@ -161,6 +163,13 @@ export interface AppConfig {
    * merchant user into without a directory record for them.
    */
   merchantAuth?: MerchantAuthPort;
+  /**
+   * Open store signup (`POST /v1/merchant-api/signup`): a shop applies to list
+   * itself and gets a write-scoped merchant key at once. Off unless set. The
+   * store is created `pending_kyb`: agents cannot find it and nobody can order
+   * from it until a human verifies it, so an open door never lists a fraud.
+   */
+  selfServeStores?: { maxPerHourPerIp?: number };
   /**
    * WorkOS AuthKit for the merchant portal (optional — omit and portal
    * invites can still be generated via the operator console, but the login
@@ -1902,6 +1911,86 @@ export function createApp(config: AppConfig) {
       }
       return next();
     };
+
+    // ---- Self-serve store signup + CSV upload ---------------------------------------
+    if (config.selfServeStores) {
+      const limit = config.selfServeStores.maxPerHourPerIp ?? 5;
+      const hits = new Map<string, number[]>();
+      app.post("/v1/merchant-api/signup", async (c) => {
+        const ip = (c.req.header("x-forwarded-for") ?? "").split(",")[0]!.trim() || "unknown";
+        const now = Date.now();
+        const recent = (hits.get(ip) ?? []).filter((t) => now - t < 3_600_000);
+        if (recent.length >= limit) {
+          return c.json({ error: { code: "rate_limited", message: "too many store applications from this address; try again later" } }, 429);
+        }
+        hits.set(ip, [...recent, now]);
+        const body = storeSignupSchema.parse(await c.req.json());
+        const merchant = await merchants.register({
+          name: body.name,
+          tradingName: body.trading_name,
+          merchantCategoryCode: body.merchant_category_code,
+          address: body.address,
+          serviceRadiusKm: body.service_radius_km,
+          currency: body.currency,
+          agentAccess: "open",
+          kyb: {
+            registrationNumber: body.kyb.registration_number,
+            vatNumber: body.kyb.vat_number,
+            contactEmail: body.kyb.contact_email,
+            contactPhone: body.kyb.contact_phone,
+          },
+        });
+        const { apiKey, secret } = await merchantAuth.createApiKey(merchant.id, { name: "Store signup key", scope: "read_write", createdBy: body.kyb.contact_email });
+        let uploaded = 0;
+        for (const row of body.items ?? []) {
+          try {
+            await merchants.upsertItem(merchant.id, {
+              sku: row.sku, name: row.name, description: row.description, unit: row.unit, unitPriceCents: row.unit_price_cents,
+              currency: row.currency, availability: row.availability, quantityAvailable: row.quantity_available, leadTimeDays: row.lead_time_days,
+            });
+            uploaded++;
+          } catch { /* the rest still go in; the owner sees the real count in catalog health */ }
+        }
+        // The secret is shown once; there is no endpoint that returns it again.
+        return c.json({
+          merchant: publicMerchant(merchant),
+          api_key: apiKey,
+          secret,
+          items_uploaded: uploaded,
+          status: merchant.status,
+          next: "Your store is under review. Until A-CARD verifies it, agents cannot find it and no one can order from it. You can keep uploading your catalogue with this key.",
+        }, 201);
+      });
+    }
+
+    /**
+     * CSV catalogue upload: the on-ramp for a shop with a spreadsheet and no
+     * developer. Send the file as the request body (text/csv). Per-row results,
+     * like the JSON sync: bad rows are reported, good rows go in.
+     */
+    app.put("/v1/merchant-api/catalog/csv", merchantApi, requireWrite, async (c) => {
+      const ctx = c.get("merchantApi")!;
+      const text = await c.req.text();
+      if (text.length > 2_000_000) return c.json({ error: { code: "too_large", message: "the file is over 2 MB" } }, 413);
+      const parsed = parseCatalogCsv(text);
+      let synced = 0;
+      const errors = [...parsed.errors];
+      for (const row of parsed.items) {
+        try {
+          await merchants.upsertItem(ctx.merchantId, {
+            sku: row.sku, name: row.name, description: row.description, unit: row.unit, unitPriceCents: row.unit_price_cents,
+            currency: row.currency, availability: row.availability, quantityAvailable: row.quantity_available, leadTimeDays: row.lead_time_days,
+          });
+          synced++;
+        } catch (error) {
+          errors.push({ row: row.row, sku: row.sku, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return c.json({ synced, failed: errors.length, errors }, errors.length === 0 ? 200 : 207);
+    });
+
+    /** The CSV format, so a shop can download a template and fill it in. */
+    app.get("/v1/merchant-api/catalog/csv-template", (c) => c.body(CSV_TEMPLATE, 200, { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="a-card-catalogue-template.csv"' }));
 
     /** Who am I — the first call any integration makes. */
     app.get("/v1/merchant-api/me", merchantApi, async (c) => {

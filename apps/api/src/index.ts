@@ -46,6 +46,7 @@ const afpX402AllowPrivate = process.env.ACARD_AFP_X402_ALLOW_PRIVATE_NETWORKS ==
 const afpStablecoinFromAddress = process.env.ACARD_AFP_STABLECOIN_FROM_ADDRESS;
 const walletProviderUrl = process.env.ACARD_WALLET_PROVIDER_URL;
 const walletProviderKey = process.env.ACARD_WALLET_PROVIDER_KEY;
+const selfServeStores = process.env.ACARD_SELF_SERVE_STORES === "true";
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
 const complianceMonitor = process.env.ACARD_COMPLIANCE_MONITOR_TRANSACTIONS === "true";
@@ -342,6 +343,7 @@ const app = createApp({
   onMutation,
   merchants,
   merchantAuth,
+  selfServeStores: selfServeStores ? {} : undefined,
   afp,
   // Auto-provisions a linked embedded wallet at signup, from the provider.
   embeddedWallet: walletProviderUrl && walletProviderKey ? { baseUrl: walletProviderUrl, apiKey: walletProviderKey, defaultChain: "ethereum" } : undefined,

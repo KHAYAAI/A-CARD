@@ -632,7 +632,7 @@ $("#cta").addEventListener("click", (e) => { const c = e.target.closest("[data-c
 const setNavBadge = () => { const b = document.querySelector('[data-v="approvals"]'); if (!b) return; b.querySelector(".badge-n")?.remove(); if (pendingCount) b.insertAdjacentHTML("beforeend", `<span class="badge-n">${pendingCount}</span>`); };
 const NAVS = [
   ["agent", "Agent"], ["cards", "Manage cards"], ["spending", "Track spending"], ["wallet", "Wallet"],
-  ["approvals", "Approvals"], ["policies", "Policies"], ["audit", "Audit log"], ["merchants", "Merchants"], ["connect", "Connect agents"],
+  ["approvals", "Approvals"], ["policies", "Policies"], ["audit", "Audit log"], ["merchants", "Merchants"], ["sell", "Sell on A-CARD"], ["connect", "Connect agents"],
 ];
 const MCC = { "5411": "Groceries", "5734": "Software", "4816": "Cloud", "7311": "Advertising", "4511": "Airlines", "5812": "Restaurants", "7995": "Gambling", "6051": "Crypto", "5211": "Building supplies", "5251": "Hardware", "5541": "Fuel", "5542": "Fuel", "5732": "Electronics", "5200": "Home supplies", "7538": "Auto service", "7372": "Software", "x402": "x402 APIs", "5912": "Pharmacy", "5943": "Office supplies", "5699": "Workwear", "5169": "Cleaning supplies", "5533": "Auto parts", "7399": "Fees & services" };
 const mcc = (c) => (MCC[c] ? `${MCC[c]} (${c})` : c);
@@ -722,6 +722,19 @@ const VIEWS = {
     const rows = merchants.map((m) => `<tr><td><b>${esc(m.name)}</b></td><td>${esc(mcc(m.merchantCategoryCode))}</td><td>${esc(m.address?.city ?? "")}</td><td class="mono">${m.serviceRadiusKm} km</td><td><span class="pill ${m.verified ? "completed" : "pending"}">${m.verified ? "verified" : esc(m.status)}</span></td></tr>`).join("");
     return head("Merchants", "A-MERCHANT: verified suppliers agents can find and buy from. Unverified merchants never appear in agent search.") + `<div class="panel" style="margin-bottom:18px"><h2>Search supply</h2><div class="filters"><input id="mq" value="cement" placeholder="What does the agent need?"><button class="btn btn-green" id="msearch">Search near Johannesburg</button></div><div class="ctabs" style="margin-bottom:12px">${["bread", "milk", "paper", "monitor", "hard hat", "gloves", "bleach", "engine oil", "bricks", "paint", "diesel", "pain"].map((w) => `<button class="ctab" data-q="${w}">${w}</button>`).join("")}</div><div id="mres" class="hint">Search runs against the same ranking an agent sees: price, distance, lead time and how fresh the stock count is.</div></div><div class="panel"><h2>Directory</h2><table class="grid wide"><thead><tr><th>Merchant</th><th>Category</th><th>City</th><th>Service radius</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   },
+  async sell() {
+    const r = await fetch(API + "/sandbox/store", { headers: { "x-sandbox-session": sid } }).then((x) => x.json());
+    const mine = (r.stores ?? []).map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.city)}</td><td class="mono">${x.items} products</td><td><span class="pill completed">live in your sandbox</span></td><td class="right"><button class="btn btn-outline btn-sm" data-sellask="Buy 1 ${esc(x.first)} from ${esc(x.name)}">Ask the agent to buy</button></td></tr>`).join("");
+    return head("Sell on A-CARD", "A-MERCHANT: list your own shop so buyers' agents can find it, compare it and pay it.") +
+      `<div class="panel" style="margin-bottom:18px"><h2>How it works</h2><div class="hint" style="font-size:14px;line-height:1.6">1. Tell us about the shop. 2. Upload your products as a spreadsheet (CSV). 3. A-CARD verifies the business (KYB). 4. Once verified, agents can search your stock and buy from you, paid by card, wallet or stablecoin.<br><b>In the real platform</b> a new store stays hidden until a person verifies it. <b>In this sandbox</b> it is verified for you, but only <i>your</i> chat can see it, so nobody else's session ever sees what you upload.</div></div>` +
+      (mine ? `<div class="panel" style="margin-bottom:18px"><h2>Your test stores</h2><table class="grid wide"><tbody>${mine}</tbody></table></div>` : "") +
+      `<div class="panel"><h2>${mine ? "Add another store" : "Open your store"}</h2>
+        <div class="filters"><input id="st-name" placeholder="Store name, e.g. Corner Dairy" maxlength="80"><input id="st-city" placeholder="City" value="Johannesburg" maxlength="40"></div>
+        <div class="filters"><select id="st-cat"><option value="5411">Groceries (5411)</option><option value="5211">Building supplies (5211)</option><option value="5734">Software (5734)</option><option value="5812">Restaurants (5812)</option><option value="5999">Other retail (5999)</option></select><input type="file" id="st-file" accept=".csv,text/csv"><button class="btn btn-outline" id="st-tpl">Download template</button></div>
+        <div class="hint" style="margin-bottom:8px">No file handy? Leave it empty and we use the example below. Columns: <span class="mono">sku, name, price</span> (in rands) and optionally description, unit, availability, quantity, lead_time_days.</div>
+        <textarea id="st-csv" spellcheck="false" style="width:100%;min-height:130px;padding:12px;border-radius:11px;background:var(--surface-2);border:1px solid var(--border);color:var(--ink);font:12.5px ui-monospace,Menlo,monospace">${esc(r.template ?? "")}</textarea>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn btn-green" id="st-go">Upload and open store</button><span class="hint" id="st-out"></span></div></div>`;
+  },
   async connect() {
     return head("Connect agents", "Use this platform from your own agent. The sandbox runs in this page, so these connect to a real A-CARD deployment.") + `<div class="panel"><div class="ctabs" id="ct">${["Claude Code", "Codex", "OpenClaw", "MCP server"].map((t, i) => `<button class="ctab${i ? "" : " sel"}" data-t="${t}">${t}</button>`).join("")}</div><div id="cc"></div><div class="hint" style="margin-top:14px">Get an agent API key (<span class="mono">ak_…</span>) from the A-CARD console, or run <span class="mono">acard signup</span> against the sandbox API. Add <span class="mono">ACARD_ENABLE_WALLET=true</span> to the environment to give the agent the sandbox wallet tools. Never paste a key into a chat.</div></div>`;
   },
@@ -742,6 +755,15 @@ $("#vo").addEventListener("click", async (e) => {
     else if (t.dataset.ap) { await fetch(API + "/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: t.dataset.k, id: t.dataset.id, decision: t.dataset.ap }) }); toast(t.dataset.ap === "approve" ? "Approved. The agent can retry once." : "Declined."); renderView(); refresh(); }
     else if (t.id === "psave") { const blocked = $("#pb").value.split(",").map((x) => x.trim()).filter(Boolean); const th = parseInt($("#pt").value, 10); await api("/v1/policy", { method: "PUT", body: JSON.stringify({ blocked_merchant_categories: blocked, approval_threshold: th > 0 ? th : undefined }) }); toast("Policy saved. It applies to the next charge."); renderView(); }
     else if (t.id === "ptry") { e.preventDefault(); location.hash = "agent"; $("#q").value = "Try to spend R500 at an online casino on a general card."; $("#q").focus(); }
+    else if (t.id === "st-tpl") { const blob = new Blob([$("#st-csv").value], { type: "text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "a-card-catalogue-template.csv"; a.click(); }
+    else if (t.id === "st-go") {
+      t.disabled = true; $("#st-out").textContent = "Uploading…";
+      const res = await fetch(API + "/sandbox/store", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ name: $("#st-name").value, city: $("#st-city").value, category: $("#st-cat").value, csv: $("#st-csv").value }) });
+      const j = await res.json().catch(() => ({})); t.disabled = false;
+      if (!res.ok) { $("#st-out").textContent = j.error ?? "Upload failed."; if (j.errors?.length) $("#st-out").textContent += " " + j.errors.slice(0, 3).map((e) => `row ${e.row}: ${e.error}`).join("; "); return; }
+      toast(`${j.store.name} is open with ${j.store.items} products.` + (j.errors.length ? ` ${j.errors.length} rows skipped.` : "")); renderView(); refresh();
+    }
+    else if (t.dataset.sellask) { location.hash = "agent"; $("#q").value = t.dataset.sellask; $("#q").focus(); }
     else if (t.id === "msearch") {
       const q = encodeURIComponent($("#mq").value.trim()); const r = await api(`/v1/merchants/search?q=${q}&lat=-26.2309&lng=28.1772&radius_km=60&quantity=50`);
       const offers = r.offers ?? [];

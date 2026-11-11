@@ -391,6 +391,23 @@ below) and `DASHBOARD_URL` to enable the portal; without them, merchant
 registration and KYB still work, but a portal invite has nowhere to send the
 merchant, and `/v1/merchant-auth/*` / `/v1/merchant-portal/*` stay unmounted.
 
+### Self-serve stores and CSV upload
+
+A shop can list itself without an operator. Set `ACARD_SELF_SERVE_STORES=true`
+and the dashboard's `/sell` page (or `POST /v1/merchant-api/signup`) takes the
+shop's details and returns a write-scoped `mk_` key, shown once. The store is
+created `pending_kyb`: **agents cannot find it and nobody can order from it
+until an operator verifies the business**, so an open door cannot list a
+fraud. Signup is rate limited per address.
+
+Products go in as a spreadsheet saved as CSV: `PUT /v1/merchant-api/catalog/csv`
+with `sku`, `name` and `price` (in rands) and optional description, unit,
+currency, availability, quantity and lead time. Bad rows are reported by row
+number and the good rows still import; uploading again updates by SKU. A
+template is at `GET /v1/merchant-api/catalog/csv-template`. The sandbox has the
+same flow ("Sell on A-CARD"), verified automatically but visible only to the
+visitor's own session.
+
 ## Compliance — KYC, KYB and AML
 
 Verification runs through **Didit**: document scan or a South African ID

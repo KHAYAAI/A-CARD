@@ -14,6 +14,7 @@ import { AcardClient } from "../../mcp/src/client.js";
 import { createMcpServer } from "../../mcp/src/server.js";
 import { seedDemoWorld } from "../../../examples/seed-demo-world.js";
 import type { Model, ModelMessage, ToolDef } from "./model.js";
+import { parseCatalogCsv, CSV_TEMPLATE } from "../../api/src/merchant/csv.js";
 import { seedCatalogue } from "./catalogue.js";
 import { createCardRail, createX402Rail, STABLECOIN_PROFILE, type RailAdapter } from "../../api/src/rails/index.js";
 import { createHash } from "node:crypto";
@@ -65,6 +66,7 @@ interface Session {
   mcp: Client;
   tools: ToolDef[];
   history: ModelMessage[];
+  stores: { id: string; name: string; city: string; items: number; first: string }[];
   turns: number;
   busy: boolean;
   created: number;
@@ -266,7 +268,7 @@ export async function createSandbox(opts: SandboxOptions) {
     const mcp = new Client({ name: "acard-sandbox", version: "0.1.0" });
     await mcp.connect(b);
     const tools = (await mcp.listTools()).tools.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: t.inputSchema as Record<string, unknown> }));
-    const s: Session = { id: randomUUID(), sessionToken, holderId, events, agentKey, wallet, approvals, mcp, tools, history: [], turns: 0, busy: false, created: Date.now() };
+    const s: Session = { id: randomUUID(), sessionToken, holderId, events, agentKey, wallet, approvals, mcp, tools, history: [], stores: [], turns: 0, busy: false, created: Date.now() };
     sessions.set(s.id, s);
     return s;
   }
@@ -339,6 +341,50 @@ export async function createSandbox(opts: SandboxOptions) {
     const key = `${w.chain}:${w.address}`;
     providerBalances.set(key, (providerBalances.get(key) ?? 0n) + BigInt(Math.round(usdc * 1e6)));
     return c.json({ ok: true });
+  });
+
+  // A-MERCHANT, the supply side: a visitor lists their own shop. In the real platform a new store is
+  // "pending_kyb" and invisible until A-CARD verifies it. Here the sandbox verifies it for you, but
+  // allowlists it to your own agent, so nobody else's chat ever sees (or buys from) what you upload.
+  app.get("/sandbox/store", (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    return c.json({ stores: s.stores, template: CSV_TEMPLATE });
+  });
+  app.post("/sandbox/store", async (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    if (s.stores.length >= 2) return c.json({ error: "The sandbox allows two test stores per session." }, 400);
+    const b = (await c.req.json().catch(() => ({}))) as { name?: string; city?: string; category?: string; csv?: string };
+    const name = (b.name ?? "").trim().slice(0, 80);
+    if (!name) return c.json({ error: "Give your store a name." }, 400);
+    if ((b.csv ?? "").length > 200_000) return c.json({ error: "Keep the test file under 200 KB." }, 413);
+    const parsed = parseCatalogCsv(b.csv ?? "");
+    if (!parsed.items.length) return c.json({ error: parsed.errors[0]?.error ?? "No products found in that file.", errors: parsed.errors }, 400);
+    const rows = parsed.items.slice(0, 100);
+    const m = platform.merchants.register({
+      name,
+      merchantCategoryCode: /^\d{4}$/.test(b.category ?? "") ? (b.category as string) : "5411",
+      address: { lat: -26.2041, lng: 28.0473, addressLine: "1 Sandbox Street", city: (b.city ?? "Johannesburg").trim().slice(0, 40) || "Johannesburg", province: "Gauteng", country: "ZA" },
+      serviceRadiusKm: 80,
+      currency: "ZAR",
+      agentAccess: "allowlist",
+      allowedAccountHolderIds: [s.holderId],
+      kyb: { registrationNumber: "SANDBOX", contactEmail: "sandbox@a-card.invalid" },
+    });
+    platform.merchants.setStatus(m.id, "verified", "sandbox-auto", "Sandbox: verified automatically, visible only to the session that created it");
+    let items = 0;
+    const errors = [...parsed.errors];
+    for (const r of rows) {
+      try {
+        platform.merchants.upsertItem(m.id, { sku: r.sku, name: r.name, description: r.description, unit: r.unit, unitPriceCents: r.unit_price_cents, currency: "ZAR", availability: r.availability ?? "in_stock", quantityAvailable: r.quantity_available ?? 100, leadTimeDays: r.lead_time_days ?? 1 });
+        items++;
+      } catch (e) {
+        errors.push({ row: r.row, sku: r.sku, error: (e as Error).message });
+      }
+    }
+    s.stores.push({ id: m.id, name, city: m.address.city, items, first: rows[0]!.name });
+    return c.json({ store: s.stores[s.stores.length - 1], errors, sample: rows.slice(0, 3).map((r) => r.name) });
   });
 
   // The agent wallet: what the agent can do on chain, its limits and how much of them is used, and what it has done.

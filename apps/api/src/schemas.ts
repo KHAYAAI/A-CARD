@@ -160,6 +160,29 @@ export const registerMerchantSchema = z.object({
   }),
 });
 
+/** Public store signup: a shop applies to list itself. It lands in pending_kyb, invisible to agents until a human verifies it. */
+export const storeSignupSchema = z.object({
+  name: z.string().min(1).max(120),
+  trading_name: z.string().max(120).optional(),
+  merchant_category_code: z.string().min(3).max(8),
+  address: addressSchema,
+  service_radius_km: z.number().min(0).max(5000).optional(),
+  currency: currencySchema.optional(),
+  kyb: z.object({
+    registration_number: z.string().min(1).max(60),
+    vat_number: z.string().max(40).optional(),
+    contact_email: z.string().email(),
+    contact_phone: z.string().max(40).optional(),
+  }),
+  /** Optional first catalogue, same shape as the bulk sync. */
+  items: z.array(z.object({
+    sku: z.string().min(1), name: z.string().min(1), description: z.string().optional(), unit: z.string().optional(),
+    unit_price_cents: z.number().int().nonnegative(), currency: currencySchema.optional(),
+    availability: z.enum(["in_stock", "low_stock", "out_of_stock", "made_to_order"]).optional(),
+    quantity_available: z.number().int().nonnegative().optional(), lead_time_days: z.number().int().nonnegative().optional(),
+  })).max(500).optional(),
+});
+
 export const kybDecisionSchema = z.object({
   status: z.enum(["pending_kyb", "verified", "suspended"]),
   note: z.string().optional(),

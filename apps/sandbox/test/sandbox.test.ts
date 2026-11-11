@@ -546,3 +546,25 @@ describe("limits", () => {
     expect((await fetch(`${base}/sandbox/state`)).status).toBe(401);
   });
 });
+
+describe("sell on A-CARD: a visitor lists their own store", () => {
+  const csv = "sku,name,price,quantity\nZ-1,Zebra Biltong 100g,39.50,12\nZ-2,Bad Row,abc,1\n";
+  const post = (sid: string, body: unknown) => fetch(`${base}/sandbox/store`, { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const seen = (sid: string) => fetch(`${base}/sandbox/api/v1/merchants/search?q=biltong&lat=-26.2&lng=28.04&radius_km=60`, { headers: { "x-sandbox-session": sid } }).then((r) => r.text());
+
+  it("opens a store from a CSV, reports bad rows, and keeps it private to the session", async () => {
+    const a = await session();
+    const b = await session();
+    expect((await post(a.sid, { name: "", csv })).status).toBe(400);
+    expect((await post(a.sid, { name: "Biltong Bros", csv: "a,b\n1,2" })).status).toBe(400);
+    const ok = await post(a.sid, { name: "Biltong Bros", csv });
+    expect(ok.status).toBe(200);
+    const out = (await ok.json()) as any;
+    expect(out.store).toMatchObject({ name: "Biltong Bros", items: 1, first: "Zebra Biltong 100g" });
+    expect(out.errors[0]).toMatchObject({ row: 3 });
+    expect(await seen(a.sid)).toContain("Biltong Bros");
+    expect(await seen(b.sid)).not.toContain("Biltong Bros");
+    expect((await post(a.sid, { name: "Second", csv })).status).toBe(200);
+    expect((await post(a.sid, { name: "Third", csv })).status).toBe(400);
+  });
+});
