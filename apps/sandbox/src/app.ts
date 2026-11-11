@@ -90,11 +90,19 @@ export async function createSandbox(opts: SandboxOptions) {
   const platform = new Platform();
   const service = new InMemoryPlatformService(platform);
   const ledger = new InMemoryAfpLedger(new AfpLedger());
+  // Agents may pay x402 APIs, but in the sandbox the only API they can reach is its own demo one.
+  // (Otherwise "any request" would let a visitor point the server at internal addresses.)
+  const sandboxFetch: typeof fetch = (input, init) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : (input as Request).url);
+    if (url.origin !== new URL(base).origin) return Promise.reject(new Error("In the sandbox, agents can only pay the built-in demo API"));
+    return fetch(input, init);
+  };
   const x402 = createX402Payer(service, ledger, {
     signer: SANDBOX_SIGNER,
     payerAddress: "0x2222222222222222222222222222222222222222",
     networks: ["eip155:84532"],
     allowPrivateNetworks: true, // the demo API is this same process
+    fetchImpl: sandboxFetch,
   });
   const acard = createApp({
     platform: service,
@@ -156,7 +164,7 @@ export async function createSandbox(opts: SandboxOptions) {
     const issued = await call("POST", "/v1/keys", sessionToken, { name: "sandbox agent" });
     const agentKey = (issued.api_key ?? issued.secret) as string;
     const approvals = new MemoryApprovalStore();
-    const wallet = await devWallet({ approvals, sink: () => {}, x402AllowPrivateNetworks: true });
+    const wallet = await devWallet({ approvals, sink: () => {}, x402AllowPrivateNetworks: true, fetchImpl: sandboxFetch });
     const server = createMcpServer(new AcardClient({ baseUrl: base, apiKey: agentKey }), { wallet });
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);

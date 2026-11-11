@@ -383,7 +383,7 @@ async function ask(text) {
         const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
         const ev = /event: (\w+)/.exec(chunk)?.[1]; const data = JSON.parse(/data: (.*)/.exec(chunk)?.[1] ?? "{}");
         if (ev === "mode") setMode(data.mode === "live");
-        if (ev === "text") { add(esc(data.text), "bot"); addTiming(t0); ensureTyping(); }
+        if (ev === "text") { add(esc(data.text), "bot"); if (/Claude key/.test(data.text)) { const b = document.createElement("button"); b.className = "btn btn-outline btn-sm"; b.style.alignSelf = "flex-start"; b.textContent = "Use your Claude key"; b.onclick = () => $("#keybtn").click(); log.append(b); } addTiming(t0); ensureTyping(); }
         if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); tools[data.id] = d; log.scrollTop = log.scrollHeight; ensureTyping(); }
         if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } judge(data.name, data.output, data.is_error); if (data.name === "find_offers" && !data.is_error) showOffers(data.output, t0); ensureTyping(); refresh(); }
         if (ev === "error") add(`<span class="err-line">${esc(data.message)}</span>`, "bot");

@@ -47,6 +47,9 @@ async function session() {
 }
 const names = (events: any[]) => events.filter((e) => e.event === "tool_call").map((e) => e.data.name);
 const results = (events: any[]) => events.filter((e) => e.event === "tool_result").map((e) => e.data);
+/** The offers from the search that found something (the agent may try a few phrasings). */
+const offersOf = (events: any[]): any[] => { for (const r of results(events)) { try { const o = JSON.parse(r.output); if (o.offers?.length) return o.offers; } catch {} } return []; };
+const noFinds = (events: any[]) => names(events).filter((n) => n !== "find_offers");
 const texts = (events: any[]) => events.filter((e) => e.event === "text").map((e) => e.data.text).join("\n");
 
 describe("demo mode (no model, no key)", () => {
@@ -99,18 +102,18 @@ describe("demo mode (no model, no key)", () => {
     ];
     for (const [q, name] of asks) {
       const { events } = await s.chat(q);
-      const offers = JSON.parse(results(events)[0]!.output).offers;
+      const offers = offersOf(events);
       expect(offers.length, q).toBeGreaterThan(0);
       expect(offers.some((o: any) => name.test(o.item.name)), q).toBe(true);
       expect(texts(events), q).not.toMatch(/No verified supplier/);   // the agent can read its own results back
     }
     // Same product, several suppliers, ranked: bread has at least two.
-    const bread = JSON.parse(results((await s.chat("Show me bread offers.")).events)[0]!.output).offers;
+    const bread = offersOf((await s.chat("Show me bread offers.")).events);
     expect(new Set(bread.map((o: any) => o.merchant.name)).size).toBeGreaterThan(1);
-    const hats = JSON.parse(results((await s.chat("Show me hard hats.")).events)[0]!.output).offers;
+    const hats = offersOf((await s.chat("Show me hard hats.")).events);
     expect(new Set(hats.map((o: any) => o.merchant.name)).size).toBeGreaterThan(1);
     // Pretoria Bulk Foods is unverified: never offered, even though it's cheapest on rice.
-    const rice = JSON.parse(results((await s.chat("Show me rice offers.")).events)[0]!.output).offers;
+    const rice = offersOf((await s.chat("Show me rice offers.")).events);
     expect(rice.some((o: any) => o.merchant.name === "Pretoria Bulk Foods")).toBe(false);
     const dir = ((await (await fetch(`${base}/sandbox/api/v1/merchants`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).merchants;
     expect(dir.length).toBeGreaterThanOrEqual(18);
@@ -211,6 +214,152 @@ describe("console screens and restrictions", () => {
     const read = async (sid: string) => ((await (await fetch(`${base}/sandbox/api/v1/cards`, { headers: { "x-sandbox-session": sid } })).json()) as any).cards;
     expect((await read(a.sid)).length).toBe(1);
     expect((await read(b.sid)).length).toBe(0);
+  });
+});
+
+describe("free-form requests (no model, no key)", () => {
+  const out = (events: any[], i = 0) => { const o = results(events)[i]!.output; try { return JSON.parse(o); } catch { return o; } };
+
+  it("answers account questions from the real account", async () => {
+    const s = await session();
+    const bal = await s.chat("What's my balance?");
+    expect(names(bal.events)).toEqual(["get_wallet", "get_balances"]);
+    expect(texts(bal.events)).toMatch(/R20 000\.00 ZAR/);
+    expect(texts(bal.events)).toMatch(/500 USDC/);
+    expect(texts((await s.chat("show my cards")).events)).toMatch(/don't have any cards/);
+    expect(texts((await s.chat("what have I spent?")).events)).toMatch(/No transactions yet/);
+    expect(texts((await s.chat("Any approvals waiting?")).events)).toMatch(/Nothing is waiting/);
+  });
+
+  it("creates cards from plain descriptions, with the limits asked for", async () => {
+    const s = await session();
+    const a = await s.chat("Create a R500 card for fuel, single-use");
+    expect(names(a.events)).toEqual(["create_card"]);
+    const c = out(a.events);
+    expect(c).toMatchObject({ singleUse: true, allowedMerchantCategories: ["5541"], currency: "ZAR" });
+    expect(c.limits.total).toBe(50000);
+    expect(texts(a.events)).toMatch(/single-use.*R500\.00 total.*fuel/s);
+    const b = await s.chat("Make a USD card for software with approval above $100");
+    expect(out(b.events)).toMatchObject({ currency: "USD", approvalThreshold: 10000, allowedMerchantCategories: ["5734"] });
+    expect(texts((await s.chat("show my cards")).events)).toMatch(/2 cards, 2 active/);
+  });
+
+  it("closes cards by name or all at once", async () => {
+    const s = await session();
+    await s.chat("Create a R500 card for fuel");
+    await s.chat("Create a R200 card for groceries");
+    const one = await s.chat("close the fuel card");
+    expect(names(one.events)).toEqual(["list_cards", "close_card"]);
+    const all = await s.chat("close all my cards");
+    expect(names(all.events).filter((n) => n === "close_card")).toHaveLength(1);
+    expect(texts(all.events)).toMatch(/Closed 1 card/);
+    const cards = ((await (await fetch(`${base}/sandbox/api/v1/cards`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).cards;
+    expect(cards.every((c: any) => c.status === "closed")).toBe(true);
+    expect(texts((await s.chat("close my cards")).events)).toMatch(/no open cards/);
+  });
+
+  it("pays a merchant, and refuses over-limit and blocked-category payments with the reason", async () => {
+    const s = await session();
+    const ok = await s.chat("Spend R250 at Fresh Basket Market");
+    expect(names(ok.events)).toEqual(["create_card", "pay_checkout"]);
+    expect(texts(ok.events)).toMatch(/R250\.00 paid to Fresh Basket Market/);
+    const over = await s.chat("Spend R300 at Fresh Basket Market on a card with a limit of R100");
+    expect(texts(over.events)).toMatch(/declined/);
+    expect(texts(over.events)).toMatch(/over the card's limit/);
+    const casino = await s.chat("Pay R90 at a casino");
+    expect(texts(casino.events)).toMatch(/organisation's policy blocks that category/);
+    const tx = ((await (await fetch(`${base}/sandbox/api/v1/transactions`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).transactions;
+    expect(tx.filter((t: any) => t.status === "completed")).toHaveLength(1);
+    expect(texts((await s.chat("what have I spent?")).events)).toMatch(/1 completed charge totalling R250\.00.*2 declined/);
+  });
+
+  it("uses the wallet for any amount: sends, holds for approval, refuses, swaps", async () => {
+    const s = await session();
+    const small = await s.chat("Send 7 USDC to supplier-1");
+    expect(names(small.events)).toEqual(["send_preview", "send_execute", "get_balances"]);
+    expect((await s.state()).chain.USDC).toBe("493000000");
+    const mid = await s.chat("transfer 25 USDC to supplier-2");
+    expect(names(mid.events)).toEqual(["send_preview"]);
+    expect((await s.state()).wallet_approvals).toHaveLength(1);
+    expect(texts((await s.chat("Any approvals waiting?")).events)).toMatch(/Nothing is waiting|waiting for you/);
+    const big = await s.chat("Send 80 USDC to supplier-3");
+    expect(texts(big.events)).toMatch(/refused 80 USDC.*exceeds_per_tx_limit/);
+    expect(texts((await s.chat("send USDC to bob")).events)).toMatch(/How much USDC/);
+    const sw = await s.chat("Swap 3 USDC to ZARP");
+    expect(names(sw.events)).toEqual(["swap_quote", "swap_execute", "get_balances"]);
+    expect((await s.state()).chain.ZARP).toBe("55500000");
+  });
+
+  it("shops for anything in the catalogue in plain words, and buys on request", async () => {
+    const s = await session();
+    const q = await s.chat("how much is a laptop stand?");
+    expect(names(q.events)).toEqual(["find_offers"]);
+    const cheap = await s.chat("cheapest white bread please");
+    expect(names(cheap.events)[0]).toBe("find_offers");
+    expect(texts(cheap.events)).toMatch(/verified supplier/);
+    const buy = await s.chat("Buy 5 reams of A4 paper");
+    expect(noFinds(buy.events)).toEqual(["create_card", "pay_checkout", "pay_checkout", "close_card"]);
+    expect(texts(buy.events)).toMatch(/Done\. 5 × A4 paper/);
+    const tx = ((await (await fetch(`${base}/sandbox/api/v1/transactions`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).transactions;
+    expect(tx.map((t: any) => t.merchantName)).toContain("a·card fees");
+    // Closest / cheapest preferences choose differently from the default ranking.
+    const cheapest = await s.chat("buy the cheapest 10 reams of A4 paper");
+    const offers = offersOf(cheapest.events).map((o: any) => o.totalCents);
+    expect(noFinds(cheapest.events)).toContain("pay_checkout");
+    const card = JSON.parse(results(cheapest.events).find((r) => r.name === "create_card")!.output);
+    expect(card.limits.perTransaction).toBe(Math.min(...offers));
+  });
+
+  it("works when nothing matches: tries simpler words, then says so honestly", async () => {
+    const s = await session();
+    const none = await s.chat("find unicorn saddles");
+    expect(names(none.events).every((n) => n === "find_offers")).toBe(true);
+    expect(names(none.events).length).toBeGreaterThan(1);
+    expect(texts(none.events)).toMatch(/couldn't find that from a verified supplier/);
+    const budget = await s.chat("show me gloves under R10");
+    expect(texts(budget.events)).toMatch(/under R10\.00/);
+  });
+
+  it("handles the awkward phrasings that used to misroute", async () => {
+    const s = await session();
+    // "order 3 monitors": the 3 is a quantity, not a rand amount.
+    const order = await s.chat("order 3 monitors");
+    expect(results(order.events).find((r) => r.name === "create_card")!.output).toContain('"perTransaction"');
+    expect(texts(order.events)).toMatch(/Done\. 3 × /);
+    // "printer paper" is paper, not toner.
+    expect(offersOf((await s.chat("do you have printer paper")).events).every((o: any) => /paper|ream/i.test(o.item.name))).toBe(true);
+    // A bare product mention is a search.
+    expect(offersOf((await s.chat("gloves for my workers")).events).length).toBeGreaterThan(0);
+    // "my fuel card" closes the fuel card only.
+    await s.chat("issue a reusable card for fuel up to R5000");
+    await s.chat("create a card for team lunch with R2000 limit");
+    const close = await s.chat("close my fuel card");
+    expect(names(close.events).filter((n) => n === "close_card")).toHaveLength(1);
+    expect(texts(close.events)).toMatch(/Closed 1 card: “fuel”/);
+    const cards = ((await (await fetch(`${base}/sandbox/api/v1/cards`, { headers: { "x-sandbox-session": s.sid } })).json()) as any).cards;
+    expect(cards.filter((c: any) => c.status === "active").map((c: any) => c.label)).toContain("team lunch");
+    // A dollar card with an approval threshold in dollars.
+    const usdc = await s.chat("I want a card for Google ads, $300, needs approval over $50");
+    expect(out(usdc.events)).toMatchObject({ currency: "USD", approvalThreshold: 5000, allowedMerchantCategories: ["7311"] });
+    expect(out(usdc.events).limits.total).toBe(30000);
+    // Crypto balance questions are balance questions; approving is the visitor's job.
+    expect(names((await s.chat("how much USDC do I have")).events)).toEqual(["get_wallet", "get_balances"]);
+    const ap = await s.chat("approve it");
+    expect(names(ap.events)).toEqual([]);
+    expect(texts(ap.events)).toMatch(/Approvals are yours to decide/);
+    expect(texts((await s.chat("swap 10 ZARP to USDC")).events)).toMatch(/only swaps USDC into ZARP/);
+  });
+
+  it("is honest about what it can't do, and points to live Claude", async () => {
+    const s = await session();
+    for (const q of ["Write me a poem about rain", "what is the capital of France?", "book me a flight to Cape Town"]) {
+      const r = await s.chat(q);
+      expect(names(r.events), q).toEqual([]);
+      expect(texts(r.events), q).toMatch(/scripted demo agent/);
+      expect(texts(r.events), q).toMatch(/Claude key/);
+    }
+    expect(texts((await s.chat("hello")).events)).toMatch(/Hello!/);
+    expect(texts((await s.chat("help")).events)).toMatch(/Try asking me to/);
   });
 });
 

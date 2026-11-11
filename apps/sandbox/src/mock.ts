@@ -1,5 +1,7 @@
-import type { Block, Model, ModelMessage } from "./model.js";
-import { KEYWORDS } from "./catalogue.js";
+import type { Model, ModelMessage } from "./model.js";
+import { FEES } from "./fees.js";
+import { freeform, HELP } from "./freeform.js";
+import { call, earlier, last, lastUserText, parse as _parse, rands, resultsSinceLastUserMessage, say, verdict, type Step } from "./plan.js";
 
 /**
  * Demo mode: a scripted agent. There is no model and no key. It reads the
@@ -8,83 +10,6 @@ import { KEYWORDS } from "./catalogue.js";
  * the cards, approvals, x402 payments and wallet movements are real (on test
  * money); only the agent's choices are scripted. The UI labels this.
  */
-
-type Results = Array<{ name: string; input: any; output: any; raw: string }>;
-type Step = (r: Results, ctx: Ctx) => Block[];
-interface Ctx {
-  base: string;
-  history: ModelMessage[];
-}
-
-let n = 0;
-const id = () => `mock_${++n}_${Math.random().toString(36).slice(2, 8)}`;
-const say = (text: string): Block => ({ type: "text", text });
-const call = (name: string, input: unknown): Block => ({ type: "tool_use", id: id(), name, input });
-const parse = (s: string) => {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s;
-  }
-};
-const last = (r: Results, name: string) => [...r].reverse().find((x) => x.name === name);
-const rands = (cents: number) => `R${(cents / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/,/g, " ")}`;
-
-/** Tool results since the visitor's latest message, paired with the call that made them. */
-function resultsSinceLastUserMessage(history: ModelMessage[]): { results: Results; turns: number } {
-  let start = history.length - 1;
-  while (start >= 0 && !(history[start]!.role === "user" && typeof history[start]!.content === "string")) start--;
-  const uses = new Map<string, { name: string; input: any }>();
-  const results: Results = [];
-  let turns = 0;
-  for (const m of history.slice(start + 1)) {
-    if (m.role === "assistant" && Array.isArray(m.content)) {
-      turns++;
-      for (const b of m.content) if (b.type === "tool_use") uses.set(b.id, { name: b.name, input: b.input });
-    } else if (m.role === "user" && Array.isArray(m.content)) {
-      for (const b of m.content) if (b.type === "tool_result") {
-        const u = uses.get(b.tool_use_id);
-        if (u) results.push({ ...u, raw: b.content, output: parse(b.content) });
-      }
-    }
-  }
-  return { results, turns };
-}
-
-/** The most recent thing of a kind from earlier in the conversation (a card id, a held preview). */
-function earlier(history: ModelMessage[]) {
-  const uses = new Map<string, { name: string; input: any }>();
-  let card: string | undefined;
-  let heldCharge: any;
-  let heldTransfer: string | undefined;
-  for (const m of history) {
-    if (!Array.isArray(m.content)) continue;
-    for (const b of m.content) {
-      if (b.type === "tool_use") uses.set(b.id, { name: b.name, input: b.input });
-      if (b.type === "tool_result") {
-        const u = uses.get(b.tool_use_id);
-        const out = parse(b.content);
-        if (u?.name === "create_card" && out?.id) card = out.id;
-        if (u?.name === "pay_checkout") heldCharge = /pending_human_approval|pending_approval/.test(b.content) ? u.input : undefined;
-        if (u?.name === "send_preview" && out?.decision === "require_approval") heldTransfer = out.preview_id;
-        if (u?.name === "send_execute") heldTransfer = undefined;
-      }
-    }
-  }
-  return { card, heldCharge, heldTransfer };
-}
-
-/** One plain sentence for a pay_checkout / pay_x402 result. */
-const verdict = (x?: { raw: string; output: any }) => {
-  const o = x?.output;
-  if (o && typeof o === "object") {
-    if (o.approved === true) return "approved";
-    if (o.approved === false) return `declined (${o.decline_reason ?? o.declineReason ?? "no reason given"})`;
-    if (o.status === "paid") return `paid${o.body ? `. The API replied: ${typeof o.body === "string" ? o.body : JSON.stringify(o.body)}` : ""}`;
-    if (o.status) return String(o.status);
-  }
-  return (x?.raw ?? "").replace(/^Error\s*—\s*/, "").replace(/\s+/g, " ").slice(0, 160);
-};
 
 const weather = (base: string) => `${base}/demo/weather`;
 
@@ -147,26 +72,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
-    // Browse without buying: show ranked offers as cards.
-    match: new RegExp(`^(?!.*\\b(buy|purchase|pay|checkout|swap|send|transfer|usdc|approval|approved)\\b)(?=.*(?:${KEYWORDS.map((k) => k.re.source).join("|")})).*\\b(show|browse|search|compare|options|offers|find|looking for|need)\\b`, "i"),
-    steps: [
-      (_r, { history }) => {
-        const t = String([...history].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "");
-        // The keyword that appears earliest in what the visitor wrote.
-        const hits = KEYWORDS.map((x) => ({ x, at: t.search(x.re) })).filter((h) => h.at >= 0).sort((a, b) => a.at - b.at);
-        const k = hits[0]?.x;
-        if (!k) return [say(HELP)];
-        const lat = -26.2309, lng = 28.1772;
-        return [say(`Searching A-MERCHANT for verified suppliers of ${k.label} near Johannesburg.`), call("find_offers", { query: k.query, quantity: k.quantity, lat, lng, radius_km: 80, limit: 8 })];
-      },
-      (r) => {
-        const n = (last(r, "find_offers")?.output?.offers ?? []).length;
-        return [say(n ? `${n} verified supplier${n === 1 ? "" : "s"}, ranked by price, distance and how fresh their stock count is. Tap “Add” to put one in your cart, then check out and I'll pay with a card scoped to that purchase.` : "No verified supplier matched that. Try a simpler word, like bread, paper, gloves or cement.")];
-      },
-    ],
-  },
-  {
-    match: /cement|supplier|find .*offers|a-merchant|building suppl/i,
+    match: /\bthen buy\b|card (limited|that can only)/i,
     steps: [
       () => [
         say("I'll search A-MERCHANT for verified suppliers near Johannesburg who can deliver 50 bags by tomorrow."),
@@ -194,7 +100,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
-    match: /casino|gambl|lucky spin|7995|org(anisation)? policy/i,
+    match: /casino.*general card|general card.*casino|lucky spin|org(anisation)? policy/i,
     steps: [
       () => [say("I'll create a general-purpose card with no category limits of its own, then try to spend R500 at an online casino."), call("create_card", { label: "General spend", single_use: false, total_limit: 100000 })],
       (r) => [say("Trying the charge."), call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: 50000, merchant_name: "Lucky Spin Online", merchant_category: "7995" })],
@@ -205,7 +111,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
-    match: /fuel|\btv\b|television/i,
+    match: /(fuel|\btv\b|television).*\bthen try\b|\bthen try\b.*(\btv\b|television)/i,
     steps: [
       () => [say("I'll create a single-use R1 000 fuel card, which only works at fuel stations."), call("create_card", { label: "Fleet fuel", single_use: false, total_limit: 100000, per_transaction_limit: 100000, allowed_merchant_categories: ["5541"] })],
       (r) => [say("Now the test: trying to buy a TV with it."), call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: 90000, merchant_name: "Game Electronics", merchant_category: "5732" })],
@@ -213,7 +119,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
-    match: /approval|sign.?off|approve|1 ?500/i,
+    match: /needs my approval.*\bspend\b/i,
     steps: [
       () => [say("I'll create a card that asks you to approve any charge of R1 000 or more."), call("create_card", { label: "Site tools", single_use: false, approval_threshold: 100000, allowed_merchant_categories: ["5211"] })],
       (r) => [say("Now a R1 500 charge at Rand Build Supply."), call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: 150000, merchant_name: "Rand Build Supply", merchant_category: "5211" })],
@@ -232,20 +138,7 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
-    match: /swap|zarp|convert/i,
-    steps: [
-      () => [say("I'll quote a swap of 5 USDC to ZARP in the on-chain wallet."), call("swap_quote", { wallet_id: "default", chain: "mock", asset_in: "USDC", asset_out: "ZARP", amount_in: "5000000" })],
-      (r) => [say("The quote is within policy. Executing it."), call("swap_execute", { preview_id: last(r, "swap_quote")!.output.preview_id })],
-      () => [call("get_balances", { chain: "mock" })],
-      (r) => {
-        const b = last(r, "get_balances")?.output?.balances ?? {};
-        const f = (v: string | undefined) => (Number(v ?? 0) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 });
-        return [say(`Swapped at the sandbox's fixed rate. Wallet now holds ${f(b.USDC)} USDC and ${f(b.ZARP)} ZARP (mock chain, test funds).`)];
-      },
-    ],
-  },
-  {
-    match: /send|transfer|usdc|wallet|on-?chain|\b90\b|\b20\b/i,
+    match: /\bthen try\b/i,
     steps: [
       () => [say("I'll preview a 20 USDC transfer. Nothing moves until the policy allows it."), call("send_preview", { wallet_id: "default", chain: "mock", asset: "USDC", to: "merchant-1", amount: "20000000" })],
       (r) => {
@@ -261,26 +154,16 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
   },
 ];
 
-const HELP = `I'm the scripted demo agent: no AI model is running, but every action I take is a real call to the sandbox platform, on test money. I can show you:
-
-• Browse supplier offers as cards, add one to your cart and check out ("show me bread", "find A4 paper", "hard hats", "laptop gear", "cleaning supplies", "cement"…)
-• Find supplier offers and buy with a scoped card ("find cement near Johannesburg")
-• A fuel card refusing a TV ("fuel card, then try to buy a TV")
-• A charge held for your approval ("spend R1 500, needs my approval")
-• A casino charge refused by organisation policy ("try a casino")
-• Paying an API per call with x402
-• A wallet transfer: 20 USDC held, 90 USDC refused
-• A swap from USDC to ZARP
-
-Tap an example prompt, or add your own Claude key (top right) for a live agent that can handle anything you ask.`;
-
 export const mockModel: Model = async ({ messages, base }) => {
   const { results, turns } = resultsSinceLastUserMessage(messages);
-  const lastUser = [...messages].reverse().find((m) => m.role === "user" && typeof m.content === "string");
-  const text = String(lastUser?.content ?? "");
+  const text = lastUserText(messages);
+  const ctx = { base: base ?? "", history: messages as ModelMessage[] };
+  // The curated demonstrations first (their exact scenarios), then anything else in plain English.
   const scenario = SCENARIOS.find((s) => s.match.test(text));
-  if (!scenario) return { content: [say(HELP)] };
-  const step = scenario.steps[turns];
-  if (!step) return { content: [say("Done.")] };
-  return { content: step(results, { base: base ?? "", history: messages }) };
+  if (scenario) {
+    const step = scenario.steps[turns];
+    return { content: step ? step(results, ctx) : [say("Done.")] };
+  }
+  return { content: freeform(text, results, ctx) };
 };
+export { HELP };
