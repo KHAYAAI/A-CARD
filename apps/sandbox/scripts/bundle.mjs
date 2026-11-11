@@ -1,5 +1,6 @@
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { renderPage } from "./page.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,5 +14,5 @@ await build({
   bundle: true, platform: "node", format: "esm", target: "node20", legalComments: "none", logLevel: "warning",
   banner: { js: `import { createRequire as __cr } from "node:module";\nconst require = __cr(import.meta.url);` },
 });
-copyFileSync(join(here, "..", "public", "index.html"), join(out, "index.html"));
+writeFileSync(join(out, "index.html"), renderPage());
 console.log("wrote apps/sandbox/dist/");

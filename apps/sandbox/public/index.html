@@ -3,71 +3,182 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>A-CARD Sandbox</title>
+<title>a·card — sandbox</title>
 <style>
-:root{--bg:#0b0f14;--panel:#111821;--line:#1f2a36;--ink:#e6edf3;--mute:#8aa0b4;--green:#4ade80;--amber:#facc15;--red:#f87171;--blue:#7cc4ff}
+/*__FONTS__*/
+:root {
+  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --bg:#faf9f5;--bg-2:#f5f2ea;--surface:#fff;--surface-2:#f6f4ec;--sidebar:#f4f1e8;--border:#e8e3d5;--border-soft:#efe9dc;
+  --ink:#14201a;--muted:#5f6f66;--faint:#97a69c;--green:#0c8a54;--green-deep:#0a6e44;--mint:#4fd695;--sage:#8faa96;
+  --amber:#b07d10;--red:#c4443f;--green-bg:#e7efe9;--amber-bg:#f5ecd6;--red-bg:#f6e4e2;
+  --dark:#14201a;--dark-border:#2a3d31;
+  --shadow:0 1px 2px rgba(20,32,26,.04),0 14px 34px -16px rgba(20,32,26,.16);--shadow-chip:0 1px 2px rgba(20,32,26,.06),0 6px 16px -8px rgba(20,32,26,.18);
+  --radius:16px;--track:#e4ded0;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1712;--bg-2:#101c15;--surface:#15211b;--surface-2:#1a2820;--sidebar:#101a14;--border:#26372c;--border-soft:#223029;
+  --ink:#eef3ee;--muted:#9db0a4;--faint:#7c9285;--green:#37bd7c;--green-deep:#2aa06a;--amber:#d8a23f;--red:#ff8a80;
+  --green-bg:rgba(79,214,149,.12);--amber-bg:rgba(216,162,63,.14);--red-bg:rgba(255,138,128,.14);--dark:#0c130f;--dark-border:#26382c;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 18px 40px -18px rgba(0,0,0,.6);--shadow-chip:0 6px 18px -8px rgba(0,0,0,.5);--track:#223029}}
+:root[data-theme="dark"]{--bg:#0e1712;--bg-2:#101c15;--surface:#15211b;--surface-2:#1a2820;--sidebar:#101a14;--border:#26372c;--border-soft:#223029;--ink:#eef3ee;--muted:#9db0a4;--faint:#7c9285;--green:#37bd7c;--green-deep:#2aa06a;--amber:#d8a23f;--red:#ff8a80;--green-bg:rgba(79,214,149,.12);--amber-bg:rgba(216,162,63,.14);--red-bg:rgba(255,138,128,.14);--dark:#0c130f;--dark-border:#26382c;--shadow:0 1px 2px rgba(0,0,0,.3),0 18px 40px -18px rgba(0,0,0,.6);--shadow-chip:0 6px 18px -8px rgba(0,0,0,.5);--track:#223029}
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;height:100vh;display:flex;flex-direction:column}
-header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line)}
-header b{letter-spacing:1px}
-.badge{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#1a1300;background:var(--amber);padding:3px 8px;border-radius:99px}
-header .sp{flex:1}
-.pill{font-size:12px;border-radius:99px;padding:3px 10px;border:1px solid var(--line)}.pill.demo{color:var(--mute)}.pill.live{color:#04210f;background:var(--green);border-color:var(--green);font-weight:700}
-#dlg{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:14px;max-width:460px;padding:20px}#dlg::backdrop{background:#000a}#dlg h2{margin:0 0 8px;font-size:18px}#dlg p{color:var(--mute);font-size:13.5px;margin:6px 0}#dlg input{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:13px ui-monospace,Menlo,monospace;margin:8px 0}#dlg .b{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}#dlg button{border-radius:8px;padding:7px 14px;border:1px solid var(--line);background:none;color:var(--ink);cursor:pointer}#dlg button.go{background:var(--green);color:#04210f;border:0;font-weight:700}
-header button{background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;padding:6px 10px;cursor:pointer}
-main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
-#chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
-#log{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:760px;white-space:pre-wrap}
-.user{align-self:flex-end;background:#1d2b3a;padding:10px 14px;border-radius:14px 14px 4px 14px}
+html,body{margin:0;height:100%}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;line-height:1.5}
+button{font-family:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.wordmark{font-family:var(--font-mono);font-weight:500;letter-spacing:.1em;color:var(--ink)}
+.wordmark .dot{color:var(--green)}
+.em{font-family:var(--font-display);font-style:italic;color:var(--green);font-weight:400}
+.eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;color:var(--green);font-weight:500}
+
+.btn{border:1px solid transparent;border-radius:999px;padding:9px 16px;font-weight:600;font-size:13.5px;display:inline-flex;align-items:center;gap:7px;transition:transform .08s,filter .15s,border-color .15s}
+.btn:active{transform:translateY(1px)}
+.btn-green{background:var(--green);color:#fff}.btn-green:hover{filter:brightness(1.06)}
+.btn-green:disabled{opacity:.5;cursor:default}
+.btn-outline{background:transparent;color:var(--ink);border-color:var(--border)}.btn-outline:hover{border-color:var(--muted)}
+.btn-sm{padding:6px 12px;font-size:12.5px}
+
+#app{display:grid;grid-template-columns:240px minmax(0,1fr);height:100vh}
+.sidebar{background:var(--sidebar);border-right:1px solid var(--border-soft);display:flex;flex-direction:column;padding:16px 12px;min-height:0;overflow-y:auto}
+.sidebar .wordmark{font-size:15px;padding:4px 8px 14px}
+.side-acct{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;background:var(--surface);border:1px solid var(--border-soft)}
+.acct-badge{width:34px;height:34px;border-radius:10px;background:var(--green);color:#fff;display:grid;place-items:center;font-weight:700;font-family:var(--font-mono);font-size:14px;flex:none}
+.side-acct .n{font-size:13px;font-weight:600}.side-acct .e{font-size:11px;color:var(--muted)}
+.side-nav{display:grid;gap:2px;margin-top:14px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;color:var(--muted);font-size:13.5px;font-weight:500;background:transparent;border:none;width:100%;text-align:left}
+.nav-item.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-chip)}
+.nav-item .dot{width:7px;height:7px;border-radius:99px;background:var(--faint)}.nav-item.active .dot{background:var(--green)}
+.side-wallet{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:13px;margin-top:14px}
+.side-wallet .top{color:var(--muted);font-size:12px}
+.side-wallet .amt{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:21px;font-weight:500;margin-top:4px}
+.side-wallet .sub{font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-top:2px}
+.side-spacer{flex:1}
+.side-note{font-size:11.5px;color:var(--faint);line-height:1.5;padding:8px}
+
+.main-col{display:flex;flex-direction:column;min-width:0;min-height:0}
+.topbar{display:flex;align-items:center;gap:12px;padding:12px 24px;background:color-mix(in srgb,var(--bg) 86%,transparent);border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
+.crumbs{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}.crumbs .cur{color:var(--ink);font-weight:500}.crumbs .sep{color:var(--faint)}
+.spacer{flex:1}
+.tag-sbx{font-family:var(--font-mono);font-size:11px;font-weight:500;padding:3px 10px;border-radius:999px;background:var(--amber-bg);color:var(--amber);border:1px solid color-mix(in srgb,var(--amber) 35%,transparent);letter-spacing:.03em}
+.mode{font-family:var(--font-mono);font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}
+.mode.live{background:var(--green-bg);color:var(--green-deep);border-color:transparent;font-weight:500}
+.icon-btn{background:transparent;border:1px solid var(--border);color:var(--muted);height:32px;border-radius:9px;padding:0 11px;font-size:12.5px}.icon-btn:hover{color:var(--ink);border-color:var(--muted)}
+
+.work{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
+#chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border-soft)}
+#log{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:720px;white-space:pre-wrap;font-size:14.5px}
+.user{align-self:flex-end;background:var(--ink);color:var(--bg);padding:10px 15px;border-radius:16px 16px 4px 16px}
 .bot{align-self:flex-start}
-details.tool{align-self:flex-start;max-width:760px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
-details.tool summary{padding:8px 12px;cursor:pointer;color:var(--blue)}
-details.tool summary .st{float:right;color:var(--mute)}
+.bot::before{content:"agent";display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+.bot.note{color:var(--muted);font-style:italic}.bot.note::before{display:none}
+details.tool{align-self:flex-start;max-width:720px;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;font:12.5px/1.45 var(--font-mono);box-shadow:var(--shadow-chip)}
+details.tool summary{padding:8px 12px;cursor:pointer;color:var(--green-deep)}
+details.tool summary .st{float:right;color:var(--muted)}
 details.tool.err summary{color:var(--red)}
-details.tool pre{margin:0;padding:8px 12px;border-top:1px solid var(--line);overflow-x:auto;color:#c9d6e2;max-height:300px}
+details.tool pre{margin:0;padding:9px 12px;border-top:1px solid var(--border-soft);overflow-x:auto;color:var(--muted);max-height:280px;background:var(--surface-2);border-radius:0 0 12px 12px}
 .err-line{color:var(--red)}
-#intro{color:var(--mute);max-width:760px}
-#intro h1{color:var(--ink);font-size:26px;margin:8px 0}
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
-.chips button{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:99px;padding:7px 12px;cursor:pointer;font-size:13.5px;text-align:left}
-.chips button:hover{border-color:var(--green)}
-form{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--line)}
-textarea{flex:1;resize:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;height:48px}
-form button{background:var(--green);color:#04210f;border:0;border-radius:10px;padding:0 18px;font-weight:700;cursor:pointer}
-form button:disabled{opacity:.5;cursor:default}
-#side{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-.card h3{margin:0 0 8px;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--mute)}
-.row{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;padding:3px 0}
-.row .m{color:var(--mute)}
-.ok{color:var(--green)}.held{color:var(--amber)}.no{color:var(--red)}
-.appr{border:1px solid var(--amber);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px}
-.appr .btns{display:flex;gap:6px;margin-top:6px}
-.appr button{flex:1;border:0;border-radius:7px;padding:6px;font-weight:700;cursor:pointer}
-.appr .y{background:var(--green);color:#04210f}.appr .n{background:#2a3644;color:var(--ink)}
-.empty{color:var(--mute);font-size:13px}
-footer{font-size:12px;color:var(--mute);padding:6px 20px;border-top:1px solid var(--line)}
-@media (max-width:900px){main{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) 40vh}#chat{border-right:0;border-bottom:1px solid var(--line)}#log,form{padding-left:16px;padding-right:16px}}
+#intro{max-width:720px}
+#intro h1{font-family:var(--font-display);font-weight:400;font-size:42px;line-height:1.04;margin:6px 0 10px}
+#intro p{color:var(--muted);font-size:14.5px;margin:0 0 6px}
+.chips{display:grid;gap:8px;margin-top:18px}
+.scenario{display:grid;grid-template-columns:34px 1fr;align-items:center;gap:12px;border:1px solid var(--border);border-radius:13px;padding:10px 14px;background:var(--surface);text-align:left;color:var(--ink);font-size:13.5px;transition:border-color .15s,box-shadow .15s}
+.scenario:hover{border-color:var(--green);box-shadow:var(--shadow-chip)}
+.scenario .ix{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border);font-family:var(--font-mono);font-size:12px;color:var(--green)}
+form{display:flex;gap:10px;padding:14px 28px;border-top:1px solid var(--border-soft);background:var(--bg)}
+textarea{flex:1;resize:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font:inherit;height:48px}
+textarea::placeholder{color:var(--faint)}
+
+#side{overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px;min-height:0}
+.panel{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+.panel h2{font-family:var(--font-display);font-weight:400;font-size:20px;margin:0 0 10px}
+.empty{color:var(--muted);font-size:13px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--surface);border:1px solid var(--border-soft);border-radius:14px;padding:13px 14px;box-shadow:var(--shadow)}
+.stat .lbl{font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.stat .val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:20px;font-weight:500;margin-top:6px}
+.verify{background:var(--amber-bg);border:1px solid color-mix(in srgb,var(--amber) 40%,transparent);border-radius:14px;padding:13px 15px}
+.verify .vt{font-weight:600;font-size:14px}.verify .vs{font-size:12.5px;color:var(--muted);margin-top:1px;word-break:break-all}
+.verify .btns{display:flex;gap:8px;margin-top:10px}
+.pipeline{border-radius:14px;padding:16px;background:var(--dark);color:#cfe3d6;border:1px solid var(--dark-border)}
+.pipeline .eyebrow{color:var(--mint)}
+.pipe-track{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.gate{text-align:center;position:relative}
+.gate .node{width:38px;height:38px;border-radius:11px;margin:0 auto 6px;display:grid;place-items:center;background:#16241c;border:1.5px solid #2a3d31;color:#7d9384;font-family:var(--font-mono);font-size:15px;position:relative;z-index:2;transition:all .3s}
+.gate .lbl{font-family:var(--font-mono);font-size:9.5px;color:#8ba394;line-height:1.3}
+.gate::after{content:"";position:absolute;top:19px;left:50%;width:100%;height:2px;background:#2a3d31;z-index:1}.gate:last-child::after{display:none}
+.gate.pass .node{border-color:var(--mint);color:var(--mint);background:rgba(79,214,149,.12)}.gate.pass::after{background:var(--mint)}
+.gate.fail .node{border-color:#ff8a80;color:#ff8a80;background:rgba(255,138,128,.14)}
+.gate.review .node{border-color:#e6c072;color:#e6c072;background:rgba(230,192,114,.14)}
+.pipe-result{margin-top:12px;min-height:24px;font-size:12.5px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.verdict{font-family:var(--font-mono);font-weight:600;padding:3px 10px;border-radius:7px;font-size:11.5px;letter-spacing:.04em}
+.verdict.ok{background:rgba(79,214,149,.16);color:var(--mint)}.verdict.no{background:rgba(255,138,128,.16);color:#ff9d92}.verdict.hold{background:rgba(230,192,114,.18);color:#ecca85}
+.pipe-reason{color:#9db0a4}.pipe-idle{color:#8ba394}
+.card-mini{width:54px;aspect-ratio:1.6/1;border-radius:8px;padding:6px;background:linear-gradient(135deg,#1d2f25,#14201a);color:#cfe3d6;position:relative;border:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;justify-content:space-between}
+.card-mini.usd{background:linear-gradient(135deg,#2a4034,#182720)}
+.card-mini .b{font-family:var(--font-mono);font-size:6.5px;letter-spacing:.08em}.card-mini .n{font-family:var(--font-mono);font-size:7.5px}
+.card-mini .chip{width:10px;height:7px;border-radius:2px;background:linear-gradient(135deg,#e2c877,#b8912f);position:absolute;top:7px;right:6px}
+table.grid{width:100%;border-collapse:collapse;font-size:13px}
+table.grid td{padding:9px 8px;border-top:1px solid var(--border-soft);vertical-align:middle}
+table.grid tr:first-child td{border-top:none}
+.pill{display:inline-block;font-family:var(--font-mono);font-size:11px;font-weight:500;padding:2px 9px;border-radius:999px}
+.pill.active,.pill.completed{background:var(--green-bg);color:var(--green-deep)}.pill.closed,.pill.reversed{background:var(--track);color:var(--muted)}
+.pill.declined{background:var(--red-bg);color:var(--red)}.pill.pending{background:var(--amber-bg);color:var(--amber)}
+.right{text-align:right}
+
+#dlg{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:18px;max-width:460px;padding:24px;box-shadow:var(--shadow)}#dlg::backdrop{background:#0008}
+#dlg h2{font-family:var(--font-display);font-weight:400;font-size:26px;margin:0 0 8px}#dlg p{color:var(--muted);font-size:13.5px;margin:6px 0}
+#dlg input{width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:11px 13px;font:13px var(--font-mono);margin:10px 0}
+#dlg .b{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+
+@media (max-width:980px){#app{grid-template-columns:1fr;height:auto;min-height:100vh}.sidebar{display:none}.work{grid-template-columns:1fr}#chat{border-right:0;border-bottom:1px solid var(--border-soft);min-height:70vh}#log,form{padding-left:16px;padding-right:16px}}
 </style>
 </head>
 <body>
-<header><b>A‑CARD</b><span class="badge">Sandbox · test money</span><span class="sp"></span><span id="mode" class="pill demo">Demo agent · scripted</span><span id="turns" class="empty"></span><button id="keybtn">Use your Claude key</button><button id="reset">New session</button></header>
-<main>
-  <section id="chat">
-    <div id="log">
-      <div id="intro">
-        <h1>Give an AI agent a budget. Watch the controls hold.</h1>
-        A scripted demo agent, with no AI model or key needed, makes real calls to the platform on test money. For a live Claude agent that handles anything you ask, add your own Anthropic key (top right). It has every A‑CARD tool: per‑task virtual cards, merchant rules, human approval, A‑MERCHANT supply search, x402 pay‑per‑call APIs and an on‑chain wallet. You get your own sandbox account with R20 000 and US$500 of test money, and 500 test USDC. Approvals land on the right, and only you can decide them.
-        <div class="chips" id="chips"></div>
-      </div>
+<div id="app">
+  <aside class="sidebar">
+    <div class="wordmark">a<span class="dot">·</span>card</div>
+    <div class="side-acct"><div class="acct-badge">S</div><div><div class="n">Sandbox visitor</div><div class="e">test account · resets on reload</div></div></div>
+    <nav class="side-nav">
+      <button class="nav-item active"><span class="dot"></span>Agent</button>
+    </nav>
+    <div class="side-wallet"><div class="top">Wallet · ZAR</div><div class="amt" id="sw-zar">—</div><div class="sub" id="sw-usd"></div></div>
+    <div class="side-spacer"></div>
+    <div class="side-note">Sandbox: simulated card network, mock chain, no real money. Live card issuance launches with our issuing partner.</div>
+  </aside>
+  <div class="main-col">
+    <div class="topbar">
+      <div class="crumbs"><span>Sandbox</span><span class="sep">/</span><span class="cur">Agent</span></div>
+      <div class="spacer"></div>
+      <span class="tag-sbx">SANDBOX · TEST MONEY</span>
+      <span id="mode" class="mode">Demo agent · scripted</span>
+      <span id="turns" class="empty"></span>
+      <button class="icon-btn" id="keybtn">Use your Claude key</button>
+      <button class="icon-btn" id="theme" title="Toggle light / dark">Theme</button>
+      <button class="icon-btn" id="reset">New session</button>
     </div>
-    <form id="f"><textarea id="q" placeholder="Ask the agent to buy, pay or move money…" maxlength="2000"></textarea><button id="send">Send</button></form>
-  </section>
-  <aside id="side"><div class="empty">Starting your sandbox…</div></aside>
-</main>
-<dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button id="keyclear">Remove key</button><button id="keycancel">Cancel</button><button class="go" id="keysave">Use key</button></div></dialog>
-<footer>Sandbox: simulated card network, mock chain, no real money. Live card issuance launches with our issuing partner. Conversations reset when the server restarts.</footer>
+    <div class="work">
+      <section id="chat">
+        <div id="log">
+          <div id="intro">
+            <div class="eyebrow">SANDBOX</div>
+            <h1>Give an AI agent a budget. <span class="em">Watch the controls hold.</span></h1>
+            <p>A scripted demo agent, with no AI model or key needed, makes real calls to the platform on test money. For a live Claude agent that handles anything you ask, add your own Anthropic key (top right).</p>
+            <p>Your own sandbox account: R20 000 and US$500, plus 500 test USDC. Approvals land on the right, and only you can decide them.</p>
+            <div class="chips" id="chips"></div>
+          </div>
+        </div>
+        <form id="f"><textarea id="q" placeholder="Ask the agent to buy, pay or move money…" maxlength="2000"></textarea><button class="btn btn-green" id="send">Send</button></form>
+      </section>
+      <aside id="side"><div class="empty">Starting your sandbox…</div></aside>
+    </div>
+  </div>
+</div>
+<dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button class="btn btn-outline btn-sm" id="keyclear">Remove key</button><button class="btn btn-outline btn-sm" id="keycancel">Cancel</button><button class="btn btn-green btn-sm" id="keysave">Use key</button></div></dialog>
 <script>
 const API = window.__ACARD_API__ || "";
 const STANDALONE = !!window.__ACARD_API__;
@@ -75,7 +186,7 @@ const $ = (s) => document.querySelector(s);
 const log = $("#log"), side = $("#side");
 let sid = null, busy = false, userKey = "";
 try { userKey = sessionStorage.getItem("acard-key") || ""; } catch {}
-const setMode = (live) => { const m = $("#mode"); m.className = "pill " + (live ? "live" : "demo"); m.textContent = live ? "Live · your Claude key" : "Demo agent · scripted"; $("#keybtn").textContent = userKey ? "Change key" : "Use your Claude key"; };
+const setMode = (live) => { const m = $("#mode"); m.className = "mode" + (live ? " live" : ""); m.textContent = live ? "Live · your Claude key" : "Demo agent · scripted"; $("#keybtn").textContent = userKey ? "Change key" : "Use your Claude key"; };
 setMode(!!userKey);
 const prompts = [
   "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers.",
@@ -85,12 +196,27 @@ const prompts = [
   "Send 20 USDC from the wallet to merchant-1, then try 90.",
   "Swap 5 USDC to ZARP and show my balances.",
 ];
-for (const p of prompts) { const b = document.createElement("button"); b.textContent = p; b.onclick = () => ask(p); $("#chips").append(b); }
+prompts.forEach((p, i) => { const b = document.createElement("button"); b.className = "scenario"; b.innerHTML = `<span class="ix">0${i + 1}</span><span></span>`; b.lastChild.textContent = p; b.onclick = () => ask(p); $("#chips").append(b); });
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (c, cur = "ZAR") => (cur === "ZAR" ? "R " : cur === "USD" ? "$" : cur + " ") + (Number(c) / 100).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const units = (v, d = 6) => (Number(v) / 10 ** d).toLocaleString("en-US", { maximumFractionDigits: 4 });
 const add = (html, cls) => { const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; log.append(d); log.scrollTop = log.scrollHeight; return d; };
+
+/* the decision pipeline: where the last money action stopped */
+const GATES = ["Rules", "Limits", "Approval", "Settle"];
+let pipe = { state: [], verdict: "", reason: "", tool: "" };
+function judge(name, output, isErr) {
+  if (!/^(pay_checkout|pay_x402|send_preview|send_execute|swap_quote|swap_execute|x402_pay|x402_preview)$/.test(name)) return;
+  const t = String(output);
+  const held = /pending_human_approval|pending_approval|require_approval|approval_required/.test(t);
+  const reason = (/"decline_reason"\s*:\s*"([^"]+)"/.exec(t) || /"reasons"\s*:\s*\[\s*"([^"]+)"/.exec(t) || /(merchant_category_not_allowed|x402_price_above_max|exceeds_per_tx_limit|per_transaction_limit_exceeded|card_total_limit_exceeded|insufficient_funds|[a-z]+_not_allowed)/.exec(t) || [])[1];
+  const denied = /"approved"\s*:\s*false/.test(t) || /"decision"\s*:\s*"deny"/.test(t) || (isErr && !held);
+  if (held) pipe = { state: ["pass", "pass", "review", ""], verdict: "hold", reason: "held for your approval", tool: name };
+  else if (denied) { const lim = /limit|price|funds/.test(reason || ""); pipe = { state: lim ? ["pass", "fail", "", ""] : ["fail", "", "", ""], verdict: "no", reason: reason || "declined", tool: name }; }
+  else pipe = { state: ["pass", "pass", "pass", "pass"], verdict: "ok", reason: /_preview|swap_quote/.test(name) ? "within policy" : "settled", tool: name };
+}
+const pipeHtml = () => `<div class="pipeline"><div class="eyebrow">DECISION PIPELINE</div><div class="pipe-track">${GATES.map((g, i) => `<div class="gate ${pipe.state[i] || ""}"><div class="node">${pipe.state[i] === "pass" ? "✓" : pipe.state[i] === "fail" ? "✕" : pipe.state[i] === "review" ? "!" : i + 1}</div><div class="lbl">${g}</div></div>`).join("")}</div><div class="pipe-result">${pipe.verdict ? `<span class="verdict ${pipe.verdict}">${pipe.verdict === "ok" ? "APPROVED" : pipe.verdict === "hold" ? "HELD" : "DECLINED"}</span><span class="pipe-reason">${esc(pipe.tool)} · ${esc(pipe.reason)}</span>` : '<span class="pipe-idle">Every payment the agent attempts passes through these gates.</span>'}</div></div>`;
 
 async function start() {
   if (window.__sandboxReady) { try { await window.__sandboxReady; } catch (e) { side.innerHTML = '<div class="err-line">The sandbox could not start in this browser: ' + esc(e.message) + "</div>"; return; } }
@@ -110,27 +236,30 @@ async function refresh() {
   const s = await r.json();
   $("#turns").textContent = s.turns_left + " messages left";
   const wallets = (s.wallet.wallets ?? [s.wallet.wallet ?? s.wallet]).filter(Boolean);
-  const bal = wallets.map((w) => `<div class="row"><span>${esc(w.currency)} wallet</span><span>${money(w.balance ?? w.available ?? 0, w.currency)}</span></div>`).join("");
-  const chain = Object.entries(s.chain?.balances ?? s.chain ?? {}).map(([a, v]) => `<div class="row"><span>${esc(a)}</span><span>${units(v)}</span></div>`).join("");
+  const bal = (cur) => { const w = wallets.find((x) => x.currency === cur); return w ? money(w.balance ?? w.available ?? 0, cur) : "—"; };
+  $("#sw-zar").textContent = bal("ZAR"); $("#sw-usd").textContent = bal("USD");
+  const chain = s.chain?.balances ?? s.chain ?? {};
   const ap = [
-    ...s.card_approvals.map((a) => `<div class="appr"><b class="held">Card charge held</b><div>${money(a.amount, a.currency)} at ${esc(a.merchantName ?? a.merchant_name ?? "merchant")}</div><div class="btns"><button class="y" data-k="card" data-id="${esc(a.id)}" data-d="approve">Approve</button><button class="n" data-k="card" data-id="${esc(a.id)}" data-d="deny">Deny</button></div></div>`),
-    ...s.wallet_approvals.map((id) => `<div class="appr"><b class="held">Wallet transfer held</b><div class="m" style="font-size:12px">${esc(id)}</div><div class="btns"><button class="y" data-k="wallet" data-id="${esc(id)}" data-d="approve">Approve</button><button class="n" data-k="wallet" data-id="${esc(id)}" data-d="deny">Reject</button></div></div>`),
+    ...s.card_approvals.map((a) => `<div class="verify"><div class="vt">Card charge held · ${money(a.amount, a.currency)}</div><div class="vs">at ${esc(a.merchantName ?? a.merchant_name ?? "merchant")}</div><div class="btns"><button class="btn btn-green btn-sm" data-k="card" data-id="${esc(a.id)}" data-d="approve">Approve</button><button class="btn btn-outline btn-sm" data-k="card" data-id="${esc(a.id)}" data-d="deny">Deny</button></div></div>`),
+    ...s.wallet_approvals.map((id) => `<div class="verify"><div class="vt">Wallet transfer held</div><div class="vs mono">${esc(id)}</div><div class="btns"><button class="btn btn-green btn-sm" data-k="wallet" data-id="${esc(id)}" data-d="approve">Approve</button><button class="btn btn-outline btn-sm" data-k="wallet" data-id="${esc(id)}" data-d="deny">Reject</button></div></div>`),
   ].join("");
-  const cards = (s.cards.cards ?? []).map((c) => `<div class="row"><span>${esc(c.label ?? "card")} <span class="m">•${esc(c.last4 ?? "")}</span></span><span class="${c.status === "active" ? "ok" : "m"}">${esc(c.status)}</span></div>`).join("");
-  const tx = (s.transactions.transactions ?? []).slice(0, 12).map((t) => `<div class="row"><span>${esc(t.merchantName ?? t.merchant_name ?? t.description ?? t.type ?? "")}</span><span class="${t.status === "completed" ? "ok" : t.status === "pending" ? "held" : "no"}">${money(t.amount, t.currency)}</span></div>`).join("");
+  const cards = (s.cards.cards ?? []).map((c) => `<tr><td><div class="card-mini ${c.currency === "USD" ? "usd" : ""}"><div class="chip"></div><div class="b">a·card</div><div class="n">•${esc(c.last4 ?? "")}</div></div></td><td>${esc(c.label ?? "card")}</td><td class="right"><span class="pill ${esc(c.status)}">${esc(c.status)}</span></td></tr>`).join("");
+  const txStatus = (t) => (/pending_human_approval|pending_approval/.test(String(t.declineReason ?? t.decline_reason ?? "")) ? ["pending", "held"] : [t.status, t.status]);
+  const tx = (s.transactions.transactions ?? []).slice(0, 10).map((t) => { const [cls, label] = txStatus(t); return `<tr><td>${esc(t.merchantName ?? t.merchant_name ?? t.description ?? t.type ?? "")}</td><td class="right mono">${money(t.amount, t.currency)}</td><td class="right"><span class="pill ${esc(cls)}">${esc(label)}</span></td></tr>`; }).join("");
+  const onchain = Object.entries(chain).map(([a, v]) => `<div class="stat"><div class="lbl">${esc(a)} · mock chain</div><div class="val">${units(v)}</div></div>`).join("");
   side.innerHTML = `
-    <div class="card"><h3>Approvals: yours to decide</h3>${ap || '<div class="empty">Nothing waiting.</div>'}</div>
-    <div class="card"><h3>Fiat wallet</h3>${bal || '<div class="empty">—</div>'}</div>
-    <div class="card"><h3>On‑chain wallet (mock chain)</h3>${chain || '<div class="empty">—</div>'}</div>
-    <div class="card"><h3>Cards</h3>${cards || '<div class="empty">No cards yet.</div>'}</div>
-    <div class="card"><h3>Transactions</h3>${tx || '<div class="empty">None yet.</div>'}</div>`;
+    ${ap ? `<div class="panel"><h2>Needs your approval</h2><div style="display:grid;gap:10px">${ap}</div></div>` : ""}
+    ${pipeHtml()}
+    <div class="stats"><div class="stat"><div class="lbl">ZAR wallet</div><div class="val">${bal("ZAR")}</div></div><div class="stat"><div class="lbl">USD wallet</div><div class="val">${bal("USD")}</div></div>${onchain}</div>
+    <div class="panel"><h2>Cards</h2>${cards ? `<table class="grid"><tbody>${cards}</tbody></table>` : '<div class="empty">No cards yet. The agent creates one per task.</div>'}</div>
+    <div class="panel"><h2>Transactions</h2>${tx ? `<table class="grid"><tbody>${tx}</tbody></table>` : '<div class="empty">None yet.</div>'}</div>`;
 }
 
 side.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-id]"); if (!b) return;
   b.disabled = true;
   await fetch(API + "/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: b.dataset.k, id: b.dataset.id, decision: b.dataset.d }) });
-  add(`<i class="m">You ${b.dataset.d === "approve" ? "approved" : "declined"} it. Tell the agent to retry.</i>`, "bot");
+  add(`You ${b.dataset.d === "approve" ? "approved" : "declined"} it. Tell the agent to retry.`, "bot note");
   refresh();
 });
 
@@ -154,7 +283,7 @@ async function ask(text) {
         if (ev === "mode") setMode(data.mode === "live");
         if (ev === "text") add(esc(data.text), "bot");
         if (ev === "tool_call") { const d = document.createElement("details"); d.className = "tool"; d.innerHTML = `<summary>⚙ ${esc(data.name)} <span class="st">running…</span></summary><pre>${esc(JSON.stringify(data.input, null, 2))}</pre>`; log.append(d); tools[data.id] = d; log.scrollTop = log.scrollHeight; }
-        if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } refresh(); }
+        if (ev === "tool_result") { const d = tools[data.id]; if (d) { d.querySelector(".st").textContent = data.is_error ? "error" : "done"; if (data.is_error) d.classList.add("err"); d.insertAdjacentHTML("beforeend", `<pre>${esc(data.output)}</pre>`); } judge(data.name, data.output, data.is_error); refresh(); }
         if (ev === "error") add(`<span class="err-line">${esc(data.message)}</span>`, "bot");
       }
     }
@@ -169,8 +298,9 @@ $("#keybtn").onclick = () => { $("#keyin").value = ""; dlg.showModal(); };
 $("#keycancel").onclick = () => dlg.close();
 $("#keysave").onclick = () => { const v = $("#keyin").value.trim(); if (v) { userKey = v; try { sessionStorage.setItem("acard-key", v); } catch {} } setMode(!!userKey); dlg.close(); };
 $("#keyclear").onclick = () => { userKey = ""; try { sessionStorage.removeItem("acard-key"); } catch {} setMode(false); dlg.close(); };
+$("#theme").onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark ? "light" : "dark"; };
 $("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
-if (STANDALONE) { $("footer").innerHTML = "Sandbox: simulated card network, mock chain, no real money. Runs entirely in this page; nothing is sent to any server, and reloading resets it. Live card issuance launches with our issuing partner."; $("#dlg p").textContent = "Switches the chat to a live Claude agent. Your key is sent only from this browser straight to Anthropic, never to A-CARD, and stays in this tab until you close it or remove it. Usage is billed to your Anthropic account."; }
+if (STANDALONE) { document.querySelector(".side-note").textContent = "Sandbox: simulated card network, mock chain, no real money. Runs entirely in this page; nothing is sent to any server, and reloading resets it. Live card issuance launches with our issuing partner."; $("#dlg p").textContent = "Switches the chat to a live Claude agent. Your key is sent only from this browser straight to Anthropic, never to A-CARD, and stays in this tab until you close it or remove it. Usage is billed to your Anthropic account."; }
 start();
 </script>
 </body>

@@ -1,6 +1,7 @@
 import { build } from "esbuild";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { renderPage } from "./page.mjs";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -30,7 +31,7 @@ const result = await build({
   define: { "process.env.NODE_ENV": '"production"', global: "globalThis" },
 });
 const js = result.outputFiles[0].text.replaceAll("</script", "<\\/script");
-const page = readFileSync(join(root, "public", "index.html"), "utf8");
+const page = renderPage();
 const html = page.replace("<script>", () => `<script>${js}</script>\n<script>`);
 mkdirSync(join(root, "dist"), { recursive: true });
 const out = join(root, "dist", "a-card-sandbox.html");
