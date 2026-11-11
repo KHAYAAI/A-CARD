@@ -135,6 +135,33 @@ table.grid tr:first-child td{border-top:none}
 #dlg input{width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:11px 13px;font:13px var(--font-mono);margin:10px 0}
 #dlg .b{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 
+#v-other{flex:1;overflow-y:auto;padding:26px 28px 70px;display:none;min-height:0}
+#v-other .wrap{max-width:1120px}
+.page-head{margin-bottom:20px}.page-title{font-family:var(--font-display);font-weight:400;font-size:40px;line-height:1.02}
+.page-sub{color:var(--muted);font-size:14px;margin-top:6px;max-width:720px}
+.stack{display:grid;gap:18px}.cols{display:grid;grid-template-columns:1fr 340px;gap:18px;align-items:start}
+.stats3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.panel-head h2{margin:0}
+.hint{font-size:12.5px;color:var(--muted)}
+table.grid th{text-align:left;font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:500;padding:0 10px 10px}
+.wide td{padding:11px 10px}
+.wide tr.row-hl td{background:var(--green-bg)}
+.ctrl-chip{display:inline-block;font-family:var(--font-mono);font-size:10.5px;color:var(--muted);background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:2px 8px;margin:2px 3px 2px 0}
+.ctrl-chip.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent);background:var(--amber-bg)}
+.ctrl-chip.block{color:var(--red);border-color:color-mix(in srgb,var(--red) 35%,transparent);background:var(--red-bg)}
+.field{margin-top:14px}.field label{display:block;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;color:var(--muted);margin-bottom:6px}
+.field input,.filters input,.filters select{width:100%;padding:10px 13px;border-radius:11px;background:var(--surface-2);border:1px solid var(--border);color:var(--ink);font-size:14px;font-family:inherit}
+.field input.mono{font-family:var(--font-mono)}
+.filters{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}.filters input{flex:1;min-width:200px}.filters select{width:auto}
+.ctabs{display:flex;gap:7px;flex-wrap:wrap}.ctab{padding:7px 13px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);color:var(--muted);font-size:12.5px;font-weight:500}.ctab.sel{border-color:var(--green);color:var(--ink);background:var(--green-bg)}
+.cmd{position:relative;margin-top:12px;background:var(--dark);color:#cfe3d6;border:1px solid var(--dark-border);border-radius:11px;padding:12px 44px 12px 14px;font-family:var(--font-mono);font-size:12.5px;overflow-x:auto;white-space:pre}
+.cmd-copy{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.06);border:1px solid var(--dark-border);color:#9db0a4;height:26px;border-radius:8px;padding:0 8px;font-size:11px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:13.5px}.kv .k{color:var(--muted)}.kv .v{font-family:var(--font-mono);text-align:right}
+.group-t{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:60}.toast.on{opacity:1}
+.badge-n{margin-left:auto;font-family:var(--font-mono);font-size:11px;background:var(--amber-bg);color:var(--amber);border-radius:999px;padding:1px 7px}
+#mnav{display:none}
+@media (max-width:980px){.cols,.stats3{grid-template-columns:1fr}#mnav{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;border-bottom:1px solid var(--border-soft);background:var(--sidebar)}#mnav button{white-space:nowrap;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:999px;padding:6px 12px;font-size:12.5px}#mnav button.active{color:var(--ink);border-color:var(--green);background:var(--green-bg)}}
 @media (max-width:980px){#app{grid-template-columns:1fr;height:auto;min-height:100vh}.sidebar{display:none}.work{grid-template-columns:1fr}#chat{border-right:0;border-bottom:1px solid var(--border-soft);min-height:70vh}#log,form{padding-left:16px;padding-right:16px}}
 </style>
 </head>
@@ -143,16 +170,14 @@ table.grid tr:first-child td{border-top:none}
   <aside class="sidebar">
     <div class="wordmark">a<span class="dot">·</span>card</div>
     <div class="side-acct"><div class="acct-badge">S</div><div><div class="n">Sandbox visitor</div><div class="e">test account · resets on reload</div></div></div>
-    <nav class="side-nav">
-      <button class="nav-item active"><span class="dot"></span>Agent</button>
-    </nav>
+    <nav class="side-nav" id="nav"></nav>
     <div class="side-wallet"><div class="top">Wallet · ZAR</div><div class="amt" id="sw-zar">—</div><div class="sub" id="sw-usd"></div></div>
     <div class="side-spacer"></div>
     <div class="side-note">Sandbox: simulated card network, mock chain, no real money. Live card issuance launches with our issuing partner.</div>
   </aside>
   <div class="main-col">
     <div class="topbar">
-      <div class="crumbs"><span>Sandbox</span><span class="sep">/</span><span class="cur">Agent</span></div>
+      <div class="crumbs"><span>Sandbox</span><span class="sep">/</span><span class="cur" id="crumb">Agent</span></div>
       <div class="spacer"></div>
       <span class="tag-sbx">SANDBOX · TEST MONEY</span>
       <span id="mode" class="mode">Demo agent · scripted</span>
@@ -161,7 +186,9 @@ table.grid tr:first-child td{border-top:none}
       <button class="icon-btn" id="theme" title="Toggle light / dark">Theme</button>
       <button class="icon-btn" id="reset">New session</button>
     </div>
-    <div class="work">
+    <div id="mnav"></div>
+    <div id="v-other"><div class="wrap" id="vo"></div></div>
+    <div class="work" id="v-agent">
       <section id="chat">
         <div id="log">
           <div id="intro">
@@ -178,6 +205,7 @@ table.grid tr:first-child td{border-top:none}
     </div>
   </div>
 </div>
+<div class="toast" id="toast"></div>
 <dialog id="dlg"><h2>Use your own Claude key</h2><p>Switches the chat to a live Claude agent. Your key is sent with each message over HTTPS and used for that call only. It is never stored or logged by this server; it stays in this browser tab until you close it or remove it. Usage is billed to your Anthropic account.</p><input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><div class="b"><button class="btn btn-outline btn-sm" id="keyclear">Remove key</button><button class="btn btn-outline btn-sm" id="keycancel">Cancel</button><button class="btn btn-green btn-sm" id="keysave">Use key</button></div></dialog>
 <script>
 const API = window.__ACARD_API__ || "";
@@ -191,6 +219,7 @@ setMode(!!userKey);
 const prompts = [
   "Find 50 bags of cement near Johannesburg I can get by tomorrow, then buy the best offer with a card that can only be used at building suppliers.",
   "Make me a R1 000 single-use card for fuel only, then try to buy a TV with it.",
+  "Try to spend R500 at an online casino on a general card.",
   "Create a card that needs my approval above R1 000 and spend R1 500 at Rand Build Supply.",
   "Pay for the weather API with x402 from a USD card. Don't spend more than 1 cent.",
   "Send 20 USDC from the wallet to merchant-1, then try 90.",
@@ -235,6 +264,7 @@ async function refresh() {
   if (!r.ok) return;
   const s = await r.json();
   $("#turns").textContent = s.turns_left + " messages left";
+  const pc = s.card_approvals.length + s.wallet_approvals.length; if (pc !== pendingCount) { pendingCount = pc; if (typeof setNavBadge === "function") setNavBadge(); }
   const wallets = (s.wallet.wallets ?? [s.wallet.wallet ?? s.wallet]).filter(Boolean);
   const bal = (cur) => { const w = wallets.find((x) => x.currency === cur); return w ? money(w.balance ?? w.available ?? 0, cur) : "—"; };
   $("#sw-zar").textContent = bal("ZAR"); $("#sw-usd").textContent = bal("USD");
@@ -300,8 +330,134 @@ $("#keysave").onclick = () => { const v = $("#keyin").value.trim(); if (v) { use
 $("#keyclear").onclick = () => { userKey = ""; try { sessionStorage.removeItem("acard-key"); } catch {} setMode(false); dlg.close(); };
 $("#theme").onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark ? "light" : "dark"; };
 $("#reset").onclick = () => { try { localStorage.removeItem("acard-sbx"); } catch {} location.reload(); };
+/* ---------------- console screens ---------------- */
+const setNavBadge = () => { const b = document.querySelector('[data-v="approvals"]'); if (!b) return; b.querySelector(".badge-n")?.remove(); if (pendingCount) b.insertAdjacentHTML("beforeend", `<span class="badge-n">${pendingCount}</span>`); };
+const NAVS = [
+  ["agent", "Agent"], ["cards", "Manage cards"], ["spending", "Track spending"], ["wallet", "Wallet"],
+  ["approvals", "Approvals"], ["policies", "Policies"], ["audit", "Audit log"], ["merchants", "Merchants"], ["connect", "Connect agents"],
+];
+const MCC = { "5411": "Groceries", "5734": "Software", "4816": "Cloud", "7311": "Advertising", "4511": "Airlines", "5812": "Restaurants", "7995": "Gambling", "6051": "Crypto", "5211": "Building supplies", "5251": "Hardware", "5541": "Fuel", "5542": "Fuel", "5732": "Electronics", "5200": "Home supplies", "7538": "Auto service", "7372": "Software", "x402": "x402 APIs" };
+const mcc = (c) => (MCC[c] ? `${MCC[c]} (${c})` : c);
+let view = "agent", pendingCount = 0, viewToken = 0;
+const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2400); };
+const api = async (path, init = {}) => {
+  const r = await fetch(API + "/sandbox/api" + path, { ...init, headers: { "x-sandbox-session": sid, "content-type": "application/json" } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message ?? (typeof j?.error === "string" ? j.error : "request failed"));
+  return j;
+};
+const when = (iso) => new Date(iso).toLocaleString("en-ZA", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const heldTx = (t) => /pending_human_approval|pending_approval/.test(String(t.declineReason ?? ""));
+const txPill = (t) => (heldTx(t) ? '<span class="pill pending">held</span>' : `<span class="pill ${esc(t.status)}">${esc(t.status)}</span>`);
+const head = (title, sub) => `<div class="page-head"><div class="page-title">${title}</div>${sub ? `<div class="page-sub">${sub}</div>` : ""}</div>`;
+const empty = (t) => `<div class="empty" style="padding:22px 4px">${t}</div>`;
+const chips = (c) => [
+  c.singleUse ? '<span class="ctrl-chip">single-use</span>' : "",
+  c.limits?.perTransaction ? `<span class="ctrl-chip">≤ ${money(c.limits.perTransaction, c.currency)} per charge</span>` : "",
+  c.limits?.total ? `<span class="ctrl-chip">${money(c.limits.total, c.currency)} total</span>` : "",
+  c.approvalThreshold ? `<span class="ctrl-chip warn">approval ≥ ${money(c.approvalThreshold, c.currency)}</span>` : "",
+  ...(c.allowedMerchantCategories ?? []).map((m) => `<span class="ctrl-chip">${esc(mcc(m))}</span>`),
+  ...(c.x402AllowedHosts ?? []).map((h) => `<span class="ctrl-chip">x402: ${esc(h)}</span>`),
+].join("") || '<span class="hint">no limits set</span>';
+
+function setView(v) {
+  view = v;
+  $("#nav").innerHTML = NAVS.map(([k, l]) => `<button class="nav-item${k === v ? " active" : ""}" data-v="${k}"><span class="dot"></span>${l}${k === "approvals" && pendingCount ? `<span class="badge-n">${pendingCount}</span>` : ""}</button>`).join("");
+  $("#mnav").innerHTML = NAVS.map(([k, l]) => `<button class="${k === v ? "active" : ""}" data-v="${k}">${l}</button>`).join("");
+  $("#crumb").textContent = (NAVS.find((n) => n[0] === v) || [])[1];
+  $("#v-agent").style.display = v === "agent" ? "" : "none";
+  $("#v-other").style.display = v === "agent" ? "none" : "block";
+  if (v !== "agent") renderView();
+}
+async function renderView() {
+  const mine = ++viewToken; const vo = $("#vo");
+  if (!sid) { vo.innerHTML = '<div class="empty">Starting your sandbox…</div>'; return; }
+  try { const html = await VIEWS[view](); if (mine === viewToken && view !== "agent") vo.innerHTML = html; } catch (e) { vo.innerHTML = `<div class="err-line">${esc(e.message)}</div>`; }
+}
+for (const id of ["#nav", "#mnav"]) $(id).addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (b) { location.hash = b.dataset.v; } });
+addEventListener("hashchange", () => setView(NAVS.some((n) => n[0] === location.hash.slice(1)) ? location.hash.slice(1) : "agent"));
+
+const VIEWS = {
+  async cards() {
+    const { cards } = await api("/v1/cards");
+    const rows = cards.map((c) => `<tr><td><div class="card-mini ${c.currency === "USD" ? "usd" : ""}"><div class="chip"></div><div class="b">a·card</div><div class="n">•${esc(c.last4)}</div></div></td><td><b>${esc(c.label ?? "card")}</b><div class="hint mono">${esc(c.currency)} · exp ${String(c.expiryMonth).padStart(2, "0")}/${c.expiryYear}</div></td><td>${chips(c)}</td><td><span class="pill ${esc(c.status)}">${esc(c.status)}</span></td><td class="right">${c.status === "active" ? `<button class="btn btn-outline btn-sm" data-close="${esc(c.id)}">Close</button>` : ""}</td></tr>`).join("");
+    return head("Manage cards", "One card per task, each with its own limits. The agent creates them; the rules on each card are enforced on every charge.") + `<div class="panel">${cards.length ? `<table class="grid wide"><thead><tr><th></th><th>Card</th><th>Controls</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : empty("No cards yet. Ask the agent to create one, for example “Make me a R1 000 single-use card for fuel only.”")}</div>`;
+  },
+  async spending() {
+    const { transactions: tx } = await api("/v1/transactions");
+    const spent = tx.filter((t) => t.status === "completed").reduce((a, t) => a + t.amount, 0);
+    const held = tx.filter(heldTx).length, declined = tx.filter((t) => t.status === "declined" && !heldTx(t)).length;
+    const rows = tx.map((t) => `<tr data-s="${esc((t.merchantName ?? "") + " " + (t.merchantCategory ?? ""))}" data-st="${heldTx(t) ? "held" : esc(t.status)}"><td class="mono hint">${when(t.createdAt)}</td><td><b>${esc(t.merchantName ?? "")}</b><div class="hint">${esc(mcc(t.merchantCategory ?? ""))}</div></td><td class="right mono">${money(t.amount, t.currency)}</td><td>${txPill(t)}</td><td class="hint">${esc(heldTx(t) ? "waiting for human approval" : t.declineReason ?? "")}</td></tr>`).join("");
+    return head("Track spending", "Every charge the agents attempt, including the ones that were refused, and why.") + `<div class="stats3" style="margin-bottom:18px"><div class="stat"><div class="lbl">Spent</div><div class="val">${money(spent)}</div></div><div class="stat"><div class="lbl">Held for approval</div><div class="val">${held}</div></div><div class="stat"><div class="lbl">Declined</div><div class="val">${declined}</div></div></div><div class="panel"><div class="filters"><input id="fq" placeholder="Search merchant or category…"><select id="fs"><option value="">All statuses</option><option>completed</option><option>held</option><option>declined</option></select></div>${tx.length ? `<table class="grid wide"><thead><tr><th>When</th><th>Merchant</th><th class="right">Amount</th><th>Status</th><th>Reason</th></tr></thead><tbody id="txb">${rows}</tbody></table>` : empty("Nothing yet. Run one of the example prompts on the Agent screen.")}</div>`;
+  },
+  async wallet() {
+    const [w, st] = await Promise.all([api("/v1/wallet"), fetch(API + "/sandbox/state", { headers: { "x-sandbox-session": sid } }).then((r) => r.json())]);
+    const fiat = (w.wallets ?? [w.wallet]).filter(Boolean).map((x) => `<div class="stat"><div class="lbl">${esc(x.currency)} wallet</div><div class="val">${money(x.available, x.currency)}</div><div class="hint" style="margin-top:8px">held <b>${money(x.held, x.currency)}</b> · posted <b>${money(x.posted, x.currency)}</b></div><div style="margin-top:12px"><button class="btn btn-outline btn-sm" data-fund="${esc(x.currency)}">Add test funds</button></div></div>`).join("");
+    const chain = Object.entries(st.chain?.balances ?? st.chain ?? {}).map(([a, v]) => `<div class="stat"><div class="lbl">${esc(a)} · mock chain</div><div class="val">${units(v)}</div></div>`).join("");
+    return head("Wallet", "The fiat wallets that fund cards, and the agent's on-chain wallet. Both are test money.") + `<div class="stats3" style="grid-template-columns:repeat(2,1fr)">${fiat}</div><div class="group-t">On-chain agent wallet</div><div class="stats3" style="grid-template-columns:repeat(2,1fr)">${chain}</div><div class="panel" style="margin-top:18px"><h2>Wallet restrictions in this sandbox</h2><div class="kv"><span class="k">Auto-approved transfers</span><span class="v">up to 10 USDC</span><span class="k">Needs a person's approval</span><span class="v">above 10 USDC</span><span class="k">Refused outright</span><span class="v">above 50 USDC per transfer</span><span class="k">24-hour cap</span><span class="v">200 USDC</span><span class="k">x402 per request</span><span class="v">≤ 1 USDC, and under the agent's own ceiling</span><span class="k">Swaps</span><span class="v">USDC ↔ ZARP, slippage ≤ 1%</span><span class="k">Network</span><span class="v">mock chain, test funds only</span></div><div class="hint" style="margin-top:12px">Agents get capabilities, never keys. Every move is a preview first, then policy, then approval if needed, then settlement.</div></div>`;
+  },
+  async approvals() {
+    const [{ approvals }, st] = await Promise.all([api("/v1/approvals"), fetch(API + "/sandbox/state", { headers: { "x-sandbox-session": sid } }).then((r) => r.json())]);
+    const pend = approvals.filter((a) => a.status === "pending"), done = approvals.filter((a) => a.status !== "pending");
+    const card = (a) => `<div class="verify" style="margin-bottom:10px"><div class="vt">${money(a.amount, a.currency)} at ${esc(a.merchantName ?? "merchant")}</div><div class="vs">${esc(a.reason ?? "")} · ${when(a.createdAt)}</div><div class="btns"><button class="btn btn-green btn-sm" data-ap="approve" data-k="card" data-id="${esc(a.id)}">Approve</button><button class="btn btn-outline btn-sm" data-ap="deny" data-k="card" data-id="${esc(a.id)}">Deny</button></div></div>`;
+    const wal = st.wallet_approvals.map((id) => `<div class="verify" style="margin-bottom:10px"><div class="vt">Wallet transfer held</div><div class="vs mono">${esc(id)}</div><div class="btns"><button class="btn btn-green btn-sm" data-ap="approve" data-k="wallet" data-id="${esc(id)}">Approve</button><button class="btn btn-outline btn-sm" data-ap="deny" data-k="wallet" data-id="${esc(id)}">Reject</button></div></div>`).join("");
+    const hist = done.map((a) => `<tr><td class="mono hint">${when(a.createdAt)}</td><td>${esc(a.merchantName ?? "")}</td><td class="right mono">${money(a.amount, a.currency)}</td><td><span class="pill ${a.status === "approved" ? "completed" : "declined"}">${esc(a.status)}</span></td></tr>`).join("");
+    return head("Approvals", "Charges and transfers the agent can't make without you. Agents can't approve their own, and an approval is spent on one purchase.") + `<div class="cols"><div class="stack"><div class="panel"><h2>Waiting for you</h2>${pend.length || wal ? pend.map(card).join("") + wal : empty("Nothing waiting. Ask the agent to spend R1 500 on a card that needs your approval.")}</div><div class="panel"><h2>History</h2>${hist ? `<table class="grid wide"><tbody>${hist}</tbody></table>` : empty("No decisions yet.")}</div></div><div class="panel"><h2>How it works</h2><div class="hint" style="line-height:1.6">A card can set an approval threshold, and your organisation policy can set one for every card. At or above it, the charge is held and you decide. Approve once and the agent can retry exactly once; the same approval can't be reused.</div></div></div>`;
+  },
+  async policies() {
+    const [{ policy }, { cards }] = await Promise.all([api("/v1/policy"), api("/v1/cards")]);
+    const blocked = policy.blocked_merchant_categories ?? [];
+    const active = cards.filter((c) => c.status === "active").length;
+    return head("Policies", "Organisation-wide restrictions. They apply to every card and beat any card's own rules.") + `<div class="cols"><div class="panel"><h2>Organisation policy</h2><div class="field"><label>blocked merchant categories (MCC, comma-separated)</label><input class="mono" id="pb" value="${esc(blocked.join(", "))}" placeholder="7995, 6051"><div class="hint" style="margin-top:5px">e.g. 7995 = gambling, 6051 = crypto. Declined everywhere, whatever the card allows.</div></div><div class="field"><label>org approval threshold (cents, blank for none)</label><input class="mono" id="pt" value="${policy.approval_threshold ?? ""}" placeholder="250000"><div class="hint" style="margin-top:5px">Charges at or above this go to a human even if the card has no threshold of its own.</div></div><div style="margin-top:18px;display:flex;gap:10px;align-items:center"><button class="btn btn-green" id="psave">Save policy</button><a class="hint" href="#agent" id="ptry">Test it with the agent →</a></div>${blocked.length ? `<div class="hint" style="margin-top:16px">Currently blocking: ${blocked.map((m) => esc(mcc(m))).join(", ")}.</div>` : ""}</div><div class="stack"><div class="panel"><h2>Restrictions in force</h2><div class="group-t" style="margin-top:0">Organisation</div>${blocked.map((m) => `<span class="ctrl-chip block">blocked: ${esc(mcc(m))}</span>`).join("") || '<span class="hint">none blocked</span>'}${policy.approval_threshold ? `<span class="ctrl-chip warn">approval ≥ ${money(policy.approval_threshold)}</span>` : ""}<div class="group-t">Per card (${active} active)</div><div class="hint">Merchant categories, per-charge and total limits, approval threshold, single-use, x402 host allow-list.</div><div class="group-t">Wallet</div><div class="hint">10 USDC auto-approve · 50 USDC per transfer · 200 USDC a day · x402 ≤ 1 USDC · swaps ≤ 1% slippage.</div><div class="group-t">x402 payments</div><div class="hint">USDC only, within the card's or wallet's price ceiling and the agent's own max, and only to allowed hosts.</div></div></div></div>`;
+  },
+  async audit() {
+    const { audit } = await api("/v1/audit");
+    const rows = audit.map((e) => `<tr><td class="mono hint">${when(e.createdAt)}</td><td class="mono hint">${esc(String(e.cardId ?? "").slice(-8))}</td><td>${esc(e.merchantName ?? "")}</td><td class="right mono">${money(e.amount, e.currency)}</td><td>${txPill(e)}</td><td class="hint">${esc(heldTx(e) ? "held for human approval" : e.declineReason ?? "authorised")}</td></tr>`).join("");
+    return head("Audit log", "An immutable record of every decision, with the reason, for compliance and review.") + `<div class="panel">${audit.length ? `<table class="grid wide"><thead><tr><th>When</th><th>Card</th><th>Merchant</th><th class="right">Amount</th><th>Outcome</th><th>Reason</th></tr></thead><tbody>${rows}</tbody></table>` : empty("No decisions recorded yet.")}</div>`;
+  },
+  async merchants() {
+    const { merchants } = await api("/v1/merchants");
+    const rows = merchants.map((m) => `<tr><td><b>${esc(m.name)}</b></td><td>${esc(mcc(m.merchantCategoryCode))}</td><td>${esc(m.address?.city ?? "")}</td><td class="mono">${m.serviceRadiusKm} km</td><td><span class="pill ${m.verified ? "completed" : "pending"}">${m.verified ? "verified" : esc(m.status)}</span></td></tr>`).join("");
+    return head("Merchants", "A-MERCHANT: verified suppliers agents can find and buy from. Unverified merchants never appear in agent search.") + `<div class="panel" style="margin-bottom:18px"><h2>Search supply</h2><div class="filters"><input id="mq" value="cement" placeholder="What does the agent need?"><button class="btn btn-green" id="msearch">Search near Johannesburg</button></div><div id="mres" class="hint">Search runs against the same ranking an agent sees: price, distance, lead time and how fresh the stock count is.</div></div><div class="panel"><h2>Directory</h2><table class="grid wide"><thead><tr><th>Merchant</th><th>Category</th><th>City</th><th>Service radius</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  },
+  async connect() {
+    return head("Connect agents", "Use this platform from your own agent. The sandbox runs in this page, so these connect to a real A-CARD deployment.") + `<div class="panel"><div class="ctabs" id="ct">${["Claude Code", "Codex", "OpenClaw", "MCP server"].map((t, i) => `<button class="ctab${i ? "" : " sel"}" data-t="${t}">${t}</button>`).join("")}</div><div id="cc"></div><div class="hint" style="margin-top:14px">Get an agent API key (<span class="mono">ak_…</span>) from the A-CARD console, or run <span class="mono">acard signup</span> against the sandbox API. Add <span class="mono">ACARD_ENABLE_WALLET=true</span> to the environment to give the agent the sandbox wallet tools. Never paste a key into a chat.</div></div>`;
+  },
+};
+const CONNECT = {
+  "Claude Code": ["/plugin marketplace add khayaai/a-card", "/plugin install acard@a-card"],
+  "Codex": ["codex plugin marketplace add khayaai/a-card", "codex plugin add acard@a-card"],
+  "OpenClaw": ["openclaw plugins install ./plugins/acard"],
+  "MCP server": ["claude mcp add --transport http acard https://YOUR-A-CARD-HOST/mcp", "# then run /mcp to authenticate"],
+};
+const showConnect = (t) => { document.querySelectorAll("#ct .ctab").forEach((b) => b.classList.toggle("sel", b.dataset.t === t)); $("#cc").innerHTML = CONNECT[t].map((c) => `<div class="cmd">${esc(c)}<button class="cmd-copy" data-copy="${esc(c)}">Copy</button></div>`).join("") + (t === "MCP server" ? "" : '<div class="hint" style="margin-top:10px">The marketplace is a private repository: it works for anyone with access to it.</div>'); };
+
+$("#vo").addEventListener("click", async (e) => {
+  const t = e.target.closest("button, a"); if (!t) return;
+  try {
+    if (t.dataset.close) { await api(`/v1/cards/${t.dataset.close}/close`, { method: "POST", body: "{}" }); toast("Card closed."); renderView(); refresh(); }
+    else if (t.dataset.fund) { await api("/v1/wallet/fund", { method: "POST", body: JSON.stringify({ amount: t.dataset.fund === "USD" ? 10000 : 500000, currency: t.dataset.fund }) }); toast(`Added ${t.dataset.fund === "USD" ? "$100" : "R5 000"} of test funds.`); renderView(); refresh(); }
+    else if (t.dataset.ap) { await fetch(API + "/sandbox/approve", { method: "POST", headers: { "x-sandbox-session": sid, "content-type": "application/json" }, body: JSON.stringify({ kind: t.dataset.k, id: t.dataset.id, decision: t.dataset.ap }) }); toast(t.dataset.ap === "approve" ? "Approved. The agent can retry once." : "Declined."); renderView(); refresh(); }
+    else if (t.id === "psave") { const blocked = $("#pb").value.split(",").map((x) => x.trim()).filter(Boolean); const th = parseInt($("#pt").value, 10); await api("/v1/policy", { method: "PUT", body: JSON.stringify({ blocked_merchant_categories: blocked, approval_threshold: th > 0 ? th : undefined }) }); toast("Policy saved. It applies to the next charge."); renderView(); }
+    else if (t.id === "ptry") { e.preventDefault(); location.hash = "agent"; $("#q").value = "Try to spend R500 at an online casino on a general card."; $("#q").focus(); }
+    else if (t.id === "msearch") {
+      const q = encodeURIComponent($("#mq").value.trim()); const r = await api(`/v1/merchants/search?q=${q}&lat=-26.2309&lng=28.1772&radius_km=60&quantity=50`);
+      const offers = r.offers ?? [];
+      $("#mres").innerHTML = offers.length ? `<table class="grid wide"><thead><tr><th>#</th><th>Supplier</th><th>Item</th><th class="right">Total</th><th>Distance</th><th>Lead</th><th>Stock</th></tr></thead><tbody>${offers.map((o, i) => `<tr class="${i ? "" : "row-hl"}"><td class="mono">${i + 1}</td><td><b>${esc(o.merchant?.name ?? "")}</b><div class="hint">${esc((o.matchReasons ?? []).slice(0, 2).join(" · "))}</div></td><td>${esc(o.item?.name ?? "")}</td><td class="right mono">${money(o.totalCents, o.currency)}</td><td class="mono">${o.distanceKm != null ? o.distanceKm.toFixed(0) + " km" : "—"}</td><td class="mono">${o.leadTimeDays}d</td><td><span class="pill ${o.freshness === "fresh" ? "completed" : "pending"}">${esc(o.freshness ?? "")}</span></td></tr>`).join("")}</tbody></table>${(r.excluded ?? r.exclusions ?? []).length ? `<div class="hint" style="margin-top:10px">${(r.excluded ?? r.exclusions).length} other candidate(s) excluded, with reasons the agent can see.</div>` : ""}` : "No supplier matched that search.";
+    }
+    else if (t.dataset.t) showConnect(t.dataset.t);
+    else if (t.dataset.copy) { navigator.clipboard?.writeText(t.dataset.copy).catch(() => {}); toast("Copied."); }
+  } catch (err) { toast(err.message); }
+});
+$("#vo").addEventListener("input", (e) => {
+  if (e.target.id !== "fq" && e.target.id !== "fs") return;
+  const q = $("#fq").value.toLowerCase(), st = $("#fs").value;
+  document.querySelectorAll("#txb tr").forEach((tr) => { tr.style.display = (!q || tr.dataset.s.toLowerCase().includes(q)) && (!st || tr.dataset.st === st) ? "" : "none"; });
+});
+new MutationObserver(() => { if (view === "connect" && $("#cc") && !$("#cc").innerHTML) showConnect("Claude Code"); }).observe($("#vo"), { childList: true, subtree: true });
+
 if (STANDALONE) { document.querySelector(".side-note").textContent = "Sandbox: simulated card network, mock chain, no real money. Runs entirely in this page; nothing is sent to any server, and reloading resets it. Live card issuance launches with our issuing partner."; $("#dlg p").textContent = "Switches the chat to a live Claude agent. Your key is sent only from this browser straight to Anthropic, never to A-CARD, and stays in this tab until you close it or remove it. Usage is billed to your Anthropic account."; }
-start();
+start().then(() => setView(NAVS.some((n) => n[0] === location.hash.slice(1)) ? location.hash.slice(1) : "agent"));
 </script>
 </body>
 </html>

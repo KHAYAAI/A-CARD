@@ -7,6 +7,10 @@ A chat page where anyone can try the whole platform on test money, next to a liv
 - **Demo agent (default, free).** A scripted agent: no AI model, no key. It makes the same tool calls Claude would, to the real sandbox platform: supply search and a scoped single-use card, a fuel card refusing a TV, a charge held for approval then retried once, x402 pay-per-call, a 20 USDC transfer held and 90 USDC refused, a USDC to ZARP swap. Anything else gets a short list of what it can do. The page labels it "Demo agent · scripted".
 - **Live Claude (optional, bring your own key).** A visitor adds their own Anthropic key in the page. It travels with each request over HTTPS, is used for that call only, and is never stored or logged by the server (it stays in the visitor's browser tab). The agent then has all 21 tools and handles free-form requests. Usage bills to the visitor's own Anthropic account.
 
+Screens, as in the console: Agent (chat), Manage cards, Track spending, Wallet, Approvals, Policies, Audit log, Merchants and Connect agents. They read the visitor's real records from the in-process API through `/sandbox/api/*`, an allow-list of the console's own endpoints (no keys, members or merchant admin). A visitor can edit organisation policy, close cards, add test funds and decide approvals, and nothing else.
+
+Restrictions shown and enforced: an organisation policy (gambling and crypto blocked to start, editable under Policies) that beats any card's rules, per-card limits and approval thresholds, wallet limits (10 USDC auto-approve, 50 per transfer, 200 a day, x402 up to 1 USDC) and x402 price ceilings.
+
 Each visitor gets a fresh account: R20 000 and US$500 in the fiat wallet, 500 test USDC on a mock chain. The real A-CARD API runs in-process (`/v1/*`) with a seeded A-MERCHANT directory and a paid x402 test API at `/demo/weather`.
 
 Limits: 40 messages a session, 12 tool calls a message, 6 new sessions per IP per hour. Everything is in memory: a restart resets it, so run one instance.

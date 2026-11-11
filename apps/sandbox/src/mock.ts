@@ -134,6 +134,17 @@ const SCENARIOS: Array<{ match: RegExp; steps: Step[] }> = [
     ],
   },
   {
+    match: /casino|gambl|lucky spin|7995|org(anisation)? policy/i,
+    steps: [
+      () => [say("I'll create a general-purpose card with no category limits of its own, then try to spend R500 at an online casino."), call("create_card", { label: "General spend", single_use: false, total_limit: 100000 })],
+      (r) => [say("Trying the charge."), call("pay_checkout", { card_id: last(r, "create_card")!.output.id, amount: 50000, merchant_name: "Lucky Spin Online", merchant_category: "7995" })],
+      (r) => {
+        const v = verdict(last(r, "pay_checkout"));
+        return [say(`A-CARD ${v}. ${v.startsWith("declined") ? "The card itself would have allowed it, but your organisation's policy blocks gambling on every card. Org policy beats card rules. See Policies to change it." : "Gambling isn't blocked in your policy right now. Add 7995 under Policies and try again."}`)];
+      },
+    ],
+  },
+  {
     match: /fuel|\btv\b|television/i,
     steps: [
       () => [say("I'll create a single-use R1 000 fuel card, which only works at fuel stations."), call("create_card", { label: "Fleet fuel", single_use: false, total_limit: 100000, per_transaction_limit: 100000, allowed_merchant_categories: ["5541"] })],
@@ -195,6 +206,7 @@ const HELP = `I'm the scripted demo agent: no AI model is running, but every act
 • Find supplier offers and buy with a scoped card ("find cement near Johannesburg")
 • A fuel card refusing a TV ("fuel card, then try to buy a TV")
 • A charge held for your approval ("spend R1 500, needs my approval")
+• A casino charge refused by organisation policy ("try a casino")
 • Paying an API per call with x402
 • A wallet transfer: 20 USDC held, 90 USDC refused
 • A swap from USDC to ZARP

@@ -124,6 +124,45 @@ describe("demo mode (no model, no key)", () => {
   });
 });
 
+describe("console screens and restrictions", () => {
+  it("serves the account's real records, and only the allowed endpoints", async () => {
+    const s = await session();
+    const h = { "x-sandbox-session": s.sid, "content-type": "application/json" };
+    const get = async (p: string) => (await fetch(`${base}/sandbox/api${p}`, { headers: h })).json() as Promise<any>;
+    expect((await get("/v1/policy")).policy.blocked_merchant_categories).toEqual(["7995", "6051"]);
+    expect((await get("/v1/merchants")).merchants.length).toBeGreaterThan(3);
+    expect((await get("/v1/auth/me")).account_holder.subscriptionTier).toBe("enterprise");
+    // Not on the allow-list: keys, members, merchant creation, anything else.
+    for (const [m, path] of [["GET", "/v1/keys"], ["POST", "/v1/keys"], ["POST", "/v1/merchants"], ["GET", "/v1/auth/members"], ["DELETE", "/v1/cards/x"]] as const) {
+      expect((await fetch(`${base}/sandbox/api${path}`, { method: m, headers: h, body: m === "POST" ? "{}" : undefined })).status).toBe(404);
+    }
+    expect((await fetch(`${base}/sandbox/api/v1/wallet/fund`, { method: "POST", headers: h, body: JSON.stringify({ amount: 999_999_999, currency: "ZAR" }) })).status).toBe(400);
+    expect((await fetch(`${base}/sandbox/state`)).status).toBe(401);
+    expect((await fetch(`${base}/sandbox/api/v1/cards`)).status).toBe(401);
+  });
+
+  it("organisation policy beats the card, and editing the policy changes the outcome", async () => {
+    const s = await session();
+    const h = { "x-sandbox-session": s.sid, "content-type": "application/json" };
+    const first = await s.chat("Try to spend R500 at an online casino on a general card.");
+    expect(results(first.events)[1]!.output).toContain("merchant_category_blocked_by_policy");
+    expect(texts(first.events)).toMatch(/Org policy beats card rules/);
+    // Unblock gambling in Policies, and the same attempt now goes through.
+    const put = await fetch(`${base}/sandbox/api/v1/policy`, { method: "PUT", headers: h, body: JSON.stringify({ blocked_merchant_categories: [] }) });
+    expect(put.status).toBe(200);
+    const second = await s.chat("Try to spend R500 at an online casino on a general card.");
+    expect(texts(second.events)).toMatch(/Gambling isn't blocked/);
+  });
+
+  it("one visitor cannot see another's records", async () => {
+    const a = await session(), b = await session();
+    await a.chat("Make me a R1 000 fuel card, then try to buy a TV with it.");
+    const read = async (sid: string) => ((await (await fetch(`${base}/sandbox/api/v1/cards`, { headers: { "x-sandbox-session": sid } })).json()) as any).cards;
+    expect((await read(a.sid)).length).toBe(1);
+    expect((await read(b.sid)).length).toBe(0);
+  });
+});
+
 describe("live mode (visitor's own key)", () => {
   it("uses the visitor's key for that request and keeps nothing", async () => {
     const s = await session();

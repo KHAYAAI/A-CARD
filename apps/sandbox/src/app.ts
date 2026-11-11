@@ -142,6 +142,11 @@ export async function createSandbox(opts: SandboxOptions) {
     const sessionToken = await register("Sandbox visitor");
     await call("POST", "/v1/wallet/fund", sessionToken, { amount: 2_000_000, currency: "ZAR" });
     await call("POST", "/v1/wallet/fund", sessionToken, { amount: 50_000, currency: "USD" });
+    // Enterprise plan, so the Policies, Audit and Departments screens and card limits behave as they do for a business.
+    const me = await call("GET", "/v1/auth/me", sessionToken);
+    platform.setSubscriptionTier(me.account_holder.id, "enterprise");
+    // Starting organisation policy, as the demo business has: gambling and crypto are blocked on every card.
+    await call("PUT", "/v1/policy", sessionToken, { blocked_merchant_categories: ["7995", "6051"] });
     const issued = await call("POST", "/v1/keys", sessionToken, { name: "sandbox agent" });
     const agentKey = (issued.api_key ?? issued.secret) as string;
     const approvals = new MemoryApprovalStore();
@@ -198,6 +203,27 @@ export async function createSandbox(opts: SandboxOptions) {
     ]);
     const body = { wallet, cards, transactions, card_approvals: cardApprovals.approvals ?? [], chain, wallet_approvals: s.approvals.pending(), turns_left: maxTurns - s.turns };
     return c.body(JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v)), 200, { "content-type": "application/json" });
+  });
+
+  // The console's own endpoints for this visitor's account, so every screen shows real records.
+  // Read-mostly; the few writes are exactly what a console user can do (edit policy, close a card, add test funds).
+  const READ = /^\/v1\/(cards|cards\/[\w-]+|transactions|approvals|wallet|policy|audit|merchants|merchants\/search|merchants\/[\w-]+|orders|orders\/[\w-]+|auth\/me)$/;
+  const WRITE = [["PUT", /^\/v1\/policy$/], ["POST", /^\/v1\/cards\/[\w-]+\/close$/], ["POST", /^\/v1\/wallet\/fund$/]] as const;
+  app.all("/sandbox/api/*", async (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    const path = new URL(c.req.url).pathname.replace(/^\/sandbox\/api/, "");
+    const method = c.req.method;
+    const allowed = (method === "GET" && READ.test(path)) || WRITE.some(([m, re]) => m === method && re.test(path));
+    if (!allowed) return c.json({ error: "not available in the sandbox" }, 404);
+    const url = `${base}${path}${new URL(c.req.url).search}`;
+    const body = method === "GET" ? undefined : await c.req.text();
+    if (method === "POST" && path === "/v1/wallet/fund") {
+      const amount = Number((JSON.parse(body || "{}") as any).amount);
+      if (!(amount > 0 && amount <= 5_000_000)) return c.json({ error: { code: "invalid_request", message: "Test top-ups are capped at 50 000 per request." } }, 400);
+    }
+    const res = await acard.fetch(new Request(url, { method, headers: { authorization: `Bearer ${s.sessionToken}`, "content-type": "application/json" }, body }));
+    return new Response(await res.text(), { status: res.status, headers: { "content-type": "application/json" } });
   });
 
   app.post("/sandbox/approve", async (c) => {
