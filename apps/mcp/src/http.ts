@@ -25,8 +25,11 @@ export async function handleMcpRequest(request: Request, options: { wallets?: Wa
     );
   }
 
-  const client = new AcardClient({ baseUrl: ACARD_API_URL, apiKey });
-  const wallet = options.wallets ? await options.wallets.forKey(apiKey) : undefined;
+  // A partner platform can host one MCP connection per customer by forwarding this header.
+  const customer = request.headers.get("a-card-customer") ?? undefined;
+  const client = new AcardClient({ baseUrl: ACARD_API_URL, apiKey, customer });
+  // Each customer gets its own agent wallet, never the partner's.
+  const wallet = options.wallets ? await options.wallets.forKey(customer ? `${apiKey}#customer:${customer}` : apiKey) : undefined;
   const server = createMcpServer(client, { wallet });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);

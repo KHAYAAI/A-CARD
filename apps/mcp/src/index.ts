@@ -79,6 +79,6 @@ if (!apiKey) {
 // a plugin install never presents invented balances to an agent.
 const wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore(), x402AllowPrivateNetworks: env("ACARD_WALLET_X402_ALLOW_PRIVATE_NETWORKS") === "true" }) : undefined;
 
-const server = createMcpServer(new AcardClient({ baseUrl, apiKey }), { wallet });
+const server = createMcpServer(new AcardClient({ baseUrl, apiKey, customer: env("ACARD_CUSTOMER") }), { wallet });
 await server.connect(new StdioServerTransport());
 console.error(`acard MCP server connected (API: ${baseUrl})${wallet ? " · sandbox wallet on" : ""}`);

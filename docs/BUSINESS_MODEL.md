@@ -37,6 +37,9 @@ Give aggregators 10–25% of our revenue from customers they bring, as studios d
 **Worked example (illustrative):** a platform with 2,000 users whose agents spend $200 a month each = $400,000 of monthly volume. At 1% that is $4,000 a month; if an aggregator introduced it, 20% ($800) goes to them and we keep $3,200. Twenty such platforms ≈ $64,000 a month (about $770,000 a year), from twenty integrations rather than 40,000 individual sign-ups.
 
 ## What this needs from the product
+
+**Built (2026-11-23):** items 1–4 below. Guide: `docs/partners/INTEGRATION.md`; MCP listing: `docs/partners/MCP_LISTING.md`. Still to do: the hosted card form (waits on the Basis Theory adapter) and transactional emails (no email sender yet; they should read `/v1/branding`).
+
 1. **Platform accounts with sub-customers:** a platform creates and manages its own users' agents, cards and limits under one contract.
 2. **White label:** the platform's name and logo on approvals, emails and the hosted card form.
 3. **Revenue-share reporting:** volume and fees per platform and per aggregator, monthly statements.

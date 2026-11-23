@@ -30,6 +30,8 @@ export interface AcardOptions extends Omit<HttpOptions, "token" | "baseUrl"> {
   apiKey: string;
   /** Defaults to the local sandbox, http://localhost:8787. */
   baseUrl?: string;
+  /** Partners only: act for this customer (account holder id or your external_ref). */
+  customer?: string;
 }
 
 const DEFAULT_BASE_URL = "http://localhost:8787";
@@ -55,10 +57,14 @@ export class Acard {
   readonly merchants: MerchantsResource;
   readonly orders: OrdersResource;
   readonly x402: X402Resource;
+  /** Platform partners: your customers, brand and revenue statements. */
+  readonly partner: PartnerResource;
 
-  constructor(options: AcardOptions) {
+  constructor(private readonly options: AcardOptions) {
     if (!options?.apiKey) throw new Error("Acard: apiKey is required");
-    this.http = new Http({ ...options, baseUrl: options.baseUrl ?? DEFAULT_BASE_URL, token: options.apiKey });
+    const headers = { ...(options.headers ?? {}), ...(options.customer ? { "a-card-customer": options.customer } : {}) };
+    this.http = new Http({ ...options, headers, baseUrl: options.baseUrl ?? DEFAULT_BASE_URL, token: options.apiKey });
+    this.partner = new PartnerResource(this.http);
     this.wallet = new WalletResource(this.http);
     this.cards = new CardsResource(this.http);
     this.transactions = new TransactionsResource(this.http);
@@ -67,6 +73,19 @@ export class Acard {
     this.merchants = new MerchantsResource(this.http);
     this.orders = new OrdersResource(this.http);
     this.x402 = new X402Resource(this.http);
+  }
+
+  /**
+   * A client that acts for one of your customers, with your own key.
+   *
+   * ```ts
+   * const { customer } = await acard.partner.customers.create({ email, name, external_ref: "user-42" });
+   * const ann = acard.forCustomer("user-42");
+   * await ann.cards.create({ label: "shopping agent", limits: { per_transaction: 5_000 } });
+   * ```
+   */
+  forCustomer(customer: string): Acard {
+    return new Acard({ ...this.options, customer });
   }
 
   /**
@@ -254,5 +273,54 @@ class OrdersResource {
 
   async cancel(id: string, options: RequestOptions = {}): Promise<Order> {
     return (await this.http.request<{ order: Order }>("POST", `/v1/orders/${encodeURIComponent(id)}/cancel`, options)).order;
+  }
+}
+
+
+export interface PartnerBrand {
+  display_name: string;
+  logo_url?: string;
+  primary_color?: string;
+  support_email?: string;
+  support_url?: string;
+}
+export interface PartnerCustomerInput {
+  email: string;
+  name: string;
+  external_ref?: string;
+  currency?: string;
+  account_type?: "personal" | "enterprise";
+}
+
+class PartnerResource {
+  readonly customers: {
+    create: (input: PartnerCustomerInput) => Promise<{ customer: { account_holder_id: string; external_ref: string | null; name: string; email: string; currency: string }; act_as: { header: string; value: string } }>;
+    list: () => Promise<{ data: Array<Record<string, unknown>> }>;
+    get: (idOrRef: string) => Promise<Record<string, unknown>>;
+  };
+  constructor(private readonly http: Http) {
+    this.customers = {
+      create: (input) => this.http.request("POST", "/v1/partner/customers", { body: input }),
+      list: () => this.http.request("GET", "/v1/partner/customers"),
+      get: (idOrRef) => this.http.request("GET", `/v1/partner/customers/${encodeURIComponent(idOrRef)}`),
+    };
+  }
+  /** Turn this account into a platform partner. */
+  enroll(input: { name: string; brand?: PartnerBrand }): Promise<Record<string, unknown>> {
+    return this.http.request("POST", "/v1/partner", { body: input });
+  }
+  get(): Promise<Record<string, unknown>> {
+    return this.http.request("GET", "/v1/partner");
+  }
+  setBrand(brand: PartnerBrand): Promise<Record<string, unknown>> {
+    return this.http.request("PUT", "/v1/partner/brand", { body: brand });
+  }
+  /** Monthly statement. `month` is YYYY-MM (default: this month). Amounts in minor units. */
+  revenue(month?: string): Promise<Record<string, unknown>> {
+    return this.http.request("GET", `/v1/partner/revenue${month ? `?month=${encodeURIComponent(month)}` : ""}`);
+  }
+  /** The brand to show the current account (partner's brand for its customers). */
+  branding(): Promise<{ white_label: boolean; partner_id: string | null; brand: Record<string, string | null>; powered_by: string }> {
+    return this.http.request("GET", "/v1/branding");
   }
 }

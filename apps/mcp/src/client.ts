@@ -7,6 +7,8 @@
 export interface AcardClientOptions {
   baseUrl: string;
   apiKey: string;
+  /** Partners: act for this customer (sent as A-Card-Customer). */
+  customer?: string;
 }
 
 export class AcardApiError extends Error {
@@ -27,6 +29,7 @@ export class AcardClient {
       ...init,
       headers: {
         authorization: `Bearer ${this.options.apiKey}`,
+        ...(this.options.customer ? { "a-card-customer": this.options.customer } : {}),
         "content-type": "application/json",
         ...(init.headers ?? {}),
       },

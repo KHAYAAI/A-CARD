@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AttachedCards, CryptoWallets, PayRouting } from "./WalletTabs";
-import { AgentsPanel, NeedsAttention, OrdersPanel, PlanPanel, VerificationPanel } from "./Platform";
+import { AgentsPanel, BrandBar, NeedsAttention, OrdersPanel, PartnerPanel, PlanPanel, VerificationPanel } from "./Platform";
 
 const API_URL = process.env.NEXT_PUBLIC_ACARD_API_URL ?? "http://localhost:8787";
 
@@ -108,6 +108,7 @@ const NAV: NavItem[] = [
   { view: "security", label: "Security", icon: "shieldCheck" },
   { view: "verification", label: "Verification", icon: "check" },
   { view: "plan", label: "Plan & billing", icon: "spark" },
+  { view: "partner", label: "Partner program", icon: "plug", crumb: "Partner program", min: "admin" },
   { view: "merchants", label: "Merchants", icon: "building", crumb: "Merchants", min: "admin" },
   { view: "team", label: "Team", icon: "users", min: "admin" },
 ];
@@ -580,6 +581,7 @@ export default function Dashboard() {
   return (
     <div id="app" className="on">
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
+        <BrandBar call={call} />
         <div className="side-acct">
           <div className="acct-badge">{orgInitial}</div>
           <div className="who"><div className="n">{holder?.name ?? "Account"} {isEnt && <span className="badge-ent" style={{ fontSize: 9 }}>Ent</span>}</div><div className="e">{holder?.email ?? ""}</div></div>
@@ -854,6 +856,7 @@ export default function Dashboard() {
           {view === "orders" && <OrdersPanel call={call} flash={flash} />}
           {view === "agents" && can(role, "admin") && <AgentsPanel call={call} flash={flash} />}
           {view === "verification" && <VerificationPanel call={call} flash={flash} />}
+          {view === "partner" && can(role, "admin") && <PartnerPanel call={call} flash={flash} />}
           {view === "plan" && <PlanPanel call={call} flash={flash} current={holder?.subscriptionTier} />}
           {view === "security" && (
             <>

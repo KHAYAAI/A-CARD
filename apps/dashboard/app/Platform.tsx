@@ -252,3 +252,124 @@ export function NeedsAttention({ call, goto, cardApprovals }: { call: Call; goto
     </div>
   );
 }
+
+/* =============================================================== white label */
+type Branding = { white_label: boolean; brand: { display_name: string; logo_url: string | null; primary_color: string | null; support_email: string | null; support_url: string | null } };
+
+/** The partner's brand for its customers (and itself); nothing for ordinary accounts. */
+export function BrandBar({ call }: { call: Call }) {
+  const [b, setB] = useState<Branding | null>(null);
+  useEffect(() => { call("/v1/branding").then(setB).catch(() => setB(null)); }, [call]);
+  useEffect(() => {
+    const c = b?.white_label ? b.brand.primary_color : null;
+    if (c) document.documentElement.style.setProperty("--brand", c);
+    return () => { document.documentElement.style.removeProperty("--brand"); };
+  }, [b]);
+  if (!b?.white_label) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border-soft)", borderLeft: `4px solid ${b.brand.primary_color ?? "var(--green)"}` }}>
+      {b.brand.logo_url && <img src={b.brand.logo_url} alt="" style={{ height: 22, maxWidth: 90, objectFit: "contain" }} />}
+      <div style={{ lineHeight: 1.2 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>{b.brand.display_name}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>Powered by A-CARD{b.brand.support_email ? ` · ${b.brand.support_email}` : ""}</div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================== partner program */
+export function PartnerPanel({ call, flash }: { call: Call; flash: Flash }) {
+  const [p, setP] = useState<any | null | undefined>(undefined);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [rev, setRev] = useState<any | null>(null);
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState({ display_name: "", logo_url: "", primary_color: "#1f8f5f", support_email: "" });
+  const [cust, setCust] = useState({ name: "", email: "", external_ref: "" });
+  const load = useCallback(async () => {
+    try {
+      const me = await call("/v1/partner");
+      setP(me);
+      setBrand({ display_name: me.brand.display_name ?? "", logo_url: me.brand.logo_url ?? "", primary_color: me.brand.primary_color ?? "#1f8f5f", support_email: me.brand.support_email ?? "" });
+      setCustomers((await call("/v1/partner/customers")).data ?? []);
+    } catch { setP(null); }
+  }, [call]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (p) call(`/v1/partner/revenue?month=${month}`).then(setRev).catch(() => setRev(null)); }, [p, month, call]);
+  const clean = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v.trim() !== ""));
+  const enroll = async () => {
+    try { await call("/v1/partner", { method: "POST", body: JSON.stringify({ name, brand: { display_name: name } }) }); flash("You're a partner. Add your brand and first customer."); load(); }
+    catch (e) { flash((e as Error).message); }
+  };
+  const saveBrand = async () => {
+    try { setP(await call("/v1/partner/brand", { method: "PUT", body: JSON.stringify(clean(brand)) })); flash("Brand saved. Your customers now see it."); }
+    catch (e) { flash((e as Error).message); }
+  };
+  const addCustomer = async () => {
+    try { const r = await call("/v1/partner/customers", { method: "POST", body: JSON.stringify(clean(cust)) }); flash(`Customer created: act for them with A-Card-Customer: ${r.customer.external_ref ?? r.customer.account_holder_id}`); setCust({ name: "", email: "", external_ref: "" }); load(); }
+    catch (e) { flash((e as Error).message); }
+  };
+  const fmt = (o: Record<string, number> | undefined) => (o && Object.keys(o).length ? Object.entries(o).map(([c, v]) => money(v, c)).join(" + ") : "—");
+
+  if (p === undefined) return <Off text="Loading…" />;
+  if (p === null) return (
+    <>
+      <Head title="Partner program" sub="Embed A-CARD in your platform: create your own customers, put your brand on it, and share in the revenue." />
+      <div className="panel panel-pad" style={{ maxWidth: 520 }}>
+        <ul style={{ margin: "0 0 14px", paddingLeft: 18, color: "var(--muted)", fontSize: 14 }}>
+          <li>One contract and one API key for all your users</li>
+          <li>Your name, logo and colour on approvals and the dashboard</li>
+          <li>Monthly revenue statements per customer</li>
+        </ul>
+        <div className="field"><label>PLATFORM NAME</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your platform" /></div>
+        <button className="btn btn-green" disabled={name.trim().length < 2} onClick={enroll}>Become a partner</button>
+      </div>
+    </>
+  );
+  return (
+    <>
+      <Head title="Partner program" sub={`${p.name} · ${customers.length} customer${customers.length === 1 ? "" : "s"} · fees ${p.terms.volume_bps / 100}% of card volume`} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
+        <div className="panel panel-pad">
+          <div className="eyebrow">YOUR BRAND</div>
+          <div className="field"><label>DISPLAY NAME</label><input value={brand.display_name} onChange={(e) => setBrand({ ...brand, display_name: e.target.value })} /></div>
+          <div className="field"><label>LOGO URL (HTTPS)</label><input value={brand.logo_url} onChange={(e) => setBrand({ ...brand, logo_url: e.target.value })} placeholder="https://…/logo.png" /></div>
+          <div className="field"><label>COLOUR</label><div style={{ display: "flex", gap: 10, alignItems: "center" }}><input type="color" value={brand.primary_color} onChange={(e) => setBrand({ ...brand, primary_color: e.target.value })} style={{ width: 52, height: 40, padding: 2, flex: "none", cursor: "pointer" }} /><span className="mono" style={{ fontSize: 13 }}>{brand.primary_color}</span></div></div>
+          <div className="field"><label>SUPPORT EMAIL</label><input value={brand.support_email} onChange={(e) => setBrand({ ...brand, support_email: e.target.value })} /></div>
+          <button className="btn btn-green" onClick={saveBrand}>Save brand</button>
+        </div>
+        <div className="panel panel-pad">
+          <div className="eyebrow">ADD A CUSTOMER</div>
+          <div className="field"><label>NAME</label><input value={cust.name} onChange={(e) => setCust({ ...cust, name: e.target.value })} /></div>
+          <div className="field"><label>EMAIL</label><input value={cust.email} onChange={(e) => setCust({ ...cust, email: e.target.value })} /></div>
+          <div className="field"><label>YOUR REFERENCE (OPTIONAL)</label><input value={cust.external_ref} onChange={(e) => setCust({ ...cust, external_ref: e.target.value })} placeholder="user-42" /></div>
+          <button className="btn btn-green" disabled={!cust.name || !cust.email} onClick={addCustomer}>Create customer</button>
+          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 10 }}>Then call any API route with your key and the header <span className="mono">A-Card-Customer</span>.</p>
+        </div>
+      </div>
+      <div className="panel panel-pad" style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="eyebrow">REVENUE STATEMENT</div>
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+        </div>
+        {!rev ? <Off text="No statement yet." /> : (
+          <>
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", margin: "10px 0" }}>
+              <div><div style={th}>Card volume</div><div className="serif" style={{ fontSize: 22 }}>{fmt(rev.volume)}</div></div>
+              <div><div style={th}>Active cards</div><div className="serif" style={{ fontSize: 22 }}>{rev.active_cards}</div></div>
+              <div><div style={th}>A-CARD fees</div><div className="serif" style={{ fontSize: 22 }}>{fmt(rev.fees.total)}</div></div>
+            </div>
+            {rev.fees.minimum_top_up > 0 && <p style={{ fontSize: 12, color: "var(--muted)" }}>Includes {money(rev.fees.minimum_top_up, rev.terms.currency)} to reach the monthly minimum of {money(rev.terms.monthly_minimum, rev.terms.currency)}.</p>}
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><th style={th}>Customer</th><th style={th}>Volume</th><th style={th}>Active cards</th><th style={th}>Transactions</th></tr></thead>
+              <tbody>{rev.customers.map((c: any) => {
+                const who = customers.find((x) => x.account_holder_id === c.account_holder_id);
+                return <tr key={c.account_holder_id}><td style={td}>{who?.name ?? c.account_holder_id}<div style={{ fontSize: 12, color: "var(--muted)" }}>{c.external_ref ?? ""}</div></td><td style={td}>{fmt(c.volume)}</td><td style={td}>{c.active_cards}</td><td style={td}>{c.transactions}</td></tr>;
+              })}</tbody>
+            </table>
+          </>
+        )}
+      </div>
+    </>
+  );
+}

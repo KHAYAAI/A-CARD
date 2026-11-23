@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "cc.a-card/acard",
+  "title": "A-CARD",
+  "description": "Payment cards for AI agents: virtual cards with spending rules, human approvals, and A-MERCHANT ordering. Sandbox: test money only.",
+  "version": "0.1.0",
+  "websiteUrl": "https://a-card.cc",
+  "repository": { "url": "https://github.com/KHAYAAI/A-CARD", "source": "github", "subfolder": "apps/mcp" },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.a-card.cc/mcp",
+      "headers": [
+        { "name": "Authorization", "description": "Bearer <your A-CARD API key (ak_...)>", "isRequired": true, "isSecret": true },
+        { "name": "A-Card-Customer", "description": "Platform partners only: the customer to act for (account holder id or your external_ref)", "isRequired": false, "isSecret": false }
+      ]
+    }
+  ]
+}

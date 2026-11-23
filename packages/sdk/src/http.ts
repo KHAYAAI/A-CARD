@@ -10,6 +10,8 @@ export interface HttpOptions {
   timeoutMs?: number;
   /** Bring your own fetch (tests, proxies, edge runtimes). Defaults to global fetch. */
   fetch?: typeof fetch;
+  /** Extra headers on every request (e.g. A-Card-Customer when a partner acts for a customer). */
+  headers?: Record<string, string>;
 }
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -43,7 +45,7 @@ export class Http {
       url.searchParams.set(key, Array.isArray(value) ? value.join(",") : String(value));
     }
 
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = { accept: "application/json", ...(this.options.headers ?? {}) };
     if (init.auth !== false) headers.authorization = `Bearer ${this.options.token}`;
     if (init.body !== undefined) headers["content-type"] = "application/json";
     if (method !== "GET") headers["idempotency-key"] = init.idempotencyKey ?? crypto.randomUUID();
