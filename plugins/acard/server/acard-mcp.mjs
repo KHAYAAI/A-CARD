@@ -18270,6 +18270,7 @@ var AcardClient = class {
       ...init,
       headers: {
         authorization: `Bearer ${this.options.apiKey}`,
+        ...this.options.customer ? { "a-card-customer": this.options.customer } : {},
         "content-type": "application/json",
         ...init.headers ?? {}
       }
@@ -22811,6 +22812,6 @@ if (!apiKey) {
   process.exit(1);
 }
 var wallet = env("ACARD_ENABLE_WALLET") === "true" ? await devWallet({ approvals: new FileApprovalStore(), x402AllowPrivateNetworks: env("ACARD_WALLET_X402_ALLOW_PRIVATE_NETWORKS") === "true" }) : void 0;
-var server = createMcpServer(new AcardClient({ baseUrl, apiKey }), { wallet });
+var server = createMcpServer(new AcardClient({ baseUrl, apiKey, customer: env("ACARD_CUSTOMER") }), { wallet });
 await server.connect(new StdioServerTransport());
 console.error(`acard MCP server connected (API: ${baseUrl})${wallet ? " \xB7 sandbox wallet on" : ""}`);
