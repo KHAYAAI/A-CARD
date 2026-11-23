@@ -15,7 +15,6 @@ fly secrets set --app acard-api \
   ISSUER_WEBHOOK_SECRET=$(openssl rand -hex 32) \
   ACARD_ENCRYPTION_KEY=$(openssl rand -hex 32) \
   DASHBOARD_URL=https://acard-app.fly.dev \
-  ACARD_ATTACHED_CARDS_PROVIDER=test \
   ACARD_ENABLE_AFP=true \
   ACARD_SELF_SERVE_STORES=true
 ```
