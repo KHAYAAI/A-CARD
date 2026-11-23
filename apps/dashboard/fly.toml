@@ -1,0 +1,15 @@
+# A-CARD dashboard. Deploy from the repo root (the API URL is baked in at build time):
+#   fly deploy --config apps/dashboard/fly.toml --dockerfile apps/dashboard/Dockerfile --build-arg NEXT_PUBLIC_ACARD_API_URL=https://acard-api.fly.dev .
+app = "acard-app"
+primary_region = "jnb"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

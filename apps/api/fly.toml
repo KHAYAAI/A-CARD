@@ -1,0 +1,18 @@
+# A-CARD API. Deploy from the repo root:
+#   fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile .
+app = "acard-api"
+primary_region = "jnb"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
+  [[http_service.checks]]
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
