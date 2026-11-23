@@ -61,6 +61,9 @@
       "description": "Charges held for a human, and the single-use grants approvals mint."
     },
     {
+      "name": "Attached cards"
+    },
+    {
       "name": "API keys",
       "description": "Programmatic credentials, full or read-only."
     },
@@ -2456,6 +2459,776 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/passkeys": {
+      "get": {
+        "operationId": "get_passkeys",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Your passkeys",
+        "description": "Person only: needs a dashboard session, not an agent API key.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "passkeys": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "passkeys"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/passkeys/registration-options": {
+      "post": {
+        "operationId": "post_passkeys_registration_options",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Start registering a passkey",
+        "description": "Person only: needs a dashboard session, not an agent API key. Returns WebAuthn creation options for the browser.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "options": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/passkeys/registration": {
+      "post": {
+        "operationId": "post_passkeys_registration",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Finish registering a passkey",
+        "description": "Person only: needs a dashboard session, not an agent API key. User verification (Face ID, fingerprint or device PIN) is required.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "passkey": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "passkey_response": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "passkey_response"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards": {
+      "get": {
+        "operationId": "get_attached_cards",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "List attached cards and settings",
+        "description": "Brand, last four and expiry only. The vault reference is never returned.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      },
+      "post": {
+        "operationId": "post_attached_cards",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Attach a card by its vault reference",
+        "description": "Person only: needs a dashboard session, not an agent API key. The card is entered in the vault provider's own form; send only its reference. Any request containing a card number is refused with `card_number_refused`.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "card": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider_ref": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 200
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 60
+                  }
+                },
+                "required": [
+                  "provider_ref"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards/{id}": {
+      "delete": {
+        "operationId": "delete_attached_cards_by_id",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Remove an attached card",
+        "description": "Person only: needs a dashboard session, not an agent API key. Also asks the provider to delete it.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "removed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards/settings": {
+      "put": {
+        "operationId": "put_attached_cards_settings",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Set auto-approve and per-purchase limits",
+        "description": "Person only: needs a dashboard session, not an agent API key.\n\nRequires the `admin` role or higher. Read-only API keys act as `viewer`.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "auto_approve_under": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "max_per_purchase": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-min-role": "admin",
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards/purchases": {
+      "post": {
+        "operationId": "post_attached_cards_purchases",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Ask to pay with an attached card",
+        "description": "Agents may call this. Organisation policy and the holder's limits run first. Under the auto-approve amount the provider releases a single-use credential bound to the merchant and amount and delivers it to the merchant's checkout; over it, the purchase waits for a passkey approval.\n\nRequires the `member` role or higher. Read-only API keys act as `viewer`.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "purchase": {},
+                    "passkey_needed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "passkey_needed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "card_id": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "currency": {
+                    "type": "string",
+                    "enum": [
+                      "ZAR",
+                      "USD",
+                      "NGN",
+                      "KES"
+                    ]
+                  },
+                  "merchant_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "merchant_category": {
+                    "type": "string",
+                    "pattern": "^\\d{4}$"
+                  },
+                  "checkout": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "network_token",
+                          "vault_proxy"
+                        ]
+                      },
+                      "destination": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "destination"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency",
+                  "merchant_name",
+                  "merchant_category",
+                  "checkout"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-min-role": "member",
+        "x-acard-requires": "attached_cards"
+      },
+      "get": {
+        "operationId": "get_attached_cards_purchases",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "List attached-card purchases",
+        "description": "Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "purchases": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "purchases"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards/purchases/{id}/approval-options": {
+      "post": {
+        "operationId": "post_attached_cards_purchases_by_id_approval_options",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Get a passkey prompt for one purchase",
+        "description": "Person only: needs a dashboard session, not an agent API key. The challenge is bound to this purchase and expires in 5 minutes.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "options": {},
+                    "purchase": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards/purchases/{id}/approve": {
+      "post": {
+        "operationId": "post_attached_cards_purchases_by_id_approve",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Approve a purchase with a passkey signature",
+        "description": "Person only: needs a dashboard session, not an agent API key. Verifies the signature (origin, user verification, one use), then releases the credential.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "purchase": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "passkey_response": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "passkey_response"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/attached-cards/purchases/{id}/deny": {
+      "post": {
+        "operationId": "post_attached_cards_purchases_by_id_deny",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Deny a held purchase",
+        "description": "Person only: needs a dashboard session, not an agent API key.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "purchase": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
       }
     },
     "/v1/approvals/{id}/approve": {

@@ -23,7 +23,7 @@ export const API_VERSION = "1.0.0";
 type Method = "get" | "post" | "put" | "patch" | "delete";
 type Auth = "none" | "tenant" | "merchant_session" | "merchant_key" | "issuer_signature" | "payfast_itn" | "compliance_signature";
 type Role = "viewer" | "member" | "admin" | "owner";
-type Requires = "merchants" | "merchant_portal" | "kyb_documents" | "afp" | "compliance" | "crypto_compliance" | "workos";
+type Requires = "merchants" | "merchant_portal" | "kyb_documents" | "afp" | "compliance" | "crypto_compliance" | "workos" | "attached_cards";
 
 interface Resp {
   /** Top-level key the payload is wrapped in, e.g. `card` in `{ card: {...} }`. */
@@ -150,6 +150,19 @@ export const ROUTES: RouteDoc[] = [
   // ---- transactions & approvals -----------------------------------------------------------
   r("get", "/v1/transactions", "Transactions", "List card transactions", { auth: "tenant", query: { card_id: { schema: str } }, response: { key: "transactions", ref: "CardTransaction", array: true } }),
   r("get", "/v1/approvals", "Approvals", "List approval requests", { auth: "tenant", query: statusQ(["pending", "approved", "denied", "consumed"]), response: { key: "approvals", ref: "Approval", array: true } }),
+  // ---- attached cards (bring your own card) and passkeys ---------------------------------------------
+  r("get", "/v1/passkeys", "Attached cards", "Your passkeys", { auth: "tenant", requires: "attached_cards", description: "Person only: needs a dashboard session, not an agent API key.", response: { schema: z.object({ passkeys: z.array(z.unknown()) }) } }),
+  r("post", "/v1/passkeys/registration-options", "Attached cards", "Start registering a passkey", { auth: "tenant", requires: "attached_cards", description: "Person only: needs a dashboard session, not an agent API key." + " Returns WebAuthn creation options for the browser.", response: { schema: z.object({ options: z.unknown() }) } }),
+  r("post", "/v1/passkeys/registration", "Attached cards", "Finish registering a passkey", { auth: "tenant", requires: "attached_cards", body: S.passkeyResponseSchema, description: "Person only: needs a dashboard session, not an agent API key." + " User verification (Face ID, fingerprint or device PIN) is required.", response: { status: 201, schema: z.object({ passkey: z.unknown() }) } }),
+  r("get", "/v1/attached-cards", "Attached cards", "List attached cards and settings", { auth: "tenant", requires: "attached_cards", description: "Brand, last four and expiry only. The vault reference is never returned.", response: { schema: z.object({}).passthrough() } }),
+  r("post", "/v1/attached-cards", "Attached cards", "Attach a card by its vault reference", { auth: "tenant", requires: "attached_cards", body: S.attachCardSchema, description: "Person only: needs a dashboard session, not an agent API key." + " The card is entered in the vault provider's own form; send only its reference. Any request containing a card number is refused with `card_number_refused`.", response: { status: 201, schema: z.object({ card: z.unknown() }) } }),
+  r("delete", "/v1/attached-cards/{id}", "Attached cards", "Remove an attached card", { auth: "tenant", requires: "attached_cards", description: "Person only: needs a dashboard session, not an agent API key." + " Also asks the provider to delete it.", response: { schema: z.object({ removed: z.boolean() }) } }),
+  r("put", "/v1/attached-cards/settings", "Attached cards", "Set auto-approve and per-purchase limits", { auth: "tenant", role: "admin", requires: "attached_cards", body: S.attachedCardSettingsSchema, description: "Person only: needs a dashboard session, not an agent API key.", response: { schema: z.object({ settings: z.unknown() }) } }),
+  r("post", "/v1/attached-cards/purchases", "Attached cards", "Ask to pay with an attached card", { auth: "tenant", role: "member", requires: "attached_cards", body: S.attachedPurchaseSchema, description: "Agents may call this. Organisation policy and the holder's limits run first. Under the auto-approve amount the provider releases a single-use credential bound to the merchant and amount and delivers it to the merchant's checkout; over it, the purchase waits for a passkey approval.", response: { status: 201, schema: z.object({ purchase: z.unknown(), passkey_needed: z.boolean() }) } }),
+  r("get", "/v1/attached-cards/purchases", "Attached cards", "List attached-card purchases", { auth: "tenant", requires: "attached_cards", response: { schema: z.object({ purchases: z.array(z.unknown()) }) } }),
+  r("post", "/v1/attached-cards/purchases/{id}/approval-options", "Attached cards", "Get a passkey prompt for one purchase", { auth: "tenant", requires: "attached_cards", description: "Person only: needs a dashboard session, not an agent API key." + " The challenge is bound to this purchase and expires in 5 minutes.", response: { schema: z.object({ options: z.unknown(), purchase: z.unknown() }) } }),
+  r("post", "/v1/attached-cards/purchases/{id}/approve", "Attached cards", "Approve a purchase with a passkey signature", { auth: "tenant", requires: "attached_cards", body: S.passkeyResponseSchema, description: "Person only: needs a dashboard session, not an agent API key." + " Verifies the signature (origin, user verification, one use), then releases the credential.", response: { schema: z.object({ purchase: z.unknown() }) } }),
+  r("post", "/v1/attached-cards/purchases/{id}/deny", "Attached cards", "Deny a held purchase", { auth: "tenant", requires: "attached_cards", description: "Person only: needs a dashboard session, not an agent API key.", response: { schema: z.object({ purchase: z.unknown() }) } }),
   r("post", "/v1/approvals/{id}/approve", "Approvals", "Approve a held charge", {
     auth: "tenant",
     role: "member",
@@ -373,6 +386,7 @@ const REQUIRES_TEXT: Record<Requires, string> = {
   compliance: "Mounted when compliance is enabled (ACARD_ENABLE_COMPLIANCE=true).",
   crypto_compliance: "Mounted when crypto compliance is configured. Inert while AFP's crypto rails are sandboxed.",
   workos: "Requires WorkOS SSO to be configured; returns `sso_not_configured` otherwise.",
+  attached_cards: "Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
 };
 
 const SECURITY: Record<Auth, Array<Record<string, string[]>>> = {

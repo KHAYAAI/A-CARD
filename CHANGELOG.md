@@ -8,6 +8,15 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: attached cards in the platform, with real passkey approval
+
+### Added
+- **Attached cards API** (`/v1/attached-cards*`, mounted only when a card vault provider and passkey settings are configured): attach a card by its vault reference, list, remove, set auto-approve and per-purchase limits, and let agents request purchases. A-CARD stores only the provider's reference plus brand, last four and expiry; any request containing a card number is refused (`card_number_refused`).
+- **Passkey approval (WebAuthn)**: register a passkey; approve a held purchase with a signature bound to that purchase, user verification required, origin checked, single use. Agent API keys can't approve (`person_required`).
+- **Card vault contract** (`CardVaultProvider`) with a development-only test provider (refused when `NODE_ENV=production`). No real provider adapter yet.
+- **Dashboard**: Wallet, then "Your cards": add a passkey, attach (test) cards, set rules, approve with passkey.
+- Docs: `docs/ATTACHED_CARDS.md` updated; counsel questions on card data and POPIA added to the outreach pack.
+
 ## [Unreleased]: attach your own card (sandbox prototype)
 
 ### Added

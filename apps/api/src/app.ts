@@ -41,6 +41,7 @@ import type { AfpLedgerPort } from "./afp/index.js";
 import { usdToAtomic, X402RequestError, type X402Outcome, type X402Payer, type X402Tab } from "./x402/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
 import { parseCatalogCsv, CSV_TEMPLATE } from "./merchant/csv.js";
+import { AttachedCardError, AttachedCardService, PasskeyError, PasskeyService, publicCard, publicPurchase, type CardVaultProvider, type PasskeyConfig } from "./attachedCards/index.js";
 import { deliverMerchantWebhook, type MerchantWebhookEvent } from "./merchant/webhooks.js";
 import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
 import {
@@ -80,6 +81,10 @@ import {
   merchantApiKeySchema,
   catalogSyncSchema,
   storeSignupSchema,
+  attachCardSchema,
+  attachedCardSettingsSchema,
+  attachedPurchaseSchema,
+  passkeyResponseSchema,
   bulkRestateSchema,
   blocklistEntrySchema,
   monitorTransactionSchema,
@@ -173,6 +178,16 @@ export interface AppConfig {
    * `cards` maps an Investec card id to an A-CARD card id.
    */
   investecPilot?: { secret: string; cards: Record<string, string> };
+  /**
+   * Attached cards ("bring your own card"), optional. The card is held by a
+   * certified card vault or as a network token (the provider); A-CARD keeps a
+   * reference only and refuses card numbers outright. Purchases over the
+   * holder's auto-approve amount need a passkey signature from a person, so
+   * mounting this requires `passkeys` too.
+   */
+  attachedCards?: { provider: CardVaultProvider };
+  /** WebAuthn relying-party settings for passkey approvals. */
+  passkeys?: PasskeyConfig;
   /**
    * Open store signup (`POST /v1/merchant-api/signup`): a shop applies to list
    * itself and gets a write-scoped merchant key at once. Off unless set. The
@@ -1005,6 +1020,99 @@ export function createApp(config: AppConfig) {
   });
 
   // ---- approvals ----------------------------------------------------------------
+
+  // ---- attached cards (bring your own card) + passkeys ---------------------------------
+  if (config.attachedCards && config.passkeys) {
+    const passkeys = new PasskeyService(config.passkeys);
+    const attached = new AttachedCardService(config.attachedCards.provider, async (id) => (await platform.getPolicy(id)).blockedMerchantCategories);
+    /** A person signed in on the dashboard, never an agent's API key. */
+    const humanOnly = async (c: Context<Env>, next: () => Promise<void>) => {
+      if (!c.get("sessionUser")) {
+        return c.json({ error: { code: "person_required", message: "a person must do this, signed in on the dashboard; agent API keys cannot" } }, 403);
+      }
+      return next();
+    };
+    /** Card numbers never enter A-CARD: refuse any request body that contains one. */
+    const noCardNumbers = async (c: Context<Env>, next: () => Promise<void>) => {
+      const raw = await c.req.raw.clone().text().catch(() => "");
+      for (const m of raw.matchAll(/(?:\d[ -]?){13,19}/g)) {
+        const d = m[0].replace(/[ -]/g, "");
+        let sum = 0;
+        for (let i = 0; i < d.length; i++) { let x = Number(d[d.length - 1 - i]); if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; }
+        if (d.length >= 13 && sum % 10 === 0) {
+          return c.json({ error: { code: "card_number_refused", message: "never send card numbers to A-CARD: enter the card in your card vault's own form and send its reference" } }, 400);
+        }
+      }
+      return next();
+    };
+    const fail = (c: Context<Env>, e: unknown) => {
+      if (e instanceof AttachedCardError || e instanceof PasskeyError) return c.json({ error: { code: e.code, message: e.message } }, e.status);
+      throw e;
+    };
+    app.use("/v1/attached-cards/*", noCardNumbers);
+    app.use("/v1/attached-cards", noCardNumbers);
+
+    app.get("/v1/passkeys", humanOnly, async (c) => c.json({ passkeys: passkeys.list(c.get("sessionUser")!.id) }));
+    app.post("/v1/passkeys/registration-options", humanOnly, async (c) => {
+      const u = c.get("sessionUser")!;
+      return c.json({ options: await passkeys.registrationOptions({ id: u.id, email: u.email, name: u.name }) });
+    });
+    app.post("/v1/passkeys/registration", humanOnly, async (c) => {
+      try {
+        const body = passkeyResponseSchema.parse(await c.req.json());
+        return c.json({ passkey: await passkeys.verifyRegistration(c.get("sessionUser")!.id, body.passkey_response) }, 201);
+      } catch (e) { return fail(c, e); }
+    });
+
+    app.get("/v1/attached-cards", async (c) => {
+      const holder = c.get("holder");
+      return c.json({ cards: attached.list(holder.id).map(publicCard), settings: attached.getSettings(holder.id), provider: { name: attached.provider.name, kind: attached.provider.kind } });
+    });
+    app.post("/v1/attached-cards", humanOnly, async (c) => {
+      try {
+        const body = attachCardSchema.parse(await c.req.json());
+        const card = await attached.attach(c.get("holder").id, body.provider_ref, c.get("sessionUser")!.email, body.label);
+        return c.json({ card: publicCard(card) }, 201);
+      } catch (e) { return fail(c, e); }
+    });
+    app.delete("/v1/attached-cards/:id", humanOnly, async (c) => {
+      try { await attached.remove(c.get("holder").id, (c.req.param("id") as string)); return c.json({ removed: true }); } catch (e) { return fail(c, e); }
+    });
+    app.put("/v1/attached-cards/settings", humanOnly, requireRole("admin"), async (c) => {
+      try {
+        const body = attachedCardSettingsSchema.parse(await c.req.json());
+        return c.json({ settings: attached.setSettings(c.get("holder").id, { autoApproveUnder: body.auto_approve_under, maxPerPurchase: body.max_per_purchase }) });
+      } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/attached-cards/purchases", requireRole("member"), async (c) => {
+      const body = attachedPurchaseSchema.parse(await c.req.json());
+      const who = c.get("sessionUser")?.email ?? "api_key";
+      const p = await attached.request(c.get("holder").id, {
+        cardId: body.card_id, amount: body.amount, currency: body.currency,
+        target: { merchantName: body.merchant_name, merchantCategory: body.merchant_category, method: body.checkout.method, destination: body.checkout.destination },
+      }, who);
+      return c.json({ purchase: publicPurchase(p), passkey_needed: p.status === "awaiting_approval" }, 201);
+    });
+    app.get("/v1/attached-cards/purchases", async (c) => c.json({ purchases: attached.listPurchases(c.get("holder").id).map(publicPurchase) }));
+    app.post("/v1/attached-cards/purchases/:id/approval-options", humanOnly, async (c) => {
+      try {
+        const p = attached.get(c.get("holder").id, (c.req.param("id") as string));
+        if (p.status !== "awaiting_approval") return c.json({ error: { code: "not_pending", message: `purchase is ${p.status}` } }, 409);
+        return c.json({ options: await passkeys.authenticationOptions(c.get("sessionUser")!.id, `purchase:${p.id}`), purchase: publicPurchase(p) });
+      } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/attached-cards/purchases/:id/approve", humanOnly, async (c) => {
+      try {
+        const body = passkeyResponseSchema.parse(await c.req.json());
+        const u = c.get("sessionUser")!;
+        await passkeys.verifyAuthentication(u.id, `purchase:${(c.req.param("id") as string)}`, body.passkey_response);
+        return c.json({ purchase: publicPurchase(await attached.approve(c.get("holder").id, (c.req.param("id") as string), u.email)) });
+      } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/attached-cards/purchases/:id/deny", humanOnly, async (c) => {
+      try { return c.json({ purchase: publicPurchase(attached.deny(c.get("holder").id, (c.req.param("id") as string), c.get("sessionUser")!.email)) }); } catch (e) { return fail(c, e); }
+    });
+  }
 
   app.get("/v1/approvals", async (c) => {
     const holder = c.get("holder");

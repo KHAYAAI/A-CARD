@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CryptoWallets, PayRouting } from "./WalletTabs";
+import { AttachedCards, CryptoWallets, PayRouting } from "./WalletTabs";
 
 const API_URL = process.env.NEXT_PUBLIC_ACARD_API_URL ?? "http://localhost:8787";
 
@@ -158,7 +158,7 @@ export default function Dashboard() {
   // modals & inputs
   const [showCreate, setShowCreate] = useState(false);
   const [showFund, setShowFund] = useState(false);
-  const [walletTab, setWalletTab] = useState<"fiat" | "crypto" | "pay">("fiat");
+  const [walletTab, setWalletTab] = useState<"fiat" | "cards" | "crypto" | "pay">("fiat");
   const [cardLabel, setCardLabel] = useState("");
   const [cardCcy, setCardCcy] = useState("ZAR");
   const [cardDept, setCardDept] = useState("");
@@ -795,11 +795,12 @@ export default function Dashboard() {
                   {!readOnly && walletTab === "fiat" && <button className="btn btn-green" onClick={() => setShowFund(true)}><Icon name="plus" /> Add funds</button>}
                 </div>
               </div>
-              <div className="seg" role="tablist" style={{ marginBottom: 18, maxWidth: 420 }}>
-                {([["fiat", "Fiat"], ["crypto", "Crypto"], ["pay", "Pay & routing"]] as const).map(([k, l]) => (
+              <div className="seg" role="tablist" style={{ marginBottom: 18, maxWidth: 560 }}>
+                {([["fiat", "Fiat"], ["cards", "Your cards"], ["crypto", "Crypto"], ["pay", "Pay & routing"]] as const).map(([k, l]) => (
                   <button key={k} role="tab" aria-selected={walletTab === k} className={walletTab === k ? "sel" : ""} onClick={() => setWalletTab(k)}>{l}</button>
                 ))}
               </div>
+              {walletTab === "cards" && <AttachedCards call={call} flash={flash} />}
               {walletTab === "crypto" && <CryptoWallets call={call} flash={flash} readOnly={readOnly} />}
               {walletTab === "pay" && <PayRouting call={call} flash={flash} readOnly={readOnly} />}
               {walletTab === "fiat" && <div className="panel panel-pad">

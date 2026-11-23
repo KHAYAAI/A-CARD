@@ -123,7 +123,14 @@ ol,ul{margin:2px 0 0 14px;padding:0}li{margin:0 0 1.5px}
 <li>The agent never sees a card number, real or stand-in.</li>
 <li>Counsel confirms the card-data and POPIA position before any real card is attached.</li></ul></div>
 </div>
-<div class="warn"><b>Say plainly:</b> the attached-card flow exists only as a sandbox prototype using test card numbers. No real card has been attached or charged.</div>
+<div class="box" style="margin-top:6px"><b>For counsel: card data and POPIA</b><ol start="17">
+<li>If A-CARD never receives card numbers (a certified vault or network token holds them) but stores a reference, brand and last four, what PCI DSS obligations remain for us?</li>
+<li>Is A-CARD a "responsible party" or an "operator" under POPIA for card and purchase data, and what must our terms say about the vault provider?</li>
+<li>If the vault stores data outside South Africa, what does section 72 (cross-border transfers) require?</li>
+<li>Does releasing a customer's card credential to a merchant on an agent's request, after the customer's passkey approval, create any payments-law role for A-CARD (for example a third-party payment provider)?</li>
+<li>Liability: who carries a disputed purchase when the customer approved it with a passkey but says the agent chose the wrong item?</li>
+<li>What consent wording do we need when a customer attaches a card and sets auto-approve rules?</li></ol></div>
+<div class="warn"><b>Say plainly:</b> the attached-card flow runs only with a development test provider: no real card has been attached or charged. Passkey approval is real WebAuthn and has been tested with software and browser test authenticators.</div>
 <div class="f">Sources: Visa Intelligent Commerce and Intelligent Commerce Connect announcements; NMI on network tokens for agentic commerce; American Banker on Visa and Mastercard agent payments; Biometric Update on Mastercard Agent Pay for Machines. Verify with each company.</div>
 </div>
 </body></html>

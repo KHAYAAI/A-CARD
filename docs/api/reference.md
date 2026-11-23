@@ -29,6 +29,7 @@ Spending infrastructure for AI agents: scoped virtual cards, a double-entry ledg
 - [Cards](#cards) — Scoped virtual cards with limits, category rules and approval thresholds.
 - [Transactions](#transactions) — Every authorization, capture and decline, with reason codes.
 - [Approvals](#approvals) — Charges held for a human, and the single-use grants approvals mint.
+- [Attached cards](#attached-cards) — 
 - [API keys](#api-keys) — Programmatic credentials, full or read-only.
 - [SSO](#sso) — Federate an organization to its own identity provider.
 - [Billing](#billing) — Subscription plans and upgrades.
@@ -856,6 +857,283 @@ Accepts an `Idempotency-Key` header: a repeat with the same body replays the ori
 | `approval` | Approval | yes |  |
 
 Errors: `401`, `403`, `404`, `409` — see [errors.md](../reference/errors.md).
+
+## Attached cards
+
+### `GET /v1/passkeys`
+
+**Your passkeys**
+
+Person only: needs a dashboard session, not an agent API key.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `passkeys` | object[] | yes |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/passkeys/registration-options`
+
+**Start registering a passkey**
+
+Person only: needs a dashboard session, not an agent API key. Returns WebAuthn creation options for the browser.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `options` | object |  |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/passkeys/registration`
+
+**Finish registering a passkey**
+
+Person only: needs a dashboard session, not an agent API key. User verification (Face ID, fingerprint or device PIN) is required.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `passkey_response` | object | yes |  |
+
+**Response `201`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `passkey` | object |  |  |
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/attached-cards`
+
+**List attached cards and settings**
+
+Brand, last four and expiry only. The vault reference is never returned.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/attached-cards`
+
+**Attach a card by its vault reference**
+
+Person only: needs a dashboard session, not an agent API key. The card is entered in the vault provider's own form; send only its reference. Any request containing a card number is refused with `card_number_refused`.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `provider_ref` | string | yes |  |
+| `label` | string |  |  |
+
+**Response `201`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `card` | object |  |  |
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `DELETE /v1/attached-cards/{id}`
+
+**Remove an attached card**
+
+Person only: needs a dashboard session, not an agent API key. Also asks the provider to delete it.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `removed` | boolean | yes |  |
+
+Errors: `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
+### `PUT /v1/attached-cards/settings`
+
+**Set auto-approve and per-purchase limits**
+
+Person only: needs a dashboard session, not an agent API key.
+
+Requires the `admin` role or higher. Read-only API keys act as `viewer`.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+- **Minimum role:** `admin`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `auto_approve_under` | integer |  |  |
+| `max_per_purchase` | integer |  |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `settings` | object |  |  |
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/attached-cards/purchases`
+
+**List attached-card purchases**
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `purchases` | object[] | yes |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/attached-cards/purchases`
+
+**Ask to pay with an attached card**
+
+Agents may call this. Organisation policy and the holder's limits run first. Under the auto-approve amount the provider releases a single-use credential bound to the merchant and amount and delivers it to the merchant's checkout; over it, the purchase waits for a passkey approval.
+
+Requires the `member` role or higher. Read-only API keys act as `viewer`.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+- **Minimum role:** `member`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `card_id` | string |  |  |
+| `amount` | integer | yes |  |
+| `currency` | `ZAR` \| `USD` \| `NGN` \| `KES` | yes |  |
+| `merchant_name` | string | yes |  |
+| `merchant_category` | string | yes |  |
+| `checkout` | object | yes |  |
+| `checkout.method` | `network_token` \| `vault_proxy` | yes |  |
+| `checkout.destination` | string | yes |  |
+
+**Response `201`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `purchase` | object |  |  |
+| `passkey_needed` | boolean | yes |  |
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/attached-cards/purchases/{id}/approval-options`
+
+**Get a passkey prompt for one purchase**
+
+Person only: needs a dashboard session, not an agent API key. The challenge is bound to this purchase and expires in 5 minutes.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `options` | object |  |  |
+| `purchase` | object |  |  |
+
+Errors: `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/attached-cards/purchases/{id}/approve`
+
+**Approve a purchase with a passkey signature**
+
+Person only: needs a dashboard session, not an agent API key. Verifies the signature (origin, user verification, one use), then releases the credential.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `passkey_response` | object | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `purchase` | object |  |  |
+
+Errors: `400`, `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/attached-cards/purchases/{id}/deny`
+
+**Deny a held purchase**
+
+Person only: needs a dashboard session, not an agent API key.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `purchase` | object |  |  |
+
+Errors: `401`, `403`, `404` — see [errors.md](../reference/errors.md).
 
 ## API keys
 

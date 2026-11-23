@@ -177,3 +177,138 @@ export function PayRouting({ call, flash, readOnly }: { call: Call; flash: (m: s
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ attached cards */
+interface AttachedCardRow { id: string; brand: string; last4: string; exp_month: number; exp_year: number; label: string | null }
+interface AttachedPurchaseRow { id: string; amount: number; currency: string; merchant_name: string; status: string; reason: string | null; approved_by: string | null; release: { release_ref: string } | null; created_at: string }
+const BRAND: Record<string, string> = { visa: "Visa", mastercard: "Mastercard", amex: "Amex" };
+const TEST_REFS = ["test_tok_visa_4242_1230", "test_tok_mastercard_4444_1230", "test_tok_amex_0005_1230"];
+
+/**
+ * Cards the holder already has, used by agents without ever exposing them.
+ * The card is held by a certified vault or as a network token: A-CARD only
+ * keeps a reference. Bigger purchases need a passkey signature from the
+ * holder's own device.
+ */
+export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) => void }) {
+  const [state, setState] = useState<{ cards: AttachedCardRow[]; settings: { autoApproveUnder: number; maxPerPurchase: number }; provider: { name: string; kind: string } } | null>(null);
+  const [purchases, setPurchases] = useState<AttachedPurchaseRow[]>([]);
+  const [passkeys, setPasskeys] = useState<{ id: string }[] | null>(null);
+  const [off, setOff] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [auto, setAuto] = useState("");
+  const [max, setMax] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const s = await call("/v1/attached-cards");
+      setState(s); setAuto(String(s.settings.autoApproveUnder / 100)); setMax(String(s.settings.maxPerPurchase / 100));
+      setPurchases((await call("/v1/attached-cards/purchases")).purchases ?? []);
+      setOff("");
+    } catch (e) { setOff((e as Error).message.includes("404") || /not found/i.test((e as Error).message) ? "Attached cards aren't enabled on this deployment." : (e as Error).message); }
+    try { setPasskeys((await call("/v1/passkeys")).passkeys); } catch { setPasskeys(null); }
+  }, [call]);
+  useEffect(() => { void load(); }, [load]);
+
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    try { await fn(); if (ok) flash(ok); await load(); } catch (e) { flash((e as Error).message); } finally { setBusy(false); }
+  };
+
+  const addPasskey = () => run(async () => {
+    const { startRegistration } = await import("@simplewebauthn/browser");
+    const { options } = await call("/v1/passkeys/registration-options", { method: "POST", body: "{}" });
+    const response = await startRegistration({ optionsJSON: options });
+    await call("/v1/passkeys/registration", { method: "POST", body: JSON.stringify({ passkey_response: response }) });
+  }, "Passkey added on this device.");
+
+  const approve = (id: string) => run(async () => {
+    const { startAuthentication } = await import("@simplewebauthn/browser");
+    const { options } = await call(`/v1/attached-cards/purchases/${id}/approval-options`, { method: "POST", body: "{}" });
+    const response = await startAuthentication({ optionsJSON: options });
+    const r = await call(`/v1/attached-cards/purchases/${id}/approve`, { method: "POST", body: JSON.stringify({ passkey_response: response }) });
+    flash(r.purchase.status === "paid" ? "Approved with your passkey. Paid on your card." : `Purchase ${r.purchase.status}.`);
+  });
+
+  if (off) return <div className="panel panel-pad"><div style={empty}>{off}</div></div>;
+  if (!state) return <div className="panel panel-pad"><div style={empty}>Loading…</div></div>;
+  const waiting = purchases.filter((p) => p.status === "awaiting_approval");
+  const isTest = state.provider.kind === "test";
+  return (
+    <div>
+      <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+        <div className="eyebrow">YOUR OWN CARDS</div>
+        <p style={{ color: "var(--muted)", fontSize: 14, margin: "6px 0 0" }}>Let agents pay with a card you already have, without ever seeing it. The card is held by {isTest ? "a test vault (development only)" : `your card vault (${state.provider.name})`}, never by A-CARD. Your rules run first; anything over your auto-approve amount needs your passkey; then a single-use credential is released for that merchant and amount only.</p>
+      </div>
+
+      <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+        <div className="eyebrow">PASSKEY</div>
+        {passkeys === null ? <p style={{ color: "var(--muted)", fontSize: 14 }}>Sign in with your email and password to use passkeys. An API key can't approve purchases.</p> : (
+          <>
+            <p style={{ color: "var(--muted)", fontSize: 14, margin: "6px 0 10px" }}>{passkeys.length ? `${passkeys.length} passkey${passkeys.length === 1 ? "" : "s"} registered. You'll be asked for Face ID, fingerprint or your device PIN to approve purchases.` : "Add a passkey on this device so you can approve purchases with Face ID, fingerprint or your device PIN."}</p>
+            <button className="btn btn-outline" disabled={busy} onClick={addPasskey}>{passkeys.length ? "Add another passkey" : "Add a passkey"}</button>
+          </>
+        )}
+      </div>
+
+      {waiting.length > 0 && (
+        <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+          <div className="eyebrow">WAITING FOR YOUR PASSKEY</div>
+          {waiting.map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 0", borderTop: "1px solid var(--border-soft)", flexWrap: "wrap" }}>
+              <div><b>{money(p.amount, p.currency)}</b> at {p.merchant_name}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-green" disabled={busy || !passkeys?.length} onClick={() => approve(p.id)}>Approve with passkey</button>
+                <button className="btn btn-outline" disabled={busy} onClick={() => run(() => call(`/v1/attached-cards/purchases/${p.id}/deny`, { method: "POST", body: "{}" }), "Declined. Nothing was charged.")}>Deny</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+        <div className="eyebrow">ATTACHED CARDS</div>
+        {state.cards.length === 0 ? <div style={empty}>No cards attached yet.</div> : state.cards.map((c) => (
+          <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--border-soft)" }}>
+            <div><b>{BRAND[c.brand] ?? c.brand} •••• {c.last4}</b> <span style={{ color: "var(--muted)", fontSize: 13 }}>exp {String(c.exp_month).padStart(2, "0")}/{String(c.exp_year).slice(-2)}{c.label ? ` · ${c.label}` : ""}</span></div>
+            <button className="btn btn-outline" disabled={busy} onClick={() => run(() => call(`/v1/attached-cards/${c.id}`, { method: "DELETE" }), "Card removed.")}>Remove</button>
+          </div>
+        ))}
+        <div style={{ marginTop: 14 }}>
+          {isTest ? (
+            <>
+              <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 8px" }}>Development only: attach a test card reference. In production your card vault's own secure form opens here, and A-CARD never sees the number.</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{TEST_REFS.map((ref) => <button key={ref} className="btn btn-outline" disabled={busy} onClick={() => run(() => call("/v1/attached-cards", { method: "POST", body: JSON.stringify({ provider_ref: ref }) }), "Test card attached.")}>{ref.split("_")[2]} •••• {ref.split("_")[3]}</button>)}</div>
+            </>
+          ) : <p style={{ color: "var(--muted)", fontSize: 13 }}>Adding a card opens your card vault's secure form. (Not connected yet: no vault partner is configured.)</p>}
+        </div>
+      </div>
+
+      <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+        <div className="eyebrow">YOUR RULES</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12 }}>
+          <div className="field"><label>APPROVE WITHOUT PASSKEY UP TO</label><input inputMode="decimal" value={auto} onChange={(e) => setAuto(e.target.value)} /></div>
+          <div className="field"><label>REFUSE ANYTHING OVER</label><input inputMode="decimal" value={max} onChange={(e) => setMax(e.target.value)} /></div>
+        </div>
+        <button className="btn btn-outline" style={{ marginTop: 14 }} disabled={busy} onClick={() => run(() => call("/v1/attached-cards/settings", { method: "PUT", body: JSON.stringify({ auto_approve_under: Math.round(Number(auto) * 100), max_per_purchase: Math.round(Number(max) * 100) }) }), "Rules saved.")}>Save rules</button>
+        <p style={{ color: "var(--muted)", fontSize: 12.5, marginTop: 10 }}>Your organisation's blocked categories also apply.</p>
+      </div>
+
+      <div className="panel panel-pad">
+        <div className="eyebrow">PURCHASES ON YOUR CARDS</div>
+        {purchases.length === 0 ? <div style={empty}>None yet.</div> : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><th style={th}>Merchant</th><th style={{ ...th, textAlign: "right" }}>Amount</th><th style={th}>Status</th><th style={th}>Approved by</th></tr></thead>
+              <tbody>{purchases.map((p) => (
+                <tr key={p.id}><td style={td}>{p.merchant_name}</td><td style={{ ...td, textAlign: "right", fontFamily: "var(--font-mono)" }}>{money(p.amount, p.currency)}</td>
+                  <td style={td}><span className={`pill ${p.status === "paid" ? "completed" : p.status === "awaiting_approval" ? "pending" : "declined"}`}>{p.status === "awaiting_approval" ? "waiting" : p.status}</span>{p.reason ? <div style={{ color: "var(--muted)", fontSize: 12 }}>{p.reason.replace(/_/g, " ")}</div> : null}</td>
+                  <td style={td}>{p.approved_by === "auto_approve_rule" ? "your rule" : p.approved_by ?? "—"}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

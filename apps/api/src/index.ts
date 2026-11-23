@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Platform } from "@acard/core";
+import { TestVaultProvider } from "./attachedCards/index.js";
 import { createApp } from "./app.js";
 import { PostgresPersistence } from "./persistence.js";
 import { InMemoryPlatformService, PostgresPlatformService, type PlatformService } from "./service/index.js";
@@ -49,6 +50,13 @@ const walletProviderKey = process.env.ACARD_WALLET_PROVIDER_KEY;
 const selfServeStores = process.env.ACARD_SELF_SERVE_STORES === "true";
 const investecHookSecret = process.env.ACARD_INVESTEC_HOOK_SECRET;
 const investecCards = process.env.ACARD_INVESTEC_CARDS;
+const attachedCardsProvider = process.env.ACARD_ATTACHED_CARDS_PROVIDER; // only "test" exists until a vault partner is chosen
+if (attachedCardsProvider === "test" && process.env.NODE_ENV === "production") {
+  throw new Error("ACARD_ATTACHED_CARDS_PROVIDER=test is for local development only and is refused in production");
+}
+if (attachedCardsProvider && attachedCardsProvider !== "test") {
+  throw new Error(`ACARD_ATTACHED_CARDS_PROVIDER=${attachedCardsProvider}: no such card vault adapter yet`);
+}
 const complianceEnabled = process.env.ACARD_ENABLE_COMPLIANCE === "true";
 const complianceEnforce = process.env.ACARD_COMPLIANCE_ENFORCE === "true";
 const complianceMonitor = process.env.ACARD_COMPLIANCE_MONITOR_TRANSACTIONS === "true";
@@ -346,6 +354,10 @@ const app = createApp({
   merchants,
   merchantAuth,
   selfServeStores: selfServeStores ? {} : undefined,
+  attachedCards: attachedCardsProvider === "test" ? { provider: new TestVaultProvider() } : undefined,
+  passkeys: attachedCardsProvider
+    ? { rpId: process.env.ACARD_PASSKEY_RP_ID ?? new URL(dashboardUrl ?? "http://localhost:3000").hostname, rpName: "A-CARD", origins: (process.env.ACARD_PASSKEY_ORIGINS ?? dashboardUrl ?? "http://localhost:3000").split(",").map((o) => o.trim()) }
+    : undefined,
   investecPilot: investecHookSecret ? { secret: investecHookSecret, cards: investecCards ? (JSON.parse(investecCards) as Record<string, string>) : {} } : undefined,
   afp,
   // Auto-provisions a linked embedded wallet at signup, from the provider.

@@ -394,3 +394,23 @@ export const confirmUploadSchema = z.object({
   filename: z.string().min(1).max(200),
   content_type: z.enum(KYB_DOCUMENT_TYPES),
 });
+
+// ---- attached cards (bring your own card) -------------------------------------------
+export const attachCardSchema = z.object({
+  /** The reference the card vault's own hosted form (or the network token flow) returned. Never a card number. */
+  provider_ref: z.string().min(6).max(200),
+  label: z.string().max(60).optional(),
+});
+export const attachedCardSettingsSchema = z.object({
+  auto_approve_under: z.number().int().nonnegative().optional(),
+  max_per_purchase: z.number().int().positive().optional(),
+});
+export const attachedPurchaseSchema = z.object({
+  card_id: z.string().optional(),
+  amount: z.number().int().positive(),
+  currency: currencySchema,
+  merchant_name: z.string().min(1).max(120),
+  merchant_category: z.string().regex(/^\d{4}$/),
+  checkout: z.object({ method: z.enum(["network_token", "vault_proxy"]), destination: z.string().min(1).max(300) }),
+});
+export const passkeyResponseSchema = z.object({ passkey_response: z.object({}).passthrough() });
