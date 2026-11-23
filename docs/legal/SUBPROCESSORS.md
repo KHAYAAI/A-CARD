@@ -1,6 +1,6 @@
 # Subprocessors (operators)
 
-**DRAFT.** Last updated [DATE]. We give 30 days' notice before adding one.
+**DRAFT.** Last updated 23 November 2026. We give 30 days' notice before adding one.
 
 | Operator | Purpose | Data | Location |
 |---|---|---|---|

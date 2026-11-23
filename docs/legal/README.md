@@ -16,4 +16,6 @@
 | `BREACH_RESPONSE.md` | POPIA s22 notification procedure | Internal |
 | `SUBPROCESSORS.md` | Who processes personal data for us | Website |
 
-Company: Agent Card (Pty) Ltd. Still to fill: `[REG NO]`, `[ADDRESS]`, `[INFORMATION OFFICER]`, `[EMAIL]`, `[DOMAIN]`, `[EFFECTIVE DATE]`.
+Company: Agent Card (Pty) Ltd, 28 Grenville Avenue, Savoy Estate, Johannesburg, 2090. Domain a-card.cc. Emails: support@a-card.cc (support, complaints), privacy@a-card.cc (POPIA/PAIA requests, Information Officer), security@a-card.cc (security reports). Effective date 1 February 2027.
+
+Still to fill: `[REG NO]`, `[INFORMATION OFFICER]` and deputy, `[CTO]`/`[DIRECTOR]`, the Regulator registration date, `[FIRM]`, `[PARTNER]`/`[NO]` (licence wording), `[ISSUER]`.

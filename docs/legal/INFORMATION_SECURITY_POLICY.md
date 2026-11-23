@@ -8,7 +8,7 @@ All systems, staff, contractors and operators handling A-CARD data.
 ## 2. Roles
 - **Information Officer** [NAME]: POPIA compliance, data subject requests, Regulator contact.
 - **Security owner** [NAME]: this policy, access reviews, incidents.
-- Everyone: report anything suspicious to [security@DOMAIN] at once.
+- Everyone: report anything suspicious to [security@a-card.cc] at once.
 
 ## 3. Risk register (reviewed quarterly)
 Top risks: credential theft (staff, API keys); compromised Agent keys; prompt injection causing unwanted purchases; database exposure; wallet key compromise; card data leaking into our systems; operator breach; outage. Each has an owner, control, and test in `docs/OPERATIONS.md` / the risk sheet.

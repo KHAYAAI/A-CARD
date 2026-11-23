@@ -1,8 +1,8 @@
 # A-CARD Privacy Policy
 
-**DRAFT FOR COUNSEL REVIEW.** Effective [EFFECTIVE DATE].
+**DRAFT FOR COUNSEL REVIEW.** Effective 1 February 2027.
 
-Agent Card (Pty) Ltd ("A-CARD") is the **responsible party** for the personal information described here, under the Protection of Personal Information Act 4 of 2013 (POPIA). Information Officer: [INFORMATION OFFICER], [EMAIL], [ADDRESS].
+Agent Card (Pty) Ltd ("A-CARD") is the **responsible party** for the personal information described here, under the Protection of Personal Information Act 4 of 2013 (POPIA). Information Officer: [INFORMATION OFFICER], privacy@a-card.cc, 28 Grenville Avenue, Savoy Estate, Johannesburg, 2090.
 
 ## 1. What we collect
 | Category | What | From |
@@ -48,7 +48,7 @@ Then we delete or de-identify it.
 Encryption in transit and at rest; sensitive references encrypted at field level; wallet keys held in AWS KMS hardware; card data held only by a PCI DSS Level 1 vault; passkeys; least-privilege access; monitoring; breach procedure. See `INFORMATION_SECURITY_POLICY.md`.
 
 ## 7. Your rights
-You may ask to access, correct, or delete your information, object to processing, withdraw consent, and opt out of marketing (s23–25, s11(3), s69). Email [EMAIL]; we reply within 30 days. Some data must be kept by law (section 5). You may complain to the **Information Regulator**: inforeg.org.za, complaints.IR@inforegulator.org.za. Access requests may also be made under PAIA; see our PAIA manual.
+You may ask to access, correct, or delete your information, object to processing, withdraw consent, and opt out of marketing (s23–25, s11(3), s69). Email privacy@a-card.cc; we reply within 30 days. Some data must be kept by law (section 5). You may complain to the **Information Regulator**: inforeg.org.za, complaints.IR@inforegulator.org.za. Access requests may also be made under PAIA; see our PAIA manual.
 
 ## 8. Cookies
 Only what's needed to sign in and keep the service secure. No advertising trackers. [Update if analytics are added.]

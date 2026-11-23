@@ -47,8 +47,8 @@ Steps:
 4. **Close:** write a blameless review within 5 days: timeline, cause, what changes. File in `docs/incidents/YYYY-MM-DD-title.md`.
 
 ## 6. Support
-- **Channel:** one shared inbox (e.g. support@ your domain) plus the dashboard's help link. Answer within 1 business day.
+- **Channel:** one shared inbox (e.g. support@a-card.cc) plus the dashboard's help link. Answer within 1 business day.
 - **Triage:** bug → GitHub issue with label `support`; anything that looks like fraud, a security report or a data request → escalate the same day.
-- **Security reports:** publish `security@` and a `/.well-known/security.txt`; acknowledge within 2 business days.
+- **Security reports:** publish `security@a-card.cc` and a `/.well-known/security.txt`; acknowledge within 2 business days.
 - **POPIA requests** (access, correction, deletion): log them, answer within 30 days.
 - **Saved replies to write first:** "this is a sandbox, no real money", "reset my passkey" (recovery codes, 24 h cooldown), "my agent was declined" (check policy limits), "how do I delete my account".

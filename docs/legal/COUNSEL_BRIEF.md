@@ -1,6 +1,6 @@
 # Counsel brief: A-CARD
 
-Prepared [DATE] for [FIRM]. Draft documents are in this folder.
+Prepared 23 November 2026 for [FIRM]. Draft documents are in this folder.
 
 ## 1. What A-CARD does
 A-CARD lets a person or business give an AI agent (software acting on their instructions) a way to pay, within limits they set:

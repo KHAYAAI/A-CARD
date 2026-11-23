@@ -13,4 +13,4 @@ You must not use A-CARD, or let an Agent use it, to:
 8. run Agents with no limits on behalf of other people without their informed authorisation;
 9. resell A-CARD without our written agreement.
 
-We may refuse transactions, suspend Agents or accounts, and report to authorities where the law requires. Report abuse to [EMAIL].
+We may refuse transactions, suspend Agents or accounts, and report to authorities where the law requires. Report abuse to support@a-card.cc (security issues: security@a-card.cc).

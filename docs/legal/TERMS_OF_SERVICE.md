@@ -1,8 +1,8 @@
 # A-CARD Terms of Service
 
-**DRAFT FOR COUNSEL REVIEW.** Effective [EFFECTIVE DATE]. Version 0.1.
+**DRAFT FOR COUNSEL REVIEW.** Effective 1 February 2027. Version 0.1.
 
-These terms are an agreement between you and Agent Card (Pty) Ltd (registration number [REG NO]), [ADDRESS] ("A-CARD", "we", "us"). By creating an account you accept them. If you accept on behalf of a business, you confirm you are authorised to bind it.
+These terms are an agreement between you and Agent Card (Pty) Ltd (registration number [REG NO]), 28 Grenville Avenue, Savoy Estate, Johannesburg, 2090 ("A-CARD", "we", "us"). By creating an account you accept them. If you accept on behalf of a business, you confirm you are authorised to bind it.
 
 > **Important (CPA s49):** clauses marked **⚠** limit our liability, place risks on you, or require you to do something. Please read them.
 
@@ -15,7 +15,7 @@ These terms are an agreement between you and Agent Card (Pty) Ltd (registration 
 ## 2. Your account
 2.1 You must be 18 or older and able to contract. Businesses must be lawfully registered.
 2.2 Give us true, complete information and keep it current. We may verify your identity and your business (KYC/KYB) and screen against sanctions and PEP lists, directly or through providers, and may refuse or close an account where required by law or our risk policy.
-2.3 **⚠** You are responsible for everything done with your credentials, API keys, passkeys and recovery codes, and for keeping them secret. Tell us immediately at [EMAIL] if you suspect misuse.
+2.3 **⚠** You are responsible for everything done with your credentials, API keys, passkeys and recovery codes, and for keeping them secret. Tell us immediately at security@a-card.cc if you suspect misuse.
 2.4 One person or business per account unless we agree otherwise.
 
 ## 3. Agents and your instructions
@@ -44,7 +44,7 @@ Our Privacy Policy explains how we process personal information under POPIA. Whe
 7.3 We may suspend an Agent, key, card, wallet or account immediately where we reasonably suspect fraud, a security risk, a breach of these terms, or where the law or a partner requires it. We'll tell you why unless the law prevents us.
 
 ## 8. Cancellation
-8.1 You may close your account at any time in the dashboard or by emailing [EMAIL]. Consumers may cancel a fixed-term agreement on 20 business days' notice (CPA s14); a reasonable cancellation charge may apply only as the CPA allows.
+8.1 You may close your account at any time in the dashboard or by emailing support@a-card.cc. Consumers may cancel a fixed-term agreement on 20 business days' notice (CPA s14); a reasonable cancellation charge may apply only as the CPA allows.
 8.2 Online purchases: you may cancel within 7 days where ECTA s44 applies.
 8.3 We may end these terms on 30 days' notice, or immediately for serious breach.
 8.4 We keep records after closure as the law requires (e.g. FICA, 5 years).
@@ -56,9 +56,9 @@ Our Privacy Policy explains how we process personal information under POPIA. Whe
 9.4 Where we fail to apply your Policies correctly, we will refund the amount that exceeded them, subject to the dispute steps in clause 10.
 
 ## 10. Complaints and disputes
-10.1 Email [EMAIL]. We acknowledge within 2 business days and aim to resolve within 15 business days.
+10.1 Email support@a-card.cc. We acknowledge within 2 business days and aim to resolve within 15 business days.
 10.2 If unresolved, consumers may approach the Consumer Goods and Services Ombud or the National Consumer Commission; [once licensed: the Ombud for Financial Services Providers].
 10.3 These terms are governed by the law of South Africa. [⚖️ Counsel: UAE customers.]
 
 ## 11. General
-Changes to these terms are notified at least 30 days ahead by email and in the dashboard. If a clause is unenforceable, the rest stands. You may not transfer your account without our consent. Notices to us: [EMAIL] and [ADDRESS] (our chosen address for legal service).
+Changes to these terms are notified at least 30 days ahead by email and in the dashboard. If a clause is unenforceable, the rest stands. You may not transfer your account without our consent. Notices to us: support@a-card.cc and 28 Grenville Avenue, Savoy Estate, Johannesburg, 2090 (our chosen address for legal service).
