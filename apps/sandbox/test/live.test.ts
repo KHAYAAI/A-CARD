@@ -128,8 +128,8 @@ describe("live mode against a strict Messages API stand-in", () => {
     expect(ev.filter((e) => e.event === "tool_call").map((e) => e.data.name)).toEqual(["get_wallet", "get_balances"]);
     expect(ev.filter((e) => e.event === "tool_result").every((e) => !e.data.is_error)).toBe(true);
     expect(ev.filter((e) => e.event === "text").map((e) => e.data.text).join(" ")).toMatch(/Done: I've checked that/);
-    expect(toolsSeen).toHaveLength(23);
-    expect(toolsSeen.map((t) => t.name)).toEqual(expect.arrayContaining(["create_card", "pay_checkout", "find_offers", "list_crypto_wallets", "quote_payment", "send_preview", "swap_quote", "x402_pay"]));
+    expect(toolsSeen).toHaveLength(24);
+    expect(toolsSeen.map((t) => t.name)).toEqual(expect.arrayContaining(["create_card", "pay_checkout", "find_offers", "list_crypto_wallets", "quote_payment", "pay_with_my_card", "send_preview", "swap_quote", "x402_pay"]));
     const first = requests.find((r) => String(r.messages.at(-1).content).includes("balance"))!;
     expect(JSON.stringify(first.system)).toMatch(/Checkout:/);
     expect(JSON.stringify(first.system)).toMatch(/ONE card/);

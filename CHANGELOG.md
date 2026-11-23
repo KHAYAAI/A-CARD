@@ -8,6 +8,13 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: attach your own card (sandbox prototype)
+
+### Added
+- **Sandbox "Your cards"**: attach a card you already have and let the agent pay with it without seeing it. A-CARD's policy and the holder's limits decide first, larger purchases wait for the holder's approval (a passkey in production), and only then is a single-use stand-in released, bound to one merchant and amount. Test card numbers only; only brand and last four digits are kept.
+- New agent tool `pay_with_my_card` (the sandbox now offers 24 tools), demo-agent support ("pay R150 at Fresh Basket Market with my own card"), and Visa, Mastercard and Amex marks.
+- `docs/ATTACHED_CARDS.md`: how attached cards sit alongside issued cards, and what production needs.
+
 ## [Unreleased]: Investec hook hardening
 
 ### Fixed

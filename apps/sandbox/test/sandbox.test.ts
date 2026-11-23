@@ -53,9 +53,9 @@ const noFinds = (events: any[]) => names(events).filter((n) => n !== "find_offer
 const texts = (events: any[]) => events.filter((e) => e.event === "text").map((e) => e.data.text).join("\n");
 
 describe("demo mode (no model, no key)", () => {
-  it("gives every visitor an account and all 21 tools", async () => {
+  it("gives every visitor an account and all 24 tools", async () => {
     const s = await session();
-    expect(s.tools).toHaveLength(23);
+    expect(s.tools).toHaveLength(24);
     const st = await s.state();
     expect(st.chain.USDC).toBe("500000000");
   });
@@ -566,5 +566,62 @@ describe("sell on A-CARD: a visitor lists their own store", () => {
     expect(await seen(b.sid)).not.toContain("Biltong Bros");
     expect((await post(a.sid, { name: "Second", csv })).status).toBe(200);
     expect((await post(a.sid, { name: "Third", csv })).status).toBe(400);
+  });
+});
+
+describe("attach your own card (vault prototype)", () => {
+  const vault = (sid: string, path = "", init: RequestInit = {}) => fetch(`${base}/sandbox/vault${path}`, { ...init, headers: { "x-sandbox-session": sid, "content-type": "application/json" } });
+  const attach = (sid: string, number: string, exp = "12/30") => vault(sid, "/cards", { method: "POST", body: JSON.stringify({ number, exp, holder: "Test Holder" }) });
+
+  it("accepts only published test numbers and never keeps the full number", async () => {
+    const s = await session();
+    const real = await attach(s.sid, "4532015112830366"); // passes Luhn, but not a published test number
+    expect(real.status).toBe(400);
+    expect(((await real.json()) as any).error).toMatch(/test card numbers/);
+    expect((await attach(s.sid, "4242424242424241")).status).toBe(400); // fails Luhn
+    expect((await attach(s.sid, "4242424242424242", "01/20")).status).toBe(400); // expired
+    const ok = await attach(s.sid, "4242 4242 4242 4242");
+    expect(ok.status).toBe(201);
+    const body = JSON.stringify(await (await vault(s.sid)).json());
+    expect(body).toContain("4242");
+    expect(body).not.toContain("4242424242424242");
+  });
+
+  it("the agent pays under the auto-approve amount through a single-use stand-in", async () => {
+    const s = await session();
+    await attach(s.sid, "5555555555554444");
+    const r = await s.chat("Pay R150 at Fresh Basket Market with my own card");
+    expect(names(r.events)).toContain("pay_with_my_card");
+    const out = JSON.parse(results(r.events).find((x: any) => /purchase_id/.test(x.output))!.output);
+    expect(out.status).toBe("paid");
+    expect(out.card).toMatch(/Mastercard •••• 4444/);
+    expect(out.stand_in.bound_to).toEqual({ merchant: "Fresh Basket Market", amount_cents: 15000 });
+    expect(texts(r.events)).toMatch(/Paid R150\.00/);
+  });
+
+  it("holds larger purchases for the card holder, who alone can approve them", async () => {
+    const s = await session();
+    await attach(s.sid, "4242424242424242");
+    const r = await s.chat("Pay R900 at Fresh Basket Market with my own card");
+    expect(texts(r.events)).toMatch(/waiting for you/);
+    const st = await s.state();
+    expect(st.vault_approvals).toHaveLength(1);
+    const ap = await fetch(`${base}/sandbox/approve`, { method: "POST", headers: { "x-sandbox-session": s.sid, "content-type": "application/json" }, body: JSON.stringify({ kind: "vault", id: st.vault_approvals[0].id, decision: "approve" }) });
+    expect(((await ap.json()) as any).status).toBe("paid");
+    expect((await s.state()).vault_approvals).toHaveLength(0);
+    const v = (await (await vault(s.sid)).json()) as any;
+    expect(v.purchases[0]).toMatchObject({ status: "paid", amountCents: 90000 });
+  });
+
+  it("applies the organisation's blocked categories and the holder's per-purchase cap, and needs a card first", async () => {
+    const s = await session();
+    let r = await s.chat("Pay R100 at Fresh Basket Market with my own card");
+    expect(texts(r.events)).toMatch(/haven't attached a card/);
+    await attach(s.sid, "4242424242424242");
+    r = await s.chat("Pay R300 at an online casino with my own card");
+    expect(texts(r.events)).toMatch(/policy blocks that category/);
+    await vault(s.sid, "/settings", { method: "PUT", body: JSON.stringify({ max_per_purchase_cents: 50000 }) });
+    r = await s.chat("Pay R600 at Fresh Basket Market with my own card");
+    expect(texts(r.events)).toMatch(/per-purchase limit/);
   });
 });

@@ -15,6 +15,7 @@ import { createMcpServer } from "../../mcp/src/server.js";
 import { seedDemoWorld } from "../../../examples/seed-demo-world.js";
 import type { Model, ModelMessage, ToolDef } from "./model.js";
 import { parseCatalogCsv, CSV_TEMPLATE } from "../../api/src/merchant/csv.js";
+import { SandboxVault, VaultError, EXAMPLE_TEST_CARD } from "./vault.js";
 import { seedCatalogue } from "./catalogue.js";
 import { createCardRail, createX402Rail, STABLECOIN_PROFILE, type RailAdapter } from "../../api/src/rails/index.js";
 import { createHash } from "node:crypto";
@@ -67,12 +68,14 @@ interface Session {
   tools: ToolDef[];
   history: ModelMessage[];
   stores: { id: string; name: string; city: string; items: number; first: string }[];
+  vault: SandboxVault;
   turns: number;
   busy: boolean;
   created: number;
 }
 
 export const SYSTEM_PROMPT = `You are an AI agent in the A-CARD public sandbox. A-CARD gives AI agents governed payment tools: per-task virtual cards with limits and merchant-category rules, human approval above a threshold, A-MERCHANT supply search, x402 pay-per-call APIs (from a card with pay_x402, or from the on-chain wallet with x402_preview/x402_pay), and a sandbox on-chain wallet (USDC, ZARP) with transfers, approvals and swaps.
+If the owner asks to pay with their own card, use pay_with_my_card: you never see the card, larger purchases wait for the owner's passkey approval (you cannot approve them), and a declined payment must not be retried on another card.
 
 Everything here is a sandbox: test money, simulated card networks, a mock chain. Say so if the visitor asks whether it's real. Never claim live card issuance.
 
@@ -263,12 +266,31 @@ export async function createSandbox(opts: SandboxOptions) {
         }
       },
     );
+    // Attach-your-own-card (sandbox prototype): the agent can ask to pay with the owner's card; it never sees the card.
+    const vault = new SandboxVault();
+    server.registerTool(
+      "pay_with_my_card",
+      {
+        title: "Pay with the owner's own card",
+        description: "Pay a merchant with the card the account owner attached to their vault. You never see the card: A-CARD checks the organisation policy and the owner's vault limits, the owner approves anything above their auto-approve amount (you cannot approve it), and only then a single-use stand-in credential, bound to this merchant and amount, is released for checkout. amount_cents is in minor units (cents). Use this only when the owner asks to pay with their own card; otherwise use an A-CARD card.",
+        inputSchema: { merchant_name: z.string().min(1), merchant_category: z.string().regex(/^\d{4}$/), amount_cents: z.number().int().positive(), currency: z.enum(["ZAR", "USD"]).optional(), card_id: z.string().optional() },
+      },
+      async (a) => {
+        const policy = await call("GET", "/v1/policy", sessionToken).catch(() => ({ policy: { blocked_merchant_categories: [] } }));
+        const p = vault.request({ cardId: a.card_id, merchant: a.merchant_name, category: a.merchant_category, amountCents: a.amount_cents, currency: a.currency, blockedCategories: policy.policy?.blocked_merchant_categories ?? [] });
+        return reply({
+          purchase_id: p.id, status: p.status, reason: p.reason ?? null, card: p.cardLabel ?? null, amount_cents: p.amountCents, merchant: p.merchant,
+          stand_in: p.standIn ? { masked: p.standIn.masked, bound_to: { merchant: p.standIn.boundMerchant, amount_cents: p.standIn.boundAmountCents }, single_use: true } : null,
+          note: p.status === "awaiting_approval" ? "Held for the owner's approval (passkey). You cannot approve it. It completes automatically when they approve; tell them to approve it in the panel." : p.status === "paid" ? "Paid on the owner's card through a single-use stand-in. Disputes and rewards stay with their bank." : "Not paid. Do not retry on another card to get around this.",
+        });
+      },
+    );
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);
     const mcp = new Client({ name: "acard-sandbox", version: "0.1.0" });
     await mcp.connect(b);
     const tools = (await mcp.listTools()).tools.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: t.inputSchema as Record<string, unknown> }));
-    const s: Session = { id: randomUUID(), sessionToken, holderId, events, agentKey, wallet, approvals, mcp, tools, history: [], stores: [], turns: 0, busy: false, created: Date.now() };
+    const s: Session = { id: randomUUID(), sessionToken, holderId, events, agentKey, wallet, approvals, mcp, tools, history: [], stores: [], vault, turns: 0, busy: false, created: Date.now() };
     sessions.set(s.id, s);
     return s;
   }
@@ -312,7 +334,7 @@ export async function createSandbox(opts: SandboxOptions) {
       call("GET", "/v1/approvals?status=pending", s.sessionToken),
       s.wallet.balances("mock"),
     ]);
-    const body = { wallet, cards, transactions, card_approvals: cardApprovals.approvals ?? [], chain, wallet_approvals: s.approvals.pending(), turns_left: maxTurns - s.turns };
+    const body = { wallet, cards, transactions, card_approvals: cardApprovals.approvals ?? [], chain, wallet_approvals: s.approvals.pending(), vault_approvals: s.vault.pending(), turns_left: maxTurns - s.turns };
     return c.body(JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v)), 200, { "content-type": "application/json" });
   });
 
@@ -387,6 +409,41 @@ export async function createSandbox(opts: SandboxOptions) {
     return c.json({ store: s.stores[s.stores.length - 1], errors, sample: rows.slice(0, 3).map((r) => r.name) });
   });
 
+  // Attach your own card (sandbox prototype). Only published test numbers are accepted; nothing but brand and last four is kept.
+  app.get("/sandbox/vault", (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    return c.json({ cards: s.vault.cards, settings: s.vault.settings, purchases: s.vault.purchases.slice(0, 20), pending: s.vault.pending(), example: EXAMPLE_TEST_CARD });
+  });
+  app.post("/sandbox/vault/cards", async (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    try {
+      const b = (await c.req.json().catch(() => ({}))) as { number?: string; exp?: string; holder?: string };
+      return c.json({ card: s.vault.attach({ number: b.number ?? "", exp: b.exp ?? "", holder: b.holder ?? "" }) }, 201);
+    } catch (e) {
+      if (e instanceof VaultError) return c.json({ error: e.message }, 400);
+      throw e;
+    }
+  });
+  app.delete("/sandbox/vault/cards/:id", (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    try { s.vault.remove(c.req.param("id")); return c.json({ ok: true }); } catch (e) { return c.json({ error: (e as Error).message }, 404); }
+  });
+  app.put("/sandbox/vault/settings", async (c) => {
+    const s = get(c);
+    if (!s) return c.json({ error: "no session" }, 401);
+    try {
+      const b = (await c.req.json().catch(() => ({}))) as { auto_approve_cents?: number; max_per_purchase_cents?: number };
+      s.vault.setSettings({ autoApproveCents: b.auto_approve_cents, maxPerPurchaseCents: b.max_per_purchase_cents });
+      return c.json({ settings: s.vault.settings });
+    } catch (e) {
+      if (e instanceof VaultError) return c.json({ error: e.message }, 400);
+      throw e;
+    }
+  });
+
   // The agent wallet: what the agent can do on chain, its limits and how much of them is used, and what it has done.
   app.get("/sandbox/agent-wallet", async (c) => {
     const s = get(c);
@@ -427,7 +484,15 @@ export async function createSandbox(opts: SandboxOptions) {
   app.post("/sandbox/approve", async (c) => {
     const s = get(c);
     if (!s) return c.json({ error: "no session" }, 401);
-    const { kind, id, decision } = (await c.req.json()) as { kind: "card" | "wallet"; id: string; decision: "approve" | "deny" };
+    const { kind, id, decision } = (await c.req.json()) as { kind: "card" | "wallet" | "vault"; id: string; decision: "approve" | "deny" };
+    if (kind === "vault") {
+      try {
+        const p = s.vault.decide(id, decision === "approve");
+        return c.json({ purchase_id: p.id, status: p.status, reason: p.reason ?? null });
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 404);
+      }
+    }
     if (kind === "card") return c.json(await call("POST", `/v1/approvals/${encodeURIComponent(id)}/${decision === "approve" ? "approve" : "deny"}`, s.sessionToken));
     try {
       s.approvals.decide(id, decision === "approve");

@@ -65,6 +65,7 @@ const quantity = (t: string) => {
 
 export type Intent =
   | { kind: "chat"; sub: "hi" | "thanks" | "help" }
+  | { kind: "mycard" }
   | { kind: "wallets" | "route" | "close" | "swap" | "send" | "create" | "pay" | "balance" | "approvals" | "spending" | "cards" | "refuse-approve" }
   | { kind: "shop"; buy: boolean }
   | { kind: "other" };
@@ -88,6 +89,7 @@ export function classify(text: string): Intent {
   if (/\b(swap|convert|exchange)\b/i.test(t) && /usdc|zarp/i.test(t)) return { kind: "swap" };
   if (/\b(send|transfer|pay|move)\b/i.test(t) && /usdc|crypto|on-?chain/i.test(t)) return { kind: "send" };
   if (/\b(how (should|can|do) i pay|which rail|best way to pay|cheapest way to pay|route|quote)\b/i.test(t) && (moneyAll(t).length > 0 || usdCents(t))) return { kind: "route" };
+  if (/\b(my own card|my (personal |bank |credit |debit |own )?card|my (visa|mastercard|amex)|attached card|vaulted card)\b/i.test(t) && moneyAll(t).length > 0) return { kind: "mycard" };
   if (/\b(pay|spend|charge|buy|purchase|put)\b/i.test(t) && moneyAll(t).length > 0 && (merchantName(t) || catGuess(t))) return { kind: "pay" };
   if (/\b(create|make|issue|open|set up|new|give me|get me)\b[^.?!]*\bcards?\b/i.test(t) || /\b(want|need|have)\b[^.?!]*\b(a|an|new)\b[^.?!]*\bcard\b/i.test(t)) return { kind: "create" };
   if (/\b(approve|authori[sz]e|confirm|allow)\b[^.?!]*\b(it|this|that|them|the (charge|payment|transfer|purchase))\b/i.test(t) && !/\b(i|i've|ive) (approved|authori[sz]ed)\b/i.test(t)) return { kind: "refuse-approve" };
@@ -110,6 +112,7 @@ export const HELP = `I'm the scripted demo agent: there's no AI model behind me,
 • Find or buy something from the catalogue: “find A4 paper”, “buy 10 hard hats”, “cheapest bread”, “gloves under R60”
 • Make a card: “create a R500 card for fuel, single-use”, “a USD card for software with approval above $100”
 • Pay a merchant: “spend R250 at Fresh Basket Market”, “pay R90 at a casino”
+• Pay with your own card (attach a test card under Wallet first): “pay R150 at Fresh Basket Market with my own card”
 • Look at your account: “what are my crypto wallets?”, “how should I pay $5 to https://…”, “what's my balance?”, “show my cards”, “what have I spent?”, “any approvals waiting?”, “close my cards”
 • Use the wallet: “send 8 USDC to supplier-1”, “swap 3 USDC to ZARP”
 • Pay an API per call with x402
@@ -267,6 +270,27 @@ function payMerchant(t: string, r: Results): Block[] {
   return [say(`A-CARD ${v}.${why} I won't split the payment or try another card to get around it.`)];
 }
 
+const VAULT_WHY: Record<string, string> = {
+  no_card_attached: "You haven't attached a card yet. Add one under Wallet, then Your cards (sandbox test numbers only, such as 4242 4242 4242 4242).",
+  merchant_category_blocked_by_policy: "Your organisation's policy blocks that category, and it applies to your own card too.",
+  over_per_purchase_limit: "That's over the per-purchase limit you set for your card.",
+  currency_not_supported_in_sandbox: "The sandbox vault only pays in rand.",
+  denied_by_card_holder: "You declined it.",
+};
+
+function payMyCard(t: string, r: Results): Block[] {
+  const amount = moneyAfter(t, /\b(pay|spend|charge|buy|purchase|put)\b/i) ?? moneyAll(t)[0]!.cents;
+  const cat = catGuess(t);
+  const mcc = cat?.[1] ?? "5999";
+  const name = merchantName(t) ?? (cat ? `${cat[2][0]!.toUpperCase()}${cat[2].slice(1)} merchant` : "Merchant");
+  const done = last(r, "pay_with_my_card");
+  if (!done) return [say(`I'll ask A-CARD to pay ${rands(amount)} to ${name} with your own card. I never see the card: A-CARD checks your rules, you approve anything over your auto-approve amount, and only then is a single-use stand-in released for this merchant and amount.`), call("pay_with_my_card", { merchant_name: name, merchant_category: mcc, amount_cents: amount })];
+  const o = done.output ?? {};
+  if (o.status === "paid") return [say(`Paid ${rands(amount)} to ${name} on your ${o.card} through a single-use stand-in (${o.stand_in?.masked ?? "one-time number"}), bound to this merchant and amount. Your bank handles disputes and rewards as usual.`)];
+  if (o.status === "awaiting_approval") return [say(`That's above your auto-approve amount, so it's waiting for you. Approve it in the panel; in production this is a passkey or Face ID prompt on your phone. I can't approve it myself, and it goes through as soon as you do.`)];
+  return [say(`Not paid. ${VAULT_WHY[o.reason] ?? `Reason: ${o.reason ?? "unknown"}.`} I won't try another card to get around it.`)];
+}
+
 function wallet(t: string, kind: "send" | "swap", r: Results): Block[] {
   if (kind === "send") {
     const amt = asset6(t, "usdc");
@@ -376,6 +400,7 @@ export function freeform(text: string, r: Results, _ctx: Ctx): Block[] {
     case "shop": return shop(text, r, it.buy);
     case "create": return createCard(text, r);
     case "pay": return payMerchant(text, r);
+    case "mycard": return payMyCard(text, r);
     case "send": return wallet(text, "send", r);
     case "swap": return wallet(text, "swap", r);
     case "wallets": case "route": case "balance": case "cards": case "close": case "spending": case "approvals": return account(it.kind, text, r);
