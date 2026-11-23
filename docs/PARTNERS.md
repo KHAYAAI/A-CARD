@@ -1,5 +1,7 @@
 # Who can close the remaining blockers
 
+**Chosen (2026-11-23):** VALR for the rand ⇄ USDC ramp, Basis Theory for the card vault.
+
 A starting list from public information, as of late 2026. Verify each before contact: licences, products and regions change. We contact them; nothing here has been contacted. Questions to ask are in `docs/OUTREACH_PLAN.md` and `marketing/one-pagers/`.
 
 ## Licences (counsel)

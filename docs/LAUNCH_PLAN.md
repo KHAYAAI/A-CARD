@@ -277,3 +277,5 @@ Order of operations: (1) run the Investec pilot on your own account to test the 
 
 
 Operations for launch: `docs/OPERATIONS.md`. Partners for the remaining blockers: `docs/PARTNERS.md`.
+
+Legal pack (drafts for counsel): `docs/legal/`. Partners chosen: VALR (ramp), Basis Theory (vault).
