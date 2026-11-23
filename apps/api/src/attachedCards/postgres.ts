@@ -1,6 +1,6 @@
 import pg from "pg";
 import { decryptField, encryptField } from "../encryption.js";
-import type { AttachedCardStore, PasskeyStore, PendingChallenge, StoredPasskey } from "./store.js";
+import type { AttachedCardStore, PasskeyStore, PendingChallenge, SecurityEvent, StoredPasskey } from "./store.js";
 import type { AttachedCard, AttachedCardSettings, AttachedPurchase } from "./service.js";
 
 /**
@@ -57,6 +57,25 @@ const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL
   );
   CREATE INDEX IF NOT EXISTS acard_passkeys_user_idx ON acard_passkeys(user_id);
+
+  CREATE TABLE IF NOT EXISTS acard_passkey_recovery_codes (
+    user_id TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    used_at TIMESTAMPTZ,
+    PRIMARY KEY (user_id, code_hash)
+  );
+  CREATE TABLE IF NOT EXISTS acard_passkey_cooldowns (
+    user_id TEXT PRIMARY KEY,
+    until_at TIMESTAMPTZ NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS acard_passkey_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    detail JSONB,
+    at TIMESTAMPTZ NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS acard_passkey_events_user_idx ON acard_passkey_events(user_id, at DESC);
 
   CREATE TABLE IF NOT EXISTS acard_passkey_challenges (
     key TEXT PRIMARY KEY,
@@ -153,5 +172,50 @@ export class PostgresAttachedCardStore implements AttachedCardStore, PasskeyStor
     const r = await this.pool.query(`DELETE FROM acard_passkey_challenges WHERE key = $1 RETURNING challenge, user_id, expires_at`, [key]);
     const x = r.rows[0];
     return x ? { challenge: x.challenge, userId: x.user_id, expires: new Date(x.expires_at).getTime() } : undefined;
+  }
+
+  async deleteCredential(userId: string, id: string) {
+    const r = await this.pool.query(`DELETE FROM acard_passkeys WHERE user_id = $1 AND id = $2`, [userId, id]);
+    return r.rowCount === 1;
+  }
+  async deleteAllCredentials(userId: string) {
+    const r = await this.pool.query(`DELETE FROM acard_passkeys WHERE user_id = $1`, [userId]);
+    return r.rowCount ?? 0;
+  }
+  async setRecoveryCodes(userId: string, hashes: string[]) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM acard_passkey_recovery_codes WHERE user_id = $1`, [userId]);
+      for (const h of hashes) await client.query(`INSERT INTO acard_passkey_recovery_codes (user_id, code_hash) VALUES ($1, $2)`, [userId, h]);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+  async consumeRecoveryCode(userId: string, hash: string) {
+    const r = await this.pool.query(`UPDATE acard_passkey_recovery_codes SET used_at = now() WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL`, [userId, hash]);
+    return r.rowCount === 1;
+  }
+  async countRecoveryCodes(userId: string) {
+    const r = await this.pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE used_at IS NULL)::int AS unused FROM acard_passkey_recovery_codes WHERE user_id = $1`, [userId]);
+    return { total: r.rows[0].total, unused: r.rows[0].unused };
+  }
+  async setCooldown(userId: string, until: number) {
+    await this.pool.query(`INSERT INTO acard_passkey_cooldowns (user_id, until_at) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET until_at = EXCLUDED.until_at`, [userId, new Date(until).toISOString()]);
+  }
+  async getCooldown(userId: string) {
+    const r = await this.pool.query(`SELECT until_at FROM acard_passkey_cooldowns WHERE user_id = $1`, [userId]);
+    return r.rows[0] ? new Date(r.rows[0].until_at).getTime() : undefined;
+  }
+  async addEvent(e: SecurityEvent) {
+    await this.pool.query(`INSERT INTO acard_passkey_events (id, user_id, kind, detail, at) VALUES ($1,$2,$3,$4,$5)`, [e.id, e.userId, e.kind, e.detail ? JSON.stringify(e.detail) : null, e.at]);
+  }
+  async listEvents(userId: string): Promise<SecurityEvent[]> {
+    const r = await this.pool.query(`SELECT * FROM acard_passkey_events WHERE user_id = $1 ORDER BY at DESC LIMIT 50`, [userId]);
+    return r.rows.map((x) => ({ id: x.id, userId: x.user_id, kind: x.kind, detail: x.detail ?? undefined, at: new Date(x.at).toISOString() }));
   }
 }

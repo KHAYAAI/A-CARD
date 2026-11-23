@@ -25,7 +25,7 @@ suite("attached cards and passkeys on Postgres", () => {
   beforeEach(async () => {
     store = newStore();
     await store.migrate();
-    await store.pool.query("TRUNCATE acard_attached_cards, acard_attached_card_settings, acard_attached_purchases, acard_passkeys, acard_passkey_challenges");
+    await store.pool.query("TRUNCATE acard_attached_cards, acard_attached_card_settings, acard_attached_purchases, acard_passkeys, acard_passkey_challenges, acard_passkey_recovery_codes, acard_passkey_cooldowns, acard_passkey_events");
   });
   afterAll(async () => { await Promise.all(stores.map((s) => s.close().catch(() => {}))); });
 
@@ -62,6 +62,19 @@ suite("attached cards and passkeys on Postgres", () => {
     const others = [...Array(10)].map(() => newStore());
     const got = await Promise.all(others.map((s) => s.takeChallenge("purchase:x")));
     expect(got.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("a recovery code works once even when ten instances race to use it; cooldowns and events persist", async () => {
+    await store.setRecoveryCodes("u1", ["h1", "h2"]);
+    const others = [...Array(10)].map(() => newStore());
+    const got = await Promise.all(others.map((s) => s.consumeRecoveryCode("u1", "h1")));
+    expect(got.filter(Boolean)).toHaveLength(1);
+    expect(await store.countRecoveryCodes("u1")).toEqual({ total: 2, unused: 1 });
+    await store.setCooldown("u1", Date.now() + 60_000);
+    await store.addEvent({ id: "e1", userId: "u1", kind: "recovered", at: new Date().toISOString() });
+    const fresh = newStore();
+    expect(await fresh.getCooldown("u1")).toBeGreaterThan(Date.now());
+    expect((await fresh.listEvents("u1"))[0]).toMatchObject({ kind: "recovered" });
   });
 
   it("the full HTTP flow works on Postgres and survives a restart", async () => {

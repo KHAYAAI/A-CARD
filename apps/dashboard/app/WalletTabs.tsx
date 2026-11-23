@@ -193,7 +193,12 @@ const TEST_REFS = ["test_tok_visa_4242_1230", "test_tok_mastercard_4444_1230", "
 export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) => void }) {
   const [state, setState] = useState<{ cards: AttachedCardRow[]; settings: { autoApproveUnder: number; maxPerPurchase: number }; provider: { name: string; kind: string } } | null>(null);
   const [purchases, setPurchases] = useState<AttachedPurchaseRow[]>([]);
-  const [passkeys, setPasskeys] = useState<{ id: string }[] | null>(null);
+  const [passkeys, setPasskeys] = useState<{ id: string; created_at: string }[] | null>(null);
+  const [security, setSecurity] = useState<{ recovery_codes: { total: number; unused: number }; cooldown_until: string | null; events: { kind: string; at: string }[] } | null>(null);
+  const [newCodes, setNewCodes] = useState<string[] | null>(null);
+  const [showRecover, setShowRecover] = useState(false);
+  const [recCode, setRecCode] = useState("");
+  const [recPassword, setRecPassword] = useState("");
   const [off, setOff] = useState("");
   const [busy, setBusy] = useState(false);
   const [auto, setAuto] = useState("");
@@ -206,7 +211,7 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
       setPurchases((await call("/v1/attached-cards/purchases")).purchases ?? []);
       setOff("");
     } catch (e) { setOff((e as Error).message.includes("404") || /not found/i.test((e as Error).message) ? "Attached cards aren't enabled on this deployment." : (e as Error).message); }
-    try { setPasskeys((await call("/v1/passkeys")).passkeys); } catch { setPasskeys(null); }
+    try { const st = await call("/v1/passkeys"); setPasskeys(st.passkeys); setSecurity(st); } catch { setPasskeys(null); setSecurity(null); }
   }, [call]);
   useEffect(() => { void load(); }, [load]);
 
@@ -219,8 +224,29 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
     const { startRegistration } = await import("@simplewebauthn/browser");
     const { options } = await call("/v1/passkeys/registration-options", { method: "POST", body: "{}" });
     const response = await startRegistration({ optionsJSON: options });
-    await call("/v1/passkeys/registration", { method: "POST", body: JSON.stringify({ passkey_response: response }) });
+    const r = await call("/v1/passkeys/registration", { method: "POST", body: JSON.stringify({ passkey_response: response }) });
+    if (r.recovery_codes) setNewCodes(r.recovery_codes);
   }, "Passkey added on this device.");
+
+  const removePasskey = (id: string) => run(async () => {
+    const { startAuthentication } = await import("@simplewebauthn/browser");
+    const { options } = await call(`/v1/passkeys/${id}/removal-options`, { method: "POST", body: "{}" });
+    const response = await startAuthentication({ optionsJSON: options });
+    await call(`/v1/passkeys/${id}/remove`, { method: "POST", body: JSON.stringify({ passkey_response: response }) });
+  }, "Passkey removed. That device can't approve anything now.");
+
+  const freshCodes = () => run(async () => {
+    const { startAuthentication } = await import("@simplewebauthn/browser");
+    const { options } = await call("/v1/passkeys/recovery-codes/options", { method: "POST", body: "{}" });
+    const response = await startAuthentication({ optionsJSON: options });
+    setNewCodes((await call("/v1/passkeys/recovery-codes", { method: "POST", body: JSON.stringify({ passkey_response: response }) })).recovery_codes);
+  }, "New recovery codes issued. The old ones no longer work.");
+
+  const recover = () => run(async () => {
+    const r = await call("/v1/passkeys/recover", { method: "POST", body: JSON.stringify({ recovery_code: recCode, password: recPassword }) });
+    setRecCode(""); setRecPassword(""); setShowRecover(false);
+    flash(`Recovered: ${r.passkeys_removed} passkey${r.passkeys_removed === 1 ? "" : "s"} removed. Add a passkey on your new phone. Approvals are paused until ${new Date(r.cooldown_until).toLocaleString()}.`);
+  });
 
   const approve = (id: string) => run(async () => {
     const { startAuthentication } = await import("@simplewebauthn/browser");
@@ -246,7 +272,41 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
         {passkeys === null ? <p style={{ color: "var(--muted)", fontSize: 14 }}>Sign in with your email and password to use passkeys. An API key can't approve purchases.</p> : (
           <>
             <p style={{ color: "var(--muted)", fontSize: 14, margin: "6px 0 10px" }}>{passkeys.length ? `${passkeys.length} passkey${passkeys.length === 1 ? "" : "s"} registered. You'll be asked for Face ID, fingerprint or your device PIN to approve purchases.` : "Add a passkey on this device so you can approve purchases with Face ID, fingerprint or your device PIN."}</p>
-            <button className="btn btn-outline" disabled={busy} onClick={addPasskey}>{passkeys.length ? "Add another passkey" : "Add a passkey"}</button>
+            {security?.cooldown_until && <div role="alert" style={{ background: "var(--amber-bg)", color: "var(--amber)", padding: "10px 14px", borderRadius: 12, margin: "0 0 12px", fontSize: 14 }}>A passkey recovery happened recently. To protect you if it wasn't you, approvals and raising limits are paused until {new Date(security.cooldown_until).toLocaleString()}.</div>}
+            {newCodes && (
+              <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: 14, margin: "0 0 12px", background: "var(--surface-2)" }}>
+                <b>Save your recovery codes now.</b> <span style={{ color: "var(--muted)", fontSize: 13 }}>Each works once, if you lose your phone. We won't show them again.</span>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(130px,1fr))", gap: 6, margin: "10px 0", fontFamily: "var(--font-mono)", fontSize: 14 }}>{newCodes.map((c) => <span key={c}>{c}</span>)}</div>
+                <div style={{ display: "flex", gap: 8 }}><button className="btn btn-outline" onClick={() => navigator.clipboard?.writeText(newCodes.join("\n"))}>Copy</button><button className="btn btn-green" onClick={() => setNewCodes(null)}>I've saved them</button></div>
+              </div>
+            )}
+            {passkeys.map((k, i) => (
+              <div key={k.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--border-soft)", fontSize: 14 }}>
+                <span>Passkey {i + 1} <span style={{ color: "var(--muted)" }}>added {new Date(k.created_at).toLocaleDateString()}</span></span>
+                {passkeys.length > 1 && <button className="btn btn-outline" disabled={busy} onClick={() => removePasskey(k.id)}>Remove (lost device)</button>}
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <button className="btn btn-outline" disabled={busy} onClick={addPasskey}>{passkeys.length ? "Add another passkey" : "Add a passkey"}</button>
+              {passkeys.length > 0 && <button className="btn btn-outline" disabled={busy} onClick={freshCodes}>New recovery codes</button>}
+              <button className="btn btn-outline" disabled={busy} onClick={() => setShowRecover(!showRecover)}>Lost your phone?</button>
+            </div>
+            {security && passkeys.length > 0 && <p style={{ color: "var(--muted)", fontSize: 12.5, marginTop: 8 }}>{security.recovery_codes.unused} of {security.recovery_codes.total} recovery codes left. Tip: add a passkey on a second device too, so a lost phone is a one-click fix.</p>}
+            {showRecover && (
+              <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: 14, marginTop: 12 }}>
+                <p style={{ margin: "0 0 8px", fontSize: 14 }}>If you still have another device with a passkey, remove the lost one above instead. Otherwise use one of your recovery codes: <b>every</b> passkey will be removed, and approvals pause for 24 hours.</p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12 }}>
+                  <div className="field"><label>RECOVERY CODE</label><input value={recCode} onChange={(e) => setRecCode(e.target.value)} placeholder="ABCDE-FGHJK" autoComplete="one-time-code" /></div>
+                  <div className="field"><label>YOUR PASSWORD</label><input type="password" value={recPassword} onChange={(e) => setRecPassword(e.target.value)} autoComplete="current-password" /></div>
+                </div>
+                <button className="btn btn-green" style={{ marginTop: 12 }} disabled={busy || !recCode || !recPassword} onClick={recover}>Recover my account</button>
+              </div>
+            )}
+            {security && security.events.length > 0 && (
+              <details style={{ marginTop: 12 }}><summary style={{ cursor: "pointer", fontSize: 13, color: "var(--muted)" }}>Recent passkey activity</summary>
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13, color: "var(--muted)" }}>{security.events.slice(0, 10).map((e, i) => <li key={i}>{new Date(e.at).toLocaleString()}: {e.kind.replace(/_/g, " ")}</li>)}</ul>
+              </details>
+            )}
           </>
         )}
       </div>

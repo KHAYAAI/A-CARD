@@ -920,6 +920,121 @@ Mounted only when a card vault provider and passkey settings are configured (att
 
 Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
 
+### `POST /v1/passkeys/recover`
+
+**Lost phone: recover with a recovery code**
+
+Person only: needs a dashboard session, not an agent API key. Needs your password and one unused recovery code. Removes every passkey, so a lost phone can't approve anything, and pauses approvals (and raising limits) for 24 hours. Throttled after repeated wrong codes.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `recovery_code` | string | yes |  |
+| `password` | string | yes |  |
+
+**Response `200`**
+
+`object`
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/passkeys/recovery-codes/options`
+
+**Get a passkey prompt to issue new recovery codes**
+
+Person only: needs a dashboard session, not an agent API key.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `options` | object |  |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/passkeys/recovery-codes`
+
+**Issue new recovery codes**
+
+Person only: needs a dashboard session, not an agent API key. Needs a passkey signature. Returns 10 new one-time codes, shown once, and invalidates the old ones.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `passkey_response` | object | yes |  |
+
+**Response `201`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `recovery_codes` | string[] | yes |  |
+
+Errors: `400`, `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/passkeys/{id}/removal-options`
+
+**Get a prompt to remove a passkey**
+
+Person only: needs a dashboard session, not an agent API key. The prompt only accepts a different passkey than the one being removed; your last passkey can't be removed this way (use recovery).
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `options` | object |  |  |
+
+Errors: `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/passkeys/{id}/remove`
+
+**Remove a passkey (for example a lost phone)**
+
+Person only: needs a dashboard session, not an agent API key. Signed with another of your passkeys.
+
+Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `passkey_response` | object | yes |  |
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `removed` | boolean | yes |  |
+
+Errors: `400`, `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
 ### `GET /v1/attached-cards`
 
 **List attached cards and settings**

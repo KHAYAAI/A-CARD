@@ -2623,6 +2623,341 @@
         "x-acard-requires": "attached_cards"
       }
     },
+    "/v1/passkeys/recover": {
+      "post": {
+        "operationId": "post_passkeys_recover",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Lost phone: recover with a recovery code",
+        "description": "Person only: needs a dashboard session, not an agent API key. Needs your password and one unused recovery code. Removes every passkey, so a lost phone can't approve anything, and pauses approvals (and raising limits) for 24 hours. Throttled after repeated wrong codes.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "recovery_code": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 40
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "recovery_code",
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/passkeys/recovery-codes/options": {
+      "post": {
+        "operationId": "post_passkeys_recovery_codes_options",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Get a passkey prompt to issue new recovery codes",
+        "description": "Person only: needs a dashboard session, not an agent API key.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "options": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/passkeys/recovery-codes": {
+      "post": {
+        "operationId": "post_passkeys_recovery_codes",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Issue new recovery codes",
+        "description": "Person only: needs a dashboard session, not an agent API key. Needs a passkey signature. Returns 10 new one-time codes, shown once, and invalidates the old ones.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "recovery_codes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "recovery_codes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "passkey_response": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "passkey_response"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/passkeys/{id}/removal-options": {
+      "post": {
+        "operationId": "post_passkeys_by_id_removal_options",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Get a prompt to remove a passkey",
+        "description": "Person only: needs a dashboard session, not an agent API key. The prompt only accepts a different passkey than the one being removed; your last passkey can't be removed this way (use recovery).\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "options": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
+    "/v1/passkeys/{id}/remove": {
+      "post": {
+        "operationId": "post_passkeys_by_id_remove",
+        "tags": [
+          "Attached cards"
+        ],
+        "summary": "Remove a passkey (for example a lost phone)",
+        "description": "Person only: needs a dashboard session, not an agent API key. Signed with another of your passkeys.\n\nMounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "removed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "passkey_response": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "passkey_response"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-acard-requires": "attached_cards"
+      }
+    },
     "/v1/attached-cards": {
       "get": {
         "operationId": "get_attached_cards",

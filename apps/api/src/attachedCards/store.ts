@@ -35,8 +35,27 @@ export interface PendingChallenge {
   expires: number;
 }
 
-/** Storage for passkeys and their one-time challenges. */
+export interface SecurityEvent {
+  id: string;
+  userId: string;
+  kind: "passkey_added" | "passkey_removed" | "recovered" | "recovery_codes_issued" | "recovery_code_failed";
+  detail?: Record<string, unknown>;
+  at: string;
+}
+
+/** Storage for passkeys, their one-time challenges, recovery codes and security events. */
 export interface PasskeyStore {
+  deleteCredential(userId: string, credentialId: string): Promise<boolean>;
+  deleteAllCredentials(userId: string): Promise<number>;
+  /** Replaces the user's recovery codes (hashes only). */
+  setRecoveryCodes(userId: string, hashes: string[]): Promise<void>;
+  /** Marks one unused code used, in one step. False if it doesn't exist or was used. */
+  consumeRecoveryCode(userId: string, hash: string): Promise<boolean>;
+  countRecoveryCodes(userId: string): Promise<{ total: number; unused: number }>;
+  setCooldown(userId: string, untilMs: number): Promise<void>;
+  getCooldown(userId: string): Promise<number | undefined>;
+  addEvent(e: SecurityEvent): Promise<void>;
+  listEvents(userId: string): Promise<SecurityEvent[]>;
   listCredentials(userId: string): Promise<StoredPasskey[]>;
   addCredential(c: StoredPasskey): Promise<void>;
   /** Only ever moves the counter forward. */
@@ -73,6 +92,18 @@ export class MemoryAttachedCardStore implements AttachedCardStore {
 export class MemoryPasskeyStore implements PasskeyStore {
   private creds: StoredPasskey[] = [];
   private challenges = new Map<string, PendingChallenge>();
+  private codes = new Map<string, { hash: string; used: boolean }[]>();
+  private cooldowns = new Map<string, number>();
+  private events: SecurityEvent[] = [];
+  async deleteCredential(userId: string, id: string) { const n = this.creds.length; this.creds = this.creds.filter((c) => !(c.userId === userId && c.id === id)); return this.creds.length < n; }
+  async deleteAllCredentials(userId: string) { const n = this.creds.length; this.creds = this.creds.filter((c) => c.userId !== userId); return n - this.creds.length; }
+  async setRecoveryCodes(userId: string, hashes: string[]) { this.codes.set(userId, hashes.map((hash) => ({ hash, used: false }))); }
+  async consumeRecoveryCode(userId: string, hash: string) { const c = (this.codes.get(userId) ?? []).find((x) => x.hash === hash && !x.used); if (!c) return false; c.used = true; return true; }
+  async countRecoveryCodes(userId: string) { const l = this.codes.get(userId) ?? []; return { total: l.length, unused: l.filter((x) => !x.used).length }; }
+  async setCooldown(userId: string, until: number) { this.cooldowns.set(userId, until); }
+  async getCooldown(userId: string) { return this.cooldowns.get(userId); }
+  async addEvent(e: SecurityEvent) { this.events.unshift({ ...e }); }
+  async listEvents(userId: string) { return this.events.filter((e) => e.userId === userId).slice(0, 50).map((e) => ({ ...e })); }
   async listCredentials(userId: string) { return this.creds.filter((c) => c.userId === userId).map((c) => ({ ...c })); }
   async addCredential(c: StoredPasskey) { this.creds.push({ ...c }); }
   async updateCounter(id: string, counter: number) { const c = this.creds.find((x) => x.id === id); if (c && counter > c.counter) c.counter = counter; }

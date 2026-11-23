@@ -85,6 +85,7 @@ import {
   attachedCardSettingsSchema,
   attachedPurchaseSchema,
   passkeyResponseSchema,
+  passkeyRecoverSchema,
   bulkRestateSchema,
   blocklistEntrySchema,
   monitorTransactionSchema,
@@ -1052,7 +1053,44 @@ export function createApp(config: AppConfig) {
     app.use("/v1/attached-cards/*", noCardNumbers);
     app.use("/v1/attached-cards", noCardNumbers);
 
-    app.get("/v1/passkeys", humanOnly, async (c) => c.json({ passkeys: await passkeys.list(c.get("sessionUser")!.id) }));
+    app.get("/v1/passkeys", humanOnly, async (c) => c.json(await passkeys.status(c.get("sessionUser")!.id)));
+    // Lost phone: recovery codes, removing one passkey with another, and a cooling-off after recovery.
+    app.post("/v1/passkeys/recover", humanOnly, async (c) => {
+      try {
+        const body = passkeyRecoverSchema.parse(await c.req.json());
+        const u = c.get("sessionUser")!;
+        // Re-check the password: a stolen session alone must not be enough.
+        let login;
+        try {
+          login = await platform.login({ email: u.email, password: body.password, accountHolderId: c.get("holder").id });
+        } catch {
+          return c.json({ error: { code: "password_incorrect", message: "that password is wrong" } }, 401);
+        }
+        if (login.status === "authenticated") await platform.logout(login.sessionToken).catch(() => {});
+        return c.json(await passkeys.recover(u.id, body.recovery_code));
+      } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/passkeys/recovery-codes/options", humanOnly, async (c) => {
+      try { return c.json({ options: await passkeys.authenticationOptions(c.get("sessionUser")!.id, `codes:${c.get("sessionUser")!.id}`) }); } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/passkeys/recovery-codes", humanOnly, async (c) => {
+      try {
+        const body = passkeyResponseSchema.parse(await c.req.json());
+        const u = c.get("sessionUser")!;
+        await passkeys.verifyAuthentication(u.id, `codes:${u.id}`, body.passkey_response);
+        return c.json({ recovery_codes: await passkeys.issueRecoveryCodes(u.id) }, 201);
+      } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/passkeys/:id/removal-options", humanOnly, async (c) => {
+      try { return c.json({ options: await passkeys.removalOptions(c.get("sessionUser")!.id, c.req.param("id") as string) }); } catch (e) { return fail(c, e); }
+    });
+    app.post("/v1/passkeys/:id/remove", humanOnly, async (c) => {
+      try {
+        const body = passkeyResponseSchema.parse(await c.req.json());
+        await passkeys.remove(c.get("sessionUser")!.id, c.req.param("id") as string, body.passkey_response);
+        return c.json({ removed: true });
+      } catch (e) { return fail(c, e); }
+    });
     app.post("/v1/passkeys/registration-options", humanOnly, async (c) => {
       const u = c.get("sessionUser")!;
       return c.json({ options: await passkeys.registrationOptions({ id: u.id, email: u.email, name: u.name }) });
@@ -1060,7 +1098,8 @@ export function createApp(config: AppConfig) {
     app.post("/v1/passkeys/registration", humanOnly, async (c) => {
       try {
         const body = passkeyResponseSchema.parse(await c.req.json());
-        return c.json({ passkey: await passkeys.verifyRegistration(c.get("sessionUser")!.id, body.passkey_response) }, 201);
+        const r = await passkeys.verifyRegistration(c.get("sessionUser")!.id, body.passkey_response);
+        return c.json({ passkey: { id: r.id }, recovery_codes: r.recovery_codes ?? null }, 201);
       } catch (e) { return fail(c, e); }
     });
 
@@ -1081,6 +1120,13 @@ export function createApp(config: AppConfig) {
     app.put("/v1/attached-cards/settings", humanOnly, requireRole("admin"), async (c) => {
       try {
         const body = attachedCardSettingsSchema.parse(await c.req.json());
+        const cooling = await passkeys.inCooldown(c.get("sessionUser")!.id);
+        if (cooling) {
+          const cur = await attached.getSettings(c.get("holder").id);
+          if ((body.auto_approve_under ?? 0) > cur.autoApproveUnder || (body.max_per_purchase ?? 0) > cur.maxPerPurchase) {
+            return c.json({ error: { code: "recovery_cooldown", message: `after a passkey recovery, limits can only be lowered until ${new Date(cooling).toISOString()}` } }, 403);
+          }
+        }
         return c.json({ settings: await attached.setSettings(c.get("holder").id, { autoApproveUnder: body.auto_approve_under, maxPerPurchase: body.max_per_purchase }) });
       } catch (e) { return fail(c, e); }
     });
@@ -1105,6 +1151,8 @@ export function createApp(config: AppConfig) {
       try {
         const body = passkeyResponseSchema.parse(await c.req.json());
         const u = c.get("sessionUser")!;
+        const cooling = await passkeys.inCooldown(u.id);
+        if (cooling) return c.json({ error: { code: "recovery_cooldown", message: `after a passkey recovery, approvals are paused until ${new Date(cooling).toISOString()}` } }, 403);
         await passkeys.verifyAuthentication(u.id, `purchase:${(c.req.param("id") as string)}`, body.passkey_response);
         return c.json({ purchase: publicPurchase(await attached.approve(c.get("holder").id, (c.req.param("id") as string), u.email)) });
       } catch (e) { return fail(c, e); }

@@ -414,3 +414,4 @@ export const attachedPurchaseSchema = z.object({
   checkout: z.object({ method: z.enum(["network_token", "vault_proxy"]), destination: z.string().min(1).max(300) }),
 });
 export const passkeyResponseSchema = z.object({ passkey_response: z.object({}).passthrough() });
+export const passkeyRecoverSchema = z.object({ recovery_code: z.string().min(8).max(40), password: z.string().min(1).max(200) });

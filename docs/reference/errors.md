@@ -82,6 +82,13 @@ Every write that moves money or creates something accepts an `Idempotency-Key` h
 | `card_number_refused` | 400 | A request to the attached-cards API contained a card number. A-CARD never accepts card numbers | Enter the card in your card vault's own form and send only its reference |
 | `person_required` | 403 | Attaching or removing a card, passkeys and purchase approvals need a person signed in on the dashboard, not an agent API key | Do it from the dashboard |
 | `not_pending` | 409 | The attached-card purchase was already approved, denied or settled | Nothing to do; check its status |
+| `password_incorrect` | 401 | Passkey recovery needs your account password, and it was wrong | Re-enter your password |
+| `recovery_cooldown` | 403 | A passkey recovery happened in the last 24 hours: approvals and raising limits are paused, in case it wasn't you | Wait until the time in the message; lowering limits still works |
+| `recovery_code_invalid` | 401 | The passkey recovery code is wrong or already used | Use another unused code |
+| `too_many_attempts` | 429 | Too many wrong recovery codes in the last hour | Wait an hour |
+| `last_passkey` | 409 | You can't remove your only passkey by signing with another one | Use a recovery code instead |
+| `no_passkey` | 409 | No passkey is registered yet | Add a passkey on your device first |
+| `passkey_invalid` / `passkey_unknown` / `passkey_challenge_missing` | 401 | The passkey signature didn't verify, came from an unregistered passkey, or its prompt expired or was already used | Ask for a new prompt and try again |
 | `unauthorized` | 401 | Missing, invalid or revoked credential | Check the `Authorization: Bearer` header and the key prefix (`ak_`, `sess_`, `mk_live_`) |
 | `forbidden` | 403 | Your role, key scope or shop role doesn't allow this | Use a higher role, a `full` / `read_write` key, or the shop owner |
 | `https_required` | 400 | The deployment enforces HTTPS and the request came over HTTP | Call the `https://` URL |

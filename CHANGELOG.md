@@ -8,6 +8,15 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: lost-phone passkey recovery
+
+### Added
+- **Recovery codes**: 10 one-time codes with the first passkey, shown once, hashed at rest; new codes need a passkey signature.
+- **Remove a lost device's passkey** by signing with another of your passkeys (`/v1/passkeys/{id}/removal-options`, `/remove`).
+- **Recover with a code and your password** (`/v1/passkeys/recover`): removes every passkey, then a 24-hour cooling-off pauses approvals and raising limits (`recovery_cooldown`). Wrong codes are throttled (`too_many_attempts`). Passkey events are recorded and shown.
+- Postgres tables for codes, cooldowns and events; a code works once even when ten API instances race for it.
+- Dashboard: save-your-codes panel, remove-device, "Lost your phone?", cooling-off banner, recent passkey activity.
+
 ## [Unreleased]: attached cards and passkeys on Postgres
 
 ### Added
