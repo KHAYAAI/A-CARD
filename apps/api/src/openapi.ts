@@ -71,6 +71,7 @@ const r = (method: Method, path: string, tag: string, summary: string, rest: Omi
 export const ROUTES: RouteDoc[] = [
   // ---- meta ----------------------------------------------------------------------
   r("get", "/health", "Meta", "Liveness check", { auth: "none", response: { schema: z.object({ ok: z.boolean(), service: str }) } }),
+  r("get", "/health/ready", "Meta", "Readiness check, including the database (503 when it is unreachable)", { auth: "none", response: { schema: z.object({ ok: z.boolean(), service: str, database: str }).passthrough() } }),
   r("get", "/openapi.json", "Meta", "This OpenAPI document", { auth: "none", response: { schema: z.object({}).passthrough() } }),
 
   // ---- onboarding ------------------------------------------------------------------
