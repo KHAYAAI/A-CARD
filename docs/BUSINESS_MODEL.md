@@ -1,6 +1,6 @@
 # A-CARD business model: the supplier playbook
 
-Borrowed from how casino game studios like Spribe (Aviator) scale, applied to agent payments. Figures are illustrative, to be replaced with partner quotes.
+Borrowed from how casino game studios like Spribe (Aviator) scale, applied to agent payments. Figures are illustrative, in US dollars (about R18 = $1), to be replaced with partner quotes.
 
 ## How the supplier model works
 | Piece | Game studio | A-CARD |
@@ -29,12 +29,12 @@ Give aggregators 10–25% of our revenue from customers they bring, as studios d
 | Stream | Indicative price |
 |---|---|
 | Card spend by agents | 0.5–1.5% of volume (or our share of interchange from the issuer) |
-| USDC ⇄ ZAR conversion (via VALR) | 0.25–0.75% per conversion on top of VALR's fee |
-| Platform fee | R5,000–R50,000/month by tier, credited against volume fees |
-| Active cards or wallets | R5–R20 per active card per month |
+| USDC ⇄ local currency conversion (via VALR) | 0.25–0.75% per conversion on top of VALR's fee |
+| Platform fee | $300–$2,800/month by tier, credited against volume fees |
+| Active cards or wallets | $0.30–$1.00 per active card per month |
 | A-MERCHANT | free listing; 1–3% commission on agent orders |
 
-**Worked example (illustrative):** a platform with 2,000 users whose agents spend R3,000 a month each = R6M of monthly volume. At 1% that is R60,000 a month; if an aggregator introduced it, 20% (R12,000) goes to them and we keep R48,000. Twenty such platforms ≈ R1M a month, from twenty integrations rather than 40,000 individual sign-ups.
+**Worked example (illustrative):** a platform with 2,000 users whose agents spend $200 a month each = $400,000 of monthly volume. At 1% that is $4,000 a month; if an aggregator introduced it, 20% ($800) goes to them and we keep $3,200. Twenty such platforms ≈ $64,000 a month (about $770,000 a year), from twenty integrations rather than 40,000 individual sign-ups.
 
 ## What this needs from the product
 1. **Platform accounts with sub-customers:** a platform creates and manages its own users' agents, cards and limits under one contract.
