@@ -8,6 +8,12 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: attached cards and passkeys on Postgres
+
+### Added
+- Attached cards, their settings and purchases, passkeys and passkey challenges are stored in Postgres when `DATABASE_URL` is set (memory otherwise, announced at startup). The vault reference is encrypted at rest (AES-256-GCM, `ACARD_ENCRYPTION_KEY`).
+- Approval is single-winner in SQL, and a passkey challenge can be used once, across API instances. Integration tests on a real database cover ten racing approvals from two instances, ten racing challenge takes, encryption at rest, and a restart.
+
 ## [Unreleased]: attached cards in the platform, with real passkey approval
 
 ### Added

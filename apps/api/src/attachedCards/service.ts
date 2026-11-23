@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CardDisplay, CardVaultProvider, CheckoutTarget, ReleaseResult } from "./provider.js";
+import { MemoryAttachedCardStore, type AttachedCardStore } from "./store.js";
 
 export interface AttachedCard extends CardDisplay {
   id: string;
@@ -18,7 +19,7 @@ export interface AttachedCardSettings {
   maxPerPurchase: number;
 }
 
-export type PurchaseStatus = "awaiting_approval" | "paid" | "declined" | "denied" | "failed";
+export type PurchaseStatus = "awaiting_approval" | "releasing" | "paid" | "declined" | "denied" | "failed";
 
 export interface AttachedPurchase {
   id: string;
@@ -45,17 +46,14 @@ export class AttachedCardError extends Error {
 const DEFAULTS: AttachedCardSettings = { autoApproveUnder: 0, maxPerPurchase: 500_000 };
 
 /**
- * Rules and records for attached cards. In memory for now; the store is small
- * and isolated so a Postgres version can replace it without touching the routes.
+ * Rules and records for attached cards. Storage is a store (memory or Postgres);
+ * the claim step makes approval single-winner even across API instances.
  */
 export class AttachedCardService {
-  private cards = new Map<string, AttachedCard>();
-  private purchases = new Map<string, AttachedPurchase>();
-  private settings = new Map<string, AttachedCardSettings>();
-
   constructor(
     readonly provider: CardVaultProvider,
     private readonly blockedCategories: (accountHolderId: string) => Promise<string[]>,
+    readonly store: AttachedCardStore = new MemoryAttachedCardStore(),
   ) {}
 
   async attach(accountHolderId: string, providerRef: string, createdBy: string, label?: string): Promise<AttachedCard> {
@@ -70,113 +68,111 @@ export class AttachedCardService {
     if (display.expYear < now.getUTCFullYear() || (display.expYear === now.getUTCFullYear() && display.expMonth < now.getUTCMonth() + 1)) {
       throw new AttachedCardError(400, "card_expired", "that card has expired");
     }
-    if ([...this.cards.values()].filter((c) => c.accountHolderId === accountHolderId).length >= 10) {
-      throw new AttachedCardError(409, "too_many_cards", "an account can attach up to 10 cards");
-    }
+    if ((await this.store.listCards(accountHolderId)).length >= 10) throw new AttachedCardError(409, "too_many_cards", "an account can attach up to 10 cards");
     const card: AttachedCard = { id: `acd_${randomUUID()}`, accountHolderId, providerRef, ...display, label: label?.slice(0, 60), createdBy, createdAt: now.toISOString() };
-    this.cards.set(card.id, card);
+    await this.store.insertCard(card);
     return card;
   }
 
   list(accountHolderId: string) {
-    return [...this.cards.values()].filter((c) => c.accountHolderId === accountHolderId);
+    return this.store.listCards(accountHolderId);
   }
 
   async remove(accountHolderId: string, cardId: string) {
-    const card = this.cards.get(cardId);
+    const card = await this.store.getCard(cardId);
     if (!card || card.accountHolderId !== accountHolderId) throw new AttachedCardError(404, "not_found", "attached card not found");
     await this.provider.remove(card.providerRef);
-    this.cards.delete(cardId);
+    await this.store.deleteCard(cardId);
   }
 
-  getSettings(accountHolderId: string): AttachedCardSettings {
-    return this.settings.get(accountHolderId) ?? { ...DEFAULTS };
+  async getSettings(accountHolderId: string): Promise<AttachedCardSettings> {
+    return (await this.store.getSettings(accountHolderId)) ?? { ...DEFAULTS };
   }
 
-  setSettings(accountHolderId: string, patch: Partial<AttachedCardSettings>) {
-    const next = { ...this.getSettings(accountHolderId), ...patch };
+  async setSettings(accountHolderId: string, patch: Partial<AttachedCardSettings>) {
+    const cur = await this.getSettings(accountHolderId);
+    const next = { autoApproveUnder: patch.autoApproveUnder ?? cur.autoApproveUnder, maxPerPurchase: patch.maxPerPurchase ?? cur.maxPerPurchase };
     if (!Number.isSafeInteger(next.autoApproveUnder) || next.autoApproveUnder < 0) throw new AttachedCardError(400, "invalid_settings", "auto_approve_under must be zero or more");
     if (!Number.isSafeInteger(next.maxPerPurchase) || next.maxPerPurchase <= 0) throw new AttachedCardError(400, "invalid_settings", "max_per_purchase must be above zero");
     if (next.autoApproveUnder > next.maxPerPurchase) next.autoApproveUnder = next.maxPerPurchase;
-    this.settings.set(accountHolderId, next);
+    await this.store.putSettings(accountHolderId, next);
     return next;
   }
 
   /** An agent (or a person) asks to pay. Rules run before anything is released. */
   async request(accountHolderId: string, input: { cardId?: string; amount: number; currency: string; target: CheckoutTarget }, requestedBy: string): Promise<AttachedPurchase> {
-    const cards = this.list(accountHolderId);
+    const cards = await this.store.listCards(accountHolderId);
     const card = input.cardId ? cards.find((c) => c.id === input.cardId) : cards[0];
     const p: AttachedPurchase = {
       id: `apu_${randomUUID()}`, accountHolderId, cardId: card?.id ?? "", amount: input.amount, currency: input.currency, target: input.target,
       status: "declined", requestedBy, createdAt: new Date().toISOString(),
     };
-    this.purchases.set(p.id, p);
-    const settings = this.getSettings(accountHolderId);
-    if (!card) return this.decline(p, input.cardId ? "card_not_found" : "no_card_attached");
-    if (!Number.isSafeInteger(p.amount) || p.amount <= 0) return this.decline(p, "invalid_amount");
-    if ((await this.blockedCategories(accountHolderId)).includes(p.target.merchantCategory)) return this.decline(p, "merchant_category_blocked_by_policy");
-    if (p.amount > settings.maxPerPurchase) return this.decline(p, "over_per_purchase_limit");
-    if (p.amount > settings.autoApproveUnder) {
-      p.status = "awaiting_approval";
-      return p;
-    }
-    return this.releaseFor(p, card, "auto");
+    const settings = await this.getSettings(accountHolderId);
+    const reason = !card ? (input.cardId ? "card_not_found" : "no_card_attached")
+      : !Number.isSafeInteger(p.amount) || p.amount <= 0 ? "invalid_amount"
+      : (await this.blockedCategories(accountHolderId)).includes(p.target.merchantCategory) ? "merchant_category_blocked_by_policy"
+      : p.amount > settings.maxPerPurchase ? "over_per_purchase_limit"
+      : undefined;
+    if (reason) { p.reason = reason; await this.store.insertPurchase(p); return p; }
+    if (p.amount > settings.autoApproveUnder) { p.status = "awaiting_approval"; await this.store.insertPurchase(p); return p; }
+    p.status = "releasing";
+    p.approvedBy = "auto_approve_rule";
+    p.decidedAt = p.createdAt;
+    await this.store.insertPurchase(p);
+    return this.releaseFor(p, card!);
   }
 
-  get(accountHolderId: string, purchaseId: string): AttachedPurchase {
-    const p = this.purchases.get(purchaseId);
+  async get(accountHolderId: string, purchaseId: string): Promise<AttachedPurchase> {
+    const p = await this.store.getPurchase(purchaseId);
     if (!p || p.accountHolderId !== accountHolderId) throw new AttachedCardError(404, "not_found", "purchase not found");
     return p;
   }
 
   listPurchases(accountHolderId: string) {
-    return [...this.purchases.values()].filter((p) => p.accountHolderId === accountHolderId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return this.store.listPurchases(accountHolderId);
   }
 
-  /** Called only after a verified passkey assertion from a person (see routes). */
+  /** Called only after a verified passkey assertion from a person (see routes). Single winner, even across instances. */
   async approve(accountHolderId: string, purchaseId: string, approvedBy: string): Promise<AttachedPurchase> {
-    const p = this.get(accountHolderId, purchaseId);
-    if (p.status !== "awaiting_approval") throw new AttachedCardError(409, "not_pending", `purchase is ${p.status}`);
-    const card = this.cards.get(p.cardId);
-    p.decidedAt = new Date().toISOString();
-    p.approvedBy = approvedBy;
-    if (!card) return this.decline(p, "card_removed");
-    return this.releaseFor(p, card, approvedBy);
+    const before = await this.get(accountHolderId, purchaseId);
+    if (!(await this.store.claim(purchaseId, "releasing", approvedBy, new Date().toISOString()))) {
+      const now = await this.get(accountHolderId, purchaseId);
+      throw new AttachedCardError(409, "not_pending", `purchase is ${now.status}`);
+    }
+    const p = await this.get(accountHolderId, before.id);
+    const card = await this.store.getCard(p.cardId);
+    if (!card) { p.status = "declined"; p.reason = "card_removed"; await this.store.updatePurchase(p); return p; }
+    return this.releaseFor(p, card);
   }
 
-  deny(accountHolderId: string, purchaseId: string, by: string): AttachedPurchase {
-    const p = this.get(accountHolderId, purchaseId);
-    if (p.status !== "awaiting_approval") throw new AttachedCardError(409, "not_pending", `purchase is ${p.status}`);
-    p.status = "denied";
+  async deny(accountHolderId: string, purchaseId: string, by: string): Promise<AttachedPurchase> {
+    await this.get(accountHolderId, purchaseId);
+    if (!(await this.store.claim(purchaseId, "denied", by, new Date().toISOString()))) {
+      const now = await this.get(accountHolderId, purchaseId);
+      throw new AttachedCardError(409, "not_pending", `purchase is ${now.status}`);
+    }
+    const p = await this.get(accountHolderId, purchaseId);
     p.reason = "denied_by_card_holder";
-    p.decidedAt = new Date().toISOString();
-    p.approvedBy = by;
+    await this.store.updatePurchase(p);
     return p;
   }
 
-  private async releaseFor(p: AttachedPurchase, card: AttachedCard, by: string): Promise<AttachedPurchase> {
+  private async releaseFor(p: AttachedPurchase, card: AttachedCard): Promise<AttachedPurchase> {
     try {
       const r = await this.provider.release({ providerRef: card.providerRef, purchaseId: p.id, amount: p.amount, currency: p.currency, target: p.target });
       if (r.boundAmount !== p.amount || r.boundMerchant !== p.target.merchantName) {
         p.status = "failed";
         p.reason = "provider_bound_mismatch";
-        return p;
+      } else {
+        p.release = r;
+        p.status = r.delivered ? "paid" : "failed";
+        if (!r.delivered) p.reason = "not_delivered";
       }
-      p.release = r;
-      p.status = r.delivered ? "paid" : "failed";
-      if (!r.delivered) p.reason = "not_delivered";
-      if (by === "auto") p.approvedBy = "auto_approve_rule";
-      return p;
     } catch {
       p.status = "failed";
       p.reason = "provider_error";
-      return p;
     }
-  }
-
-  private decline(p: AttachedPurchase, reason: string): AttachedPurchase {
-    p.status = "declined";
-    p.reason = reason;
+    await this.store.updatePurchase(p);
     return p;
   }
 }

@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Platform } from "@acard/core";
-import { TestVaultProvider } from "./attachedCards/index.js";
+import { PostgresAttachedCardStore, TestVaultProvider } from "./attachedCards/index.js";
+import { loadEncryptionKey } from "./encryption.js";
 import { createApp } from "./app.js";
 import { PostgresPersistence } from "./persistence.js";
 import { InMemoryPlatformService, PostgresPlatformService, type PlatformService } from "./service/index.js";
@@ -345,6 +346,22 @@ if (compliance) {
   console.log(`A-CARD API: crypto compliance — ${gate.reason}`);
 }
 
+// Attached cards and passkeys live in Postgres whenever A-CARD itself does; memory only without a database.
+let attachedStore: PostgresAttachedCardStore | undefined;
+if (attachedCardsProvider && platform instanceof PostgresPlatformService) {
+  const store = new PostgresAttachedCardStore(databaseUrl as string, loadEncryptionKey());
+  await store.migrate();
+  attachedStore = store;
+  const previousClose = onClose;
+  onClose = async () => {
+    await previousClose?.();
+    await store.close();
+  };
+  console.log("A-CARD API: attached cards and passkeys on Postgres (vault references encrypted at rest)");
+} else if (attachedCardsProvider) {
+  console.log("A-CARD API: attached cards and passkeys in memory only: they will not survive a restart");
+}
+
 const app = createApp({
   platform,
   issuerWebhookSecret,
@@ -354,7 +371,7 @@ const app = createApp({
   merchants,
   merchantAuth,
   selfServeStores: selfServeStores ? {} : undefined,
-  attachedCards: attachedCardsProvider === "test" ? { provider: new TestVaultProvider() } : undefined,
+  attachedCards: attachedCardsProvider === "test" ? { provider: new TestVaultProvider(), store: attachedStore, passkeyStore: attachedStore } : undefined,
   passkeys: attachedCardsProvider
     ? { rpId: process.env.ACARD_PASSKEY_RP_ID ?? new URL(dashboardUrl ?? "http://localhost:3000").hostname, rpName: "A-CARD", origins: (process.env.ACARD_PASSKEY_ORIGINS ?? dashboardUrl ?? "http://localhost:3000").split(",").map((o) => o.trim()) }
     : undefined,

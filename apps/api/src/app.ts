@@ -41,7 +41,7 @@ import type { AfpLedgerPort } from "./afp/index.js";
 import { usdToAtomic, X402RequestError, type X402Outcome, type X402Payer, type X402Tab } from "./x402/index.js";
 import type { CompliancePort, ComplianceStorePort } from "./compliance/index.js";
 import { parseCatalogCsv, CSV_TEMPLATE } from "./merchant/csv.js";
-import { AttachedCardError, AttachedCardService, PasskeyError, PasskeyService, publicCard, publicPurchase, type CardVaultProvider, type PasskeyConfig } from "./attachedCards/index.js";
+import { AttachedCardError, AttachedCardService, PasskeyError, PasskeyService, publicCard, publicPurchase, type AttachedCardStore, type CardVaultProvider, type PasskeyConfig, type PasskeyStore } from "./attachedCards/index.js";
 import { deliverMerchantWebhook, type MerchantWebhookEvent } from "./merchant/webhooks.js";
 import { evaluateCryptoGate, type CryptoCompliancePort, type ScreenableChain } from "./compliance/index.js";
 import {
@@ -185,7 +185,7 @@ export interface AppConfig {
    * holder's auto-approve amount need a passkey signature from a person, so
    * mounting this requires `passkeys` too.
    */
-  attachedCards?: { provider: CardVaultProvider };
+  attachedCards?: { provider: CardVaultProvider; store?: AttachedCardStore; passkeyStore?: PasskeyStore };
   /** WebAuthn relying-party settings for passkey approvals. */
   passkeys?: PasskeyConfig;
   /**
@@ -1023,8 +1023,8 @@ export function createApp(config: AppConfig) {
 
   // ---- attached cards (bring your own card) + passkeys ---------------------------------
   if (config.attachedCards && config.passkeys) {
-    const passkeys = new PasskeyService(config.passkeys);
-    const attached = new AttachedCardService(config.attachedCards.provider, async (id) => (await platform.getPolicy(id)).blockedMerchantCategories);
+    const passkeys = new PasskeyService(config.passkeys, config.attachedCards.passkeyStore);
+    const attached = new AttachedCardService(config.attachedCards.provider, async (id) => (await platform.getPolicy(id)).blockedMerchantCategories, config.attachedCards.store);
     /** A person signed in on the dashboard, never an agent's API key. */
     const humanOnly = async (c: Context<Env>, next: () => Promise<void>) => {
       if (!c.get("sessionUser")) {
@@ -1052,7 +1052,7 @@ export function createApp(config: AppConfig) {
     app.use("/v1/attached-cards/*", noCardNumbers);
     app.use("/v1/attached-cards", noCardNumbers);
 
-    app.get("/v1/passkeys", humanOnly, async (c) => c.json({ passkeys: passkeys.list(c.get("sessionUser")!.id) }));
+    app.get("/v1/passkeys", humanOnly, async (c) => c.json({ passkeys: await passkeys.list(c.get("sessionUser")!.id) }));
     app.post("/v1/passkeys/registration-options", humanOnly, async (c) => {
       const u = c.get("sessionUser")!;
       return c.json({ options: await passkeys.registrationOptions({ id: u.id, email: u.email, name: u.name }) });
@@ -1066,7 +1066,7 @@ export function createApp(config: AppConfig) {
 
     app.get("/v1/attached-cards", async (c) => {
       const holder = c.get("holder");
-      return c.json({ cards: attached.list(holder.id).map(publicCard), settings: attached.getSettings(holder.id), provider: { name: attached.provider.name, kind: attached.provider.kind } });
+      return c.json({ cards: (await attached.list(holder.id)).map(publicCard), settings: await attached.getSettings(holder.id), provider: { name: attached.provider.name, kind: attached.provider.kind } });
     });
     app.post("/v1/attached-cards", humanOnly, async (c) => {
       try {
@@ -1081,7 +1081,7 @@ export function createApp(config: AppConfig) {
     app.put("/v1/attached-cards/settings", humanOnly, requireRole("admin"), async (c) => {
       try {
         const body = attachedCardSettingsSchema.parse(await c.req.json());
-        return c.json({ settings: attached.setSettings(c.get("holder").id, { autoApproveUnder: body.auto_approve_under, maxPerPurchase: body.max_per_purchase }) });
+        return c.json({ settings: await attached.setSettings(c.get("holder").id, { autoApproveUnder: body.auto_approve_under, maxPerPurchase: body.max_per_purchase }) });
       } catch (e) { return fail(c, e); }
     });
     app.post("/v1/attached-cards/purchases", requireRole("member"), async (c) => {
@@ -1093,10 +1093,10 @@ export function createApp(config: AppConfig) {
       }, who);
       return c.json({ purchase: publicPurchase(p), passkey_needed: p.status === "awaiting_approval" }, 201);
     });
-    app.get("/v1/attached-cards/purchases", async (c) => c.json({ purchases: attached.listPurchases(c.get("holder").id).map(publicPurchase) }));
+    app.get("/v1/attached-cards/purchases", async (c) => c.json({ purchases: (await attached.listPurchases(c.get("holder").id)).map(publicPurchase) }));
     app.post("/v1/attached-cards/purchases/:id/approval-options", humanOnly, async (c) => {
       try {
-        const p = attached.get(c.get("holder").id, (c.req.param("id") as string));
+        const p = await attached.get(c.get("holder").id, (c.req.param("id") as string));
         if (p.status !== "awaiting_approval") return c.json({ error: { code: "not_pending", message: `purchase is ${p.status}` } }, 409);
         return c.json({ options: await passkeys.authenticationOptions(c.get("sessionUser")!.id, `purchase:${p.id}`), purchase: publicPurchase(p) });
       } catch (e) { return fail(c, e); }
@@ -1110,7 +1110,7 @@ export function createApp(config: AppConfig) {
       } catch (e) { return fail(c, e); }
     });
     app.post("/v1/attached-cards/purchases/:id/deny", humanOnly, async (c) => {
-      try { return c.json({ purchase: publicPurchase(attached.deny(c.get("holder").id, (c.req.param("id") as string), c.get("sessionUser")!.email)) }); } catch (e) { return fail(c, e); }
+      try { return c.json({ purchase: publicPurchase(await attached.deny(c.get("holder").id, (c.req.param("id") as string), c.get("sessionUser")!.email)) }); } catch (e) { return fail(c, e); }
     });
   }
 
