@@ -8,6 +8,17 @@ Each entry is marked **Added**, **Changed**, **Fixed**, **Security** or **Docs**
 
 ---
 
+## [Unreleased]: dashboard: every new feature in the live console
+
+### Added
+- **Agents & keys**: create agent API keys (scope, total budget), shown once; see budget used; revoke.
+- **Orders**: orders agents placed with A-MERCHANT suppliers, with status and cancel.
+- **Security**: passkeys, recovery codes, remove a lost device, recover, recent activity.
+- **Verification**: KYC status and starting verification with the provider.
+- **Plan & billing**: plans and upgrade through PayFast checkout.
+- **Home**: "Needs your attention" (card approvals, passkey purchases, open orders, verification, recovery cooling-off).
+- **Approvals**: purchases on your own card waiting for your passkey, approvable right there.
+
 ## [Unreleased]: lost-phone passkey recovery
 
 ### Added

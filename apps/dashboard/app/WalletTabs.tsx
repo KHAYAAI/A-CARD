@@ -190,7 +190,7 @@ const TEST_REFS = ["test_tok_visa_4242_1230", "test_tok_mastercard_4444_1230", "
  * keeps a reference. Bigger purchases need a passkey signature from the
  * holder's own device.
  */
-export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) => void }) {
+export function AttachedCards({ call, flash, mode = "full" }: { call: Call; flash: (m: string) => void; mode?: "full" | "security" | "approvals" }) {
   const [state, setState] = useState<{ cards: AttachedCardRow[]; settings: { autoApproveUnder: number; maxPerPurchase: number }; provider: { name: string; kind: string } } | null>(null);
   const [purchases, setPurchases] = useState<AttachedPurchaseRow[]>([]);
   const [passkeys, setPasskeys] = useState<{ id: string; created_at: string }[] | null>(null);
@@ -256,18 +256,20 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
     flash(r.purchase.status === "paid" ? "Approved with your passkey. Paid on your card." : `Purchase ${r.purchase.status}.`);
   });
 
-  if (off) return <div className="panel panel-pad"><div style={empty}>{off}</div></div>;
-  if (!state) return <div className="panel panel-pad"><div style={empty}>Loading…</div></div>;
+  if (off) return mode === "approvals" ? null : <div className="panel panel-pad"><div style={empty}>{mode === "security" ? "Passkeys aren't enabled on this deployment yet." : off}</div></div>;
+  if (!state) return mode === "approvals" ? null : <div className="panel panel-pad"><div style={empty}>Loading…</div></div>;
   const waiting = purchases.filter((p) => p.status === "awaiting_approval");
   const isTest = state.provider.kind === "test";
+  const show = (section: "intro" | "passkey" | "waiting" | "rest") => mode === "full" || (mode === "security" && section === "passkey") || (mode === "approvals" && section === "waiting");
+  if (mode === "approvals" && waiting.length === 0) return null;
   return (
     <div>
-      <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+      {show("intro") && <div className="panel panel-pad" style={{ marginBottom: 18 }}>
         <div className="eyebrow">YOUR OWN CARDS</div>
         <p style={{ color: "var(--muted)", fontSize: 14, margin: "6px 0 0" }}>Let agents pay with a card you already have, without ever seeing it. The card is held by {isTest ? "a test vault (development only)" : `your card vault (${state.provider.name})`}, never by A-CARD. Your rules run first; anything over your auto-approve amount needs your passkey; then a single-use credential is released for that merchant and amount only.</p>
-      </div>
+      </div>}
 
-      <div className="panel panel-pad" style={{ marginBottom: 18 }}>
+      {show("passkey") && <div className="panel panel-pad" style={{ marginBottom: 18 }}>
         <div className="eyebrow">PASSKEY</div>
         {passkeys === null ? <p style={{ color: "var(--muted)", fontSize: 14 }}>Sign in with your email and password to use passkeys. An API key can't approve purchases.</p> : (
           <>
@@ -309,11 +311,11 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
             )}
           </>
         )}
-      </div>
+      </div>}
 
-      {waiting.length > 0 && (
+      {show("waiting") && waiting.length > 0 && (
         <div className="panel panel-pad" style={{ marginBottom: 18 }}>
-          <div className="eyebrow">WAITING FOR YOUR PASSKEY</div>
+          <div className="eyebrow">{mode === "approvals" ? "PURCHASES ON YOUR OWN CARD: WAITING FOR YOUR PASSKEY" : "WAITING FOR YOUR PASSKEY"}</div>
           {waiting.map((p) => (
             <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 0", borderTop: "1px solid var(--border-soft)", flexWrap: "wrap" }}>
               <div><b>{money(p.amount, p.currency)}</b> at {p.merchant_name}</div>
@@ -326,6 +328,7 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
         </div>
       )}
 
+      {show("rest") && <>
       <div className="panel panel-pad" style={{ marginBottom: 18 }}>
         <div className="eyebrow">ATTACHED CARDS</div>
         {state.cards.length === 0 ? <div style={empty}>No cards attached yet.</div> : state.cards.map((c) => (
@@ -369,6 +372,7 @@ export function AttachedCards({ call, flash }: { call: Call; flash: (m: string) 
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }

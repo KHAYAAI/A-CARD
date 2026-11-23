@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AttachedCards, CryptoWallets, PayRouting } from "./WalletTabs";
+import { AgentsPanel, NeedsAttention, OrdersPanel, PlanPanel, VerificationPanel } from "./Platform";
 
 const API_URL = process.env.NEXT_PUBLIC_ACARD_API_URL ?? "http://localhost:8787";
 
@@ -101,7 +102,12 @@ const NAV: NavItem[] = [
   { view: "approvals", label: "Approvals", icon: "shieldCheck" },
   { view: "policies", label: "Policies", icon: "scale", enterprise: true, min: "admin" },
   { view: "audit", label: "Audit log", icon: "book", crumb: "Audit log", enterprise: true },
+  { view: "orders", label: "Orders", icon: "box" },
+  { view: "agents", label: "Agents & keys", icon: "bot", min: "admin" },
   { view: "connect", label: "Connect agents", icon: "cpu" },
+  { view: "security", label: "Security", icon: "shieldCheck" },
+  { view: "verification", label: "Verification", icon: "check" },
+  { view: "plan", label: "Plan & billing", icon: "spark" },
   { view: "merchants", label: "Merchants", icon: "building", crumb: "Merchants", min: "admin" },
   { view: "team", label: "Team", icon: "users", min: "admin" },
 ];
@@ -629,6 +635,7 @@ export default function Dashboard() {
                   <div className="stat"><div className="head"><span className="lbl">Active cards</span></div><div className="val">{activeCards}</div><div className="foot">{cards.length} issued in total</div></div>
                   <div className="stat"><div className="head"><span className="lbl">Plan</span></div><div className="val serif" style={{ textTransform: "capitalize" }}>{holder?.subscriptionTier ?? "Free"}</div><div className="foot">Subscription tier</div></div>
                 </div>
+                <NeedsAttention call={call} goto={goto} cardApprovals={pendingCount} />
                 {isEnt && departments.length > 0 && (
                   <div className="panel panel-pad">
                     <div className="panel-head"><h2>Spend by department</h2><span className="tag">this month</span></div>
@@ -821,9 +828,10 @@ export default function Dashboard() {
           {view === "approvals" && (
             <>
               <div className="page-head"><div className="page-title">Approvals</div><div className="page-sub">Charges above a card&apos;s threshold wait here for your decision.</div></div>
+              <AttachedCards call={call} flash={flash} mode="approvals" />
               <div className="panel panel-pad">
                 {approvals.length === 0 ? (
-                  <div className="empty">Nothing waiting on you. Charges above a card&apos;s threshold land here.</div>
+                  <div className="empty">No card charges waiting. Charges above a card&apos;s threshold land here.</div>
                 ) : (
                   <div style={{ display: "grid", gap: 12 }}>
                     {approvals.map((a) => (
@@ -843,6 +851,16 @@ export default function Dashboard() {
           )}
 
           {/* CONNECT */}
+          {view === "orders" && <OrdersPanel call={call} flash={flash} />}
+          {view === "agents" && can(role, "admin") && <AgentsPanel call={call} flash={flash} />}
+          {view === "verification" && <VerificationPanel call={call} flash={flash} />}
+          {view === "plan" && <PlanPanel call={call} flash={flash} current={holder?.subscriptionTier} />}
+          {view === "security" && (
+            <>
+              <div className="page-head"><div className="page-title">Security</div><div className="page-sub">Passkeys approve purchases on your own cards. Keep recovery codes somewhere safe, and add a second device.</div></div>
+              <AttachedCards call={call} flash={flash} mode="security" />
+            </>
+          )}
           {view === "connect" && (
             <>
               <div className="page-head"><div className="page-title">Connect agents</div><div className="page-sub">Apps and agents you&apos;ve authorized. Each one only ever sees the cards it created.</div></div>

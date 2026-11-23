@@ -250,3 +250,17 @@ Built since the plan above: AFP routing (card, x402, stablecoin), the agent wall
 | POS and ERP connectors | None built (CSV and API sync only) | No: needed for supply growth, not for first money |
 
 Order of operations: (1) run the Investec pilot on your own account to test the decision layer on real charges, (2) engage counsel and start issuing-partner talks now, since both take months, (3) finish operational readiness and a penetration test while they run, (4) go live with a small design-partner group on cards only, (5) keep crypto off until a KMS-backed provider has been audited.
+
+---
+
+## 8. Update, 2026-11-23: what stops real money, rail by rail
+
+| Rail | Built | What stops real money |
+|---|---|---|
+| **Issued cards** (A-CARD's own virtual cards) | Decisioning, ledger, approvals, policies, PayFast funding (wired), issuer webhook contract | A signed issuing partner and their onboarding; counsel on licensing (SARB, FICA, POPIA); KYC enforcement switched on; PayFast run end to end; operations and a penetration test |
+| **Attached cards** (customer's own card) | Vault contract, no-card-number guard, real passkey approval and lost-phone recovery, Postgres storage | A certified vault or Visa / Mastercard agent-token approval; a checkout path to merchants; counsel on PCI and POPIA. Likely the fastest route: no funds held, no issuer |
+| **Investec pilot** (own card) | Hook, endpoints, runbook, emulator check | Enable Programmable Banking; Investec's written OK; one real test charge |
+| **Crypto: agent wallet** | Governed tools on a simulated chain; dev signer; mainnet gate | A real chain adapter (Base, Solana); real custody (KMS/HSM or MPC); an audit; crypto-asset licensing (FSCA CASP in SA, VARA or a free-zone regulator in the UAE); Travel Rule; wallet screening on |
+| **Crypto: stablecoin rail and wallet provider** | Real keys, encrypted storage, signed USDC transfers on test networks (verified against a simulated chain only) | Run on a real testnet first; replace the environment-variable master key with KMS/HSM; audit; the same licensing and Travel Rule work; on-/off-ramp partner for rand |
+| **x402** (pay-per-API) | Real EIP-3009 signer behind explicit flags; governed by card controls | Funded wallet with real custody; licensing as for crypto |
+
