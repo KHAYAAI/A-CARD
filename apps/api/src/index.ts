@@ -362,7 +362,15 @@ if (attachedCardsProvider && platform instanceof PostgresPlatformService) {
   console.log("A-CARD API: attached cards and passkeys in memory only: they will not survive a restart");
 }
 
+let readiness: (() => Promise<void>) | undefined;
+if (databaseUrl) {
+  const { default: pgLib } = await import("pg");
+  const probe = new pgLib.Pool({ connectionString: databaseUrl, max: 1, idleTimeoutMillis: 30_000 });
+  readiness = async () => void (await probe.query("select 1"));
+}
+
 const app = createApp({
+  readiness,
   platform,
   issuerWebhookSecret,
   compliance,

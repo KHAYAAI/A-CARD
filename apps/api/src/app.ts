@@ -113,6 +113,8 @@ import { buildOpenApi } from "./openapi.js";
  */
 
 export interface AppConfig {
+  /** Deep health check for /health/ready (e.g. a database round-trip). Throws when not ready. */
+  readiness?: () => Promise<void>;
   /** The async platform service. A raw in-memory `Platform` is auto-wrapped. */
   platform: PlatformService | import("@acard/core").Platform;
   /** Shared secret with the (mock) issuer for webhook signatures. */
@@ -452,6 +454,19 @@ export function createApp(config: AppConfig) {
   }
 
   app.get("/health", (c) => c.json({ ok: true, service: "acard-api" }));
+  // For uptime monitors: also proves the database answers. Never reports why in detail.
+  app.get("/health/ready", async (c) => {
+    const started = Date.now();
+    try {
+      if (config.readiness) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([config.readiness(), new Promise((_, no) => (timer = setTimeout(() => no(new Error("timeout")), 3000)))]).finally(() => clearTimeout(timer));
+      }
+      return c.json({ ok: true, service: "acard-api", database: config.readiness ? "ok" : "none", ms: Date.now() - started });
+    } catch {
+      return c.json({ ok: false, service: "acard-api", database: "unreachable" }, 503);
+    }
+  });
 
   // The machine-readable API reference. Built once, lazily — it is derived
   // from the same zod schemas the routes validate with (see openapi.ts).

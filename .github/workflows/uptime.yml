@@ -1,0 +1,26 @@
+# Uptime monitor: every 10 minutes, checks the live API (including its database),
+# the dashboard and the sandbox. A failed run makes GitHub email the repo's watchers;
+# set the ALERT_SLACK_WEBHOOK secret to also post to Slack.
+# Scheduled workflows only run from the default branch, so merge this there.
+name: uptime
+on:
+  schedule: [{ cron: "*/10 * * * *" }]
+  workflow_dispatch:
+permissions: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      API_URL: ${{ vars.ACARD_API_URL || 'https://acard-api.fly.dev' }}
+      DASHBOARD_URL: ${{ vars.ACARD_DASHBOARD_URL || 'https://acard-dash-za.fly.dev' }}
+      SANDBOX_URL: ${{ vars.ACARD_SANDBOX_URL || 'https://acard-sandbox.fly.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-deploy.sh
+      - if: failure() && env.SLACK != ''
+        env:
+          SLACK: ${{ secrets.ALERT_SLACK_WEBHOOK }}
+        run: |
+          curl -sS -X POST -H 'content-type: application/json' \
+            -d "{\"text\":\":rotating_light: A-CARD uptime check failed: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" "$SLACK"

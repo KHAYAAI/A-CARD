@@ -41,7 +41,7 @@ const svc = new ProviderService({
   networks,
   maxTransfer: usdc(Number(env.PROVIDER_MAX_TRANSFER_USDC ?? 100)),
   maxDaily: usdc(Number(env.PROVIDER_MAX_DAILY_USDC ?? 250)),
-  compliance: { screener, travelRuleThreshold: threshold },
+  compliance: { screener, travelRuleThreshold: threshold, blockUnknown: env.PROVIDER_SCREENING_BLOCK_UNKNOWN === "true" },
 });
 const port = Number(env.PORT ?? 8788);
 serve({ fetch: createProviderApp(svc, { apiKey }).fetch, port });

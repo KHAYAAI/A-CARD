@@ -30,7 +30,8 @@ describe("screening and Travel Rule", () => {
   it("blocks sanctioned and high-risk destinations, allows low", async () => {
     await expect(checkTransfer({ screener: screener({ sanctionsHit: true, severity: "low" }) }, "ethereum", "0x1", 1n)).rejects.toMatchObject({ code: "destination_blocked" });
     await expect(checkTransfer({ screener: screener({ sanctionsHit: false, severity: "high" }) }, "ethereum", "0x1", 1n)).rejects.toMatchObject({ code: "destination_blocked" });
-    await expect(checkTransfer({ screener: screener({ sanctionsHit: false, severity: "unknown" }) }, "ethereum", "0x1", 1n)).rejects.toMatchObject({ code: "destination_blocked" });
+    expect((await checkTransfer({ screener: screener({ sanctionsHit: false, severity: "unknown" }) }, "ethereum", "0x1", 1n)).screening?.severity).toBe("unknown");
+    await expect(checkTransfer({ blockUnknown: true, screener: screener({ sanctionsHit: false, severity: "unknown" }) }, "ethereum", "0x1", 1n)).rejects.toMatchObject({ code: "destination_blocked" });
     expect((await checkTransfer({ screener: screener({ sanctionsHit: false, severity: "low" }) }, "ethereum", "0x1", 1n)).screening?.by).toBe("t");
   });
   it("fails closed when screening is down", async () => {
@@ -43,13 +44,17 @@ describe("screening and Travel Rule", () => {
     await expect(checkTransfer(cfg, "ethereum", "0x1", 1000_000_000n, { originatorName: "A", beneficiaryName: "Bob" })).rejects.toMatchObject({ code: "travel_rule_required" });
     expect((await checkTransfer(cfg, "ethereum", "0x1", 1000_000_000n, { originatorName: "Ann", beneficiaryName: "Bob" })).travelRule).toBe(true);
   });
+  it("treats an unscreened result as an outage", async () => {
+    const s = new DiditScreener("k", "https://d.test", (async () => new Response(JSON.stringify({ status: "PENDING" }))) as any);
+    await expect(checkTransfer({ screener: s }, "ethereum", "0x1", 1n)).rejects.toMatchObject({ code: "screening_unavailable" });
+  });
   it("calls Didit's screen-wallet endpoint", async () => {
     let call: any;
     const s = new DiditScreener("k", "https://d.test", (async (url: string, init: any) => { call = { url, init }; return new Response(JSON.stringify({ sanctions_hit: false, severity: "Low", risk_score: 3 })); }) as any);
     expect(await s.screen("0xabc", "ethereum")).toEqual({ sanctionsHit: false, severity: "low", riskScore: 3 });
     expect(call.url).toBe("https://d.test/v2/transactions/screen-wallet/");
     expect(call.init.headers["x-api-key"]).toBe("k");
-    expect(JSON.parse(call.init.body)).toMatchObject({ wallet_address: "0xabc", blockchain: "ethereum", direction: "outbound" });
+    expect(JSON.parse(call.init.body)).toMatchObject({ wallet_address: "0xabc", blockchain: "ETH", direction: "outbound" });
   });
 });
 

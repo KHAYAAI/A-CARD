@@ -272,5 +272,8 @@ Order of operations: (1) run the Investec pilot on your own account to test the 
 | 2 | Key custody | Done: signing inside AWS KMS (one key per wallet, keys never leave), required for mainnet. To close: run against a real AWS account. EVM only; Solana in KMS still to do. |
 | 3 | Security audit | Not code. Scope: `apps/wallet-provider`, `packages/agent-wallet` (policy, signer, x402), API wallet routes. Mainnet needs `PROVIDER_AUDIT_REF`. |
 | 4 | Licence | Not code. Counsel: FSCA CASP (SA) / VARA or free-zone (UAE). Mainnet needs `PROVIDER_LICENCE_REF`. |
-| 5 | Screening + Travel Rule | Done in code, fail-closed, required for mainnet. Needs Didit transaction-monitoring provider connected on the account. |
+| 5 | Screening + Travel Rule | Done in code, fail-closed, required for mainnet. Screening works on the Didit sandbox app (Merkle Science, built in). Live app: confirm it's enabled. Travel Rule network membership needs a licence first. |
 | 6 | Rand ramp | Not code. Partner conversation. Mainnet needs `PROVIDER_RAMP_PARTNER_REF`. |
+
+
+Operations for launch: `docs/OPERATIONS.md`. Partners for the remaining blockers: `docs/PARTNERS.md`.

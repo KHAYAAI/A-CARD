@@ -27,6 +27,9 @@ export interface TravelRuleInfo {
   beneficiaryVasp?: string;
 }
 
+/** Didit names assets, not networks. Base and other EVM L2s use ETH. */
+const DIDIT_CHAIN: Record<Chain, string> = { ethereum: "ETH", polygon: "MATIC", solana: "SOL" };
+
 /** Didit transaction-monitoring wallet screening (POST /v2/transactions/screen-wallet/). */
 export class DiditScreener implements Screener {
   readonly name = "didit";
@@ -39,11 +42,12 @@ export class DiditScreener implements Screener {
     const res = await this.doFetch(`${this.baseUrl.replace(/\/$/, "")}/v2/transactions/screen-wallet/`, {
       method: "POST",
       headers: { "x-api-key": this.apiKey, "content-type": "application/json" },
-      body: JSON.stringify({ wallet_address: address, blockchain: chain, direction: "outbound" }),
+      body: JSON.stringify({ wallet_address: address, blockchain: DIDIT_CHAIN[chain], direction: "outbound" }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`screening returned ${res.status}`);
-    const b = (await res.json()) as { sanctions_hit?: boolean; severity?: string; risk_score?: number };
+    const b = (await res.json()) as { sanctions_hit?: boolean; severity?: string; risk_score?: number; status?: string };
+    if (b.status && b.status !== "SCREENED") throw new Error(`screening status ${b.status}`);
     const s = (b.severity ?? "unknown").toLowerCase();
     return { sanctionsHit: b.sanctions_hit === true, severity: (["low", "medium", "high", "severe"].includes(s) ? s : "unknown") as Severity, riskScore: b.risk_score };
   }
@@ -53,11 +57,13 @@ export interface ComplianceConfig {
   screener?: Screener;
   /** Block destinations at or above this severity. Default "high". */
   blockAt?: Exclude<Severity, "unknown">;
+  /** "unknown" means screened but no history (normal for new wallets). Allowed unless this is true. */
+  blockUnknown?: boolean;
   /** Transfers at or above this (USDC base units) need Travel Rule details. */
   travelRuleThreshold?: bigint;
 }
 
-const RANK: Record<Severity, number> = { low: 1, medium: 2, high: 3, severe: 4, unknown: 3 };
+const RANK: Record<Exclude<Severity, "unknown">, number> = { low: 1, medium: 2, high: 3, severe: 4 };
 
 export async function checkTransfer(cfg: ComplianceConfig, chain: Chain, to: string, amount: bigint, travel?: TravelRuleInfo): Promise<{ screening?: ScreenResult & { by: string }; travelRule: boolean }> {
   let travelRule = false;
@@ -75,6 +81,8 @@ export async function checkTransfer(cfg: ComplianceConfig, chain: Chain, to: str
     throw new ProviderError(503, "screening_unavailable", `destination could not be screened, so the transfer was not sent: ${(e as Error).message}`);
   }
   if (r.sanctionsHit) throw new ProviderError(403, "destination_blocked", "destination wallet matches a sanctions list");
-  if (RANK[r.severity] >= RANK[cfg.blockAt ?? "high"]) throw new ProviderError(403, "destination_blocked", `destination wallet risk is ${r.severity}`);
+  if (r.severity === "unknown") {
+    if (cfg.blockUnknown) throw new ProviderError(403, "destination_blocked", "destination wallet has no risk history and unknown wallets are blocked");
+  } else if (RANK[r.severity] >= RANK[cfg.blockAt ?? "high"]) throw new ProviderError(403, "destination_blocked", `destination wallet risk is ${r.severity}`);
   return { screening: { ...r, by: cfg.screener.name }, travelRule };
 }
