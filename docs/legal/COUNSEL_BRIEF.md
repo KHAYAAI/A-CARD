@@ -10,7 +10,7 @@ A-CARD lets a person or business give an AI agent (software acting on their inst
 - **A-MERCHANT:** merchants list products agents can buy.
 - **Funding and billing** via PayFast (subscriptions; funding is sandbox).
 
-Company: [COMPANY NAME], incorporated in [South Africa / UAE free zone]. Customers: [consumers / businesses / both] in [South Africa first, then UAE].
+Company: Agent Card (Pty) Ltd, incorporated in [South Africa / UAE free zone]. Customers: [consumers / businesses / both] in [South Africa first, then UAE].
 
 ## 2. Personal information we process
 | Category | Examples | Source | Why |

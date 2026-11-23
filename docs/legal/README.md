@@ -16,4 +16,4 @@
 | `BREACH_RESPONSE.md` | POPIA s22 notification procedure | Internal |
 | `SUBPROCESSORS.md` | Who processes personal data for us | Website |
 
-Fill once, everywhere: `[COMPANY NAME]`, `[REG NO]`, `[ADDRESS]`, `[INFORMATION OFFICER]`, `[EMAIL]`, `[DOMAIN]`, `[EFFECTIVE DATE]`.
+Company: Agent Card (Pty) Ltd. Still to fill: `[REG NO]`, `[ADDRESS]`, `[INFORMATION OFFICER]`, `[EMAIL]`, `[DOMAIN]`, `[EFFECTIVE DATE]`.

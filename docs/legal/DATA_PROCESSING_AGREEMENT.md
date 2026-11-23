@@ -1,6 +1,6 @@
 # Data Processing Agreement (Operator Agreement)
 
-**DRAFT FOR COUNSEL REVIEW.** Between the customer named in the order or account ("**Responsible Party**") and [COMPANY NAME] ("**Operator**"). Forms part of the Terms of Service. Required by POPIA sections 20 and 21.
+**DRAFT FOR COUNSEL REVIEW.** Between the customer named in the order or account ("**Responsible Party**") and Agent Card (Pty) Ltd ("**Operator**"). Forms part of the Terms of Service. Required by POPIA sections 20 and 21.
 
 ## 1. Scope
 1.1 Applies where the Operator processes personal information on the Responsible Party's behalf: e.g. a merchant's customers' order details in A-MERCHANT, or a business customer's staff whose Agents use A-CARD.

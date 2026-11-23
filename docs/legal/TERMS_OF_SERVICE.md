@@ -2,7 +2,7 @@
 
 **DRAFT FOR COUNSEL REVIEW.** Effective [EFFECTIVE DATE]. Version 0.1.
 
-These terms are an agreement between you and [COMPANY NAME] (registration number [REG NO]), [ADDRESS] ("A-CARD", "we", "us"). By creating an account you accept them. If you accept on behalf of a business, you confirm you are authorised to bind it.
+These terms are an agreement between you and Agent Card (Pty) Ltd (registration number [REG NO]), [ADDRESS] ("A-CARD", "we", "us"). By creating an account you accept them. If you accept on behalf of a business, you confirm you are authorised to bind it.
 
 > **Important (CPA s49):** clauses marked **⚠** limit our liability, place risks on you, or require you to do something. Please read them.
 

@@ -2,7 +2,7 @@
 
 **DRAFT FOR COUNSEL REVIEW.** Effective [EFFECTIVE DATE].
 
-[COMPANY NAME] ("A-CARD") is the **responsible party** for the personal information described here, under the Protection of Personal Information Act 4 of 2013 (POPIA). Information Officer: [INFORMATION OFFICER], [EMAIL], [ADDRESS].
+Agent Card (Pty) Ltd ("A-CARD") is the **responsible party** for the personal information described here, under the Protection of Personal Information Act 4 of 2013 (POPIA). Information Officer: [INFORMATION OFFICER], [EMAIL], [ADDRESS].
 
 ## 1. What we collect
 | Category | What | From |

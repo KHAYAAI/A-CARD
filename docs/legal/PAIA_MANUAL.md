@@ -3,7 +3,7 @@
 **DRAFT FOR COUNSEL REVIEW.** Prepared under section 51 of the Promotion of Access to Information Act 2 of 2000 (PAIA), as amended by POPIA. Date: [DATE].
 
 ## 1. Company details
-[COMPANY NAME], registration number [REG NO]. Physical and postal address: [ADDRESS]. Email: [EMAIL]. Website: [DOMAIN].
+Agent Card (Pty) Ltd, registration number [REG NO]. Physical and postal address: [ADDRESS]. Email: [EMAIL]. Website: [DOMAIN].
 **Information Officer:** [INFORMATION OFFICER] (registered with the Information Regulator on [DATE]). **Deputy Information Officer:** [NAME].
 
 ## 2. The Information Regulator's guide
