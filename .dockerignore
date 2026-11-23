@@ -2,6 +2,8 @@
 .git
 **/.next
 **/dist
-marketing/videos
 **/*.mp4
 **/*.webm
+infra
+tutorials
+marketing
