@@ -16,11 +16,15 @@ Spending infrastructure for AI agents: scoped virtual cards, a double-entry ledg
 | `session` | `Authorization: Bearer …` | Human session, `sess_…` (or the httpOnly `acard_session` cookie). Permissions follow the user's role. |
 | `merchantSession` | cookie `acard_merchant_session` | Merchant portal session (a bearer merchant session token is also accepted). |
 | `merchantKey` | `Authorization: Bearer …` | Merchant machine key, `mk_live_…`. Scoped to one merchant; can never reach a wallet or card. |
+| `operatorToken` | `Authorization: Bearer …` | A-CARD staff token (ACARD_OPERATOR_TOKEN). Never issued to customers. |
+| `partnerCustomer` | header `A-Card-Customer` | Sent with a partner's own API key to act for one of its customers (account holder id or external_ref) on any tenant route. |
 | `webhookSignature` | header `x-acard-signature` | `t=<unix>,v1=<hex HMAC-SHA256 of "t.rawBody">` |
 
 ## Contents
 
 - [Meta](#meta) — Health and this document.
+- [Partners](#partners) — 
+- [Operator](#operator) — 
 - [Onboarding](#onboarding) — Create an organization and get an API key.
 - [Auth](#auth) — Human login, sessions, MFA and SSO for the dashboard.
 - [Team](#team) — Members and roles: owner > admin > member > viewer.
@@ -83,6 +87,237 @@ Health and this document.
 **Response `200`**
 
 `object`
+
+## Partners
+
+### `GET /v1/branding`
+
+**Branding for the current account**
+
+The partner's brand for a partner or one of its customers; A-CARD's otherwise. Use it to theme approvals, emails and the card form.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `white_label` | boolean | yes |  |
+| `partner_id` | string \| null | yes |  |
+| `brand` | object |  |  |
+| `powered_by` | string | yes |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/partner`
+
+**This partner, its brand and terms**
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/partner`
+
+**Become a platform partner**
+
+Turns this account into a partner that can create and act for its own customers. Commercial terms start at the defaults and are set by A-CARD.
+
+Requires the `admin` role or higher. Read-only API keys act as `viewer`.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+- **Minimum role:** `admin`
+
+**Response `201`**
+
+`object`
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `PUT /v1/partner/brand`
+
+**Set the white-label brand**
+
+display_name, logo_url (https), primary_color (#RRGGBB), support_email, support_url.
+
+Requires the `admin` role or higher. Read-only API keys act as `viewer`.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+- **Minimum role:** `admin`
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/partner/customers`
+
+**List customers**
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `data` | object[] | yes |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/partner/customers`
+
+**Create a customer account**
+
+Creates a full A-CARD account owned by this partner. Act for it on any route with the header `A-Card-Customer: <account_holder_id or external_ref>`, using the partner's own API key.
+
+Requires the `admin` role or higher. Read-only API keys act as `viewer`.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+- **Minimum role:** `admin`
+
+**Response `201`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `customer` | object |  |  |
+| `act_as` | object |  |  |
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/partner/customers/{id}`
+
+**One customer, with this month's activity**
+
+`id` is the account holder id or your external_ref.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `403`, `404` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/partner/revenue`
+
+**Monthly revenue-share statement**
+
+`?month=YYYY-MM` (default: this month). Card volume per customer and currency, and A-CARD's fees: volume_bps of volume, per active card, topped up to the monthly minimum. Amounts in minor units.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `apiKey` or `session`
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `403` — see [errors.md](../reference/errors.md).
+
+## Operator
+
+### `GET /v1/operator/distributors`
+
+**List distribution partners**
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `operatorToken`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `data` | object[] | yes |  |
+
+Errors: `401` — see [errors.md](../reference/errors.md).
+
+### `POST /v1/operator/distributors`
+
+**Add a distribution partner**
+
+A-CARD staff only. share_bps is the distributor's share of A-CARD's fees from the partners it introduced.
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `operatorToken`
+
+**Response `201`**
+
+`object`
+
+Errors: `401` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/operator/partners`
+
+**List partners**
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `operatorToken`
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `data` | object[] | yes |  |
+
+Errors: `401` — see [errors.md](../reference/errors.md).
+
+### `PUT /v1/operator/partners/{id}`
+
+**Set a partner's terms and distributor**
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `operatorToken`
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `id` | path | string | yes |  |
+
+**Response `200`**
+
+`object`
+
+Errors: `401`, `404` — see [errors.md](../reference/errors.md).
+
+### `GET /v1/operator/revenue`
+
+**All statements and distributor payouts for a month**
+
+On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.
+
+- **Auth:** `operatorToken`
+
+**Response `200`**
+
+`object`
+
+Errors: `401` — see [errors.md](../reference/errors.md).
 
 ## Onboarding
 

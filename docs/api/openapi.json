@@ -29,6 +29,12 @@
       "description": "Health and this document."
     },
     {
+      "name": "Partners"
+    },
+    {
+      "name": "Operator"
+    },
+    {
       "name": "Onboarding",
       "description": "Create an organization and get an API key."
     },
@@ -214,6 +220,591 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/branding": {
+      "get": {
+        "operationId": "get_branding",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Branding for the current account",
+        "description": "The partner's brand for a partner or one of its customers; A-CARD's otherwise. Use it to theme approvals, emails and the card form.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "white_label": {
+                      "type": "boolean"
+                    },
+                    "partner_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "brand": {},
+                    "powered_by": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "white_label",
+                    "partner_id",
+                    "powered_by"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/partner": {
+      "post": {
+        "operationId": "post_partner",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Become a platform partner",
+        "description": "Turns this account into a partner that can create and act for its own customers. Commercial terms start at the defaults and are set by A-CARD.\n\nRequires the `admin` role or higher. Read-only API keys act as `viewer`.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-min-role": "admin",
+        "x-acard-requires": "partners"
+      },
+      "get": {
+        "operationId": "get_partner",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "This partner, its brand and terms",
+        "description": "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/partner/brand": {
+      "put": {
+        "operationId": "put_partner_brand",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Set the white-label brand",
+        "description": "display_name, logo_url (https), primary_color (#RRGGBB), support_email, support_url.\n\nRequires the `admin` role or higher. Read-only API keys act as `viewer`.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-min-role": "admin",
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/partner/customers": {
+      "post": {
+        "operationId": "post_partner_customers",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Create a customer account",
+        "description": "Creates a full A-CARD account owned by this partner. Act for it on any route with the header `A-Card-Customer: <account_holder_id or external_ref>`, using the partner's own API key.\n\nRequires the `admin` role or higher. Read-only API keys act as `viewer`.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "customer": {},
+                    "act_as": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-min-role": "admin",
+        "x-acard-requires": "partners"
+      },
+      "get": {
+        "operationId": "get_partner_customers",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "List customers",
+        "description": "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/partner/customers/{id}": {
+      "get": {
+        "operationId": "get_partner_customers_by_id",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "One customer, with this month's activity",
+        "description": "`id` is the account holder id or your external_ref.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/partner/revenue": {
+      "get": {
+        "operationId": "get_partner_revenue",
+        "tags": [
+          "Partners"
+        ],
+        "summary": "Monthly revenue-share statement",
+        "description": "`?month=YYYY-MM` (default: this month). Card volume per customer and currency, and A-CARD's fees: volume_bps of volume, per active card, topped up to the monthly minimum. Amounts in minor units.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/operator/distributors": {
+      "post": {
+        "operationId": "post_operator_distributors",
+        "tags": [
+          "Operator"
+        ],
+        "summary": "Add a distribution partner",
+        "description": "A-CARD staff only. share_bps is the distributor's share of A-CARD's fees from the partners it introduced.\n\nOn unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "operatorToken": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      },
+      "get": {
+        "operationId": "get_operator_distributors",
+        "tags": [
+          "Operator"
+        ],
+        "summary": "List distribution partners",
+        "description": "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "operatorToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/operator/partners": {
+      "get": {
+        "operationId": "get_operator_partners",
+        "tags": [
+          "Operator"
+        ],
+        "summary": "List partners",
+        "description": "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "operatorToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/operator/partners/{id}": {
+      "put": {
+        "operationId": "put_operator_partners_by_id",
+        "tags": [
+          "Operator"
+        ],
+        "summary": "Set a partner's terms and distributor",
+        "description": "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "operatorToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
+      }
+    },
+    "/v1/operator/revenue": {
+      "get": {
+        "operationId": "get_operator_revenue",
+        "tags": [
+          "Operator"
+        ],
+        "summary": "All statements and distributor payouts for a month",
+        "description": "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
+        "security": [
+          {
+            "operatorToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-acard-requires": "partners"
       }
     },
     "/v1/signup": {
@@ -10997,6 +11588,17 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Merchant machine key, `mk_live_…`. Scoped to one merchant; can never reach a wallet or card."
+      },
+      "operatorToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A-CARD staff token (ACARD_OPERATOR_TOKEN). Never issued to customers."
+      },
+      "partnerCustomer": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "A-Card-Customer",
+        "description": "Sent with a partner's own API key to act for one of its customers (account holder id or external_ref) on any tenant route."
       },
       "webhookSignature": {
         "type": "apiKey",

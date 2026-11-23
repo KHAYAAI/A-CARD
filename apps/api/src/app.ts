@@ -3,6 +3,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
+import { actAsCustomer, mountPartnerRoutes } from "./partners/index.js";
 import {
   DomainError,
   redactCard,
@@ -188,6 +189,8 @@ export interface AppConfig {
    * holder's auto-approve amount need a passkey signature from a person, so
    * mounting this requires `passkeys` too.
    */
+  /** Platform partners: sub-customers, white label, revenue share. */
+  partners?: import("./partners/index.js").PartnerConfig;
   attachedCards?: { provider: CardVaultProvider; store?: AttachedCardStore; passkeyStore?: PasskeyStore };
   /** WebAuthn relying-party settings for passkey approvals. */
   passkeys?: PasskeyConfig;
@@ -309,6 +312,8 @@ type Env = {
     merchantSession?: MerchantSessionContext;
     /** Set only on `/v1/merchant-api/*` routes — a merchant's machine credential, a third identity again. */
     merchantApi?: MerchantApiContext;
+    /** Set when a partner credential is acting for one of its customers (A-Card-Customer header). */
+    partnerActor?: { partnerId: string; partnerHolderId: string };
   };
 };
 
@@ -647,7 +652,9 @@ export function createApp(config: AppConfig) {
       // A merchant API key is a third identity system: not an A-CARD tenant
       // key, not a portal session. It carries its own guard below and must
       // never satisfy this one.
-      c.req.path.startsWith("/v1/merchant-api/")
+      c.req.path.startsWith("/v1/merchant-api/") ||
+      // A-CARD staff routes carry their own operator-token guard (partners/routes.ts).
+      c.req.path.startsWith("/v1/operator/")
     ) {
       return next();
     }
@@ -682,6 +689,7 @@ export function createApp(config: AppConfig) {
     }
     return c.json({ error: { code: "unauthorized", message: "authentication required" } }, 401);
   });
+  if (config.partners) app.use("/v1/*", actAsCustomer(platform, config.partners.store));
 
   const requireRole = (min: Role) =>
     async (c: { get: (k: "role") => Role; json: (b: unknown, s?: number) => Response }, next: () => Promise<void>) => {
@@ -1038,6 +1046,10 @@ export function createApp(config: AppConfig) {
   // ---- approvals ----------------------------------------------------------------
 
   // ---- attached cards (bring your own card) + passkeys ---------------------------------
+  if (config.partners) {
+    mountPartnerRoutes(app as any, { platform, cfg: config.partners, requireAdmin: requireRole("admin") as any, provisionWallet: provisionEmbeddedWallet });
+  }
+
   if (config.attachedCards && config.passkeys) {
     const passkeys = new PasskeyService(config.passkeys, config.attachedCards.passkeyStore);
     const attached = new AttachedCardService(config.attachedCards.provider, async (id) => (await platform.getPolicy(id)).blockedMerchantCategories, config.attachedCards.store);

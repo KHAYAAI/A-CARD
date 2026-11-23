@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Platform } from "@acard/core";
 import { PostgresAttachedCardStore, TestVaultProvider } from "./attachedCards/index.js";
+import { MemoryPartnerStore, PostgresPartnerStore } from "./partners/index.js";
 import { loadEncryptionKey } from "./encryption.js";
 import { createApp } from "./app.js";
 import { PostgresPersistence } from "./persistence.js";
@@ -362,6 +363,26 @@ if (attachedCardsProvider && platform instanceof PostgresPlatformService) {
   console.log("A-CARD API: attached cards and passkeys in memory only: they will not survive a restart");
 }
 
+// Platform partners (sub-customers, white label, revenue share). On unless ACARD_PARTNERS=false.
+let partners: import("./partners/index.js").PartnerConfig | undefined;
+if (process.env.ACARD_PARTNERS !== "false") {
+  const operatorToken = process.env.ACARD_OPERATOR_TOKEN;
+  if (operatorToken && operatorToken.length < 32) throw new Error("ACARD_OPERATOR_TOKEN must be at least 32 characters (openssl rand -hex 32)");
+  if (platform instanceof PostgresPlatformService) {
+    const store = new PostgresPartnerStore(databaseUrl as string);
+    await store.migrate();
+    partners = { store, operatorToken };
+    const previousClose = onClose;
+    onClose = async () => {
+      await previousClose?.();
+      await store.close();
+    };
+  } else {
+    partners = { store: new MemoryPartnerStore(), operatorToken };
+  }
+  console.log(`A-CARD API: platform partners on (${platform instanceof PostgresPlatformService ? "Postgres" : "memory"}; operator routes ${operatorToken ? "on" : "off: set ACARD_OPERATOR_TOKEN"})`);
+}
+
 let readiness: (() => Promise<void>) | undefined;
 if (databaseUrl) {
   const { default: pgLib } = await import("pg");
@@ -371,6 +392,7 @@ if (databaseUrl) {
 
 const app = createApp({
   readiness,
+  partners,
   platform,
   issuerWebhookSecret,
   compliance,

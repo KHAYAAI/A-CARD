@@ -21,9 +21,9 @@ import { RESPONSE_COMPONENTS, type ResponseComponent } from "./responses.js";
 export const API_VERSION = "1.0.0";
 
 type Method = "get" | "post" | "put" | "patch" | "delete";
-type Auth = "none" | "tenant" | "merchant_session" | "merchant_key" | "issuer_signature" | "payfast_itn" | "compliance_signature";
+type Auth = "none" | "tenant" | "operator" | "merchant_session" | "merchant_key" | "issuer_signature" | "payfast_itn" | "compliance_signature";
 type Role = "viewer" | "member" | "admin" | "owner";
-type Requires = "merchants" | "merchant_portal" | "kyb_documents" | "afp" | "compliance" | "crypto_compliance" | "workos" | "attached_cards";
+type Requires = "merchants" | "merchant_portal" | "kyb_documents" | "afp" | "compliance" | "crypto_compliance" | "workos" | "attached_cards" | "partners";
 
 interface Resp {
   /** Top-level key the payload is wrapped in, e.g. `card` in `{ card: {...} }`. */
@@ -73,6 +73,21 @@ export const ROUTES: RouteDoc[] = [
   r("get", "/health", "Meta", "Liveness check", { auth: "none", response: { schema: z.object({ ok: z.boolean(), service: str }) } }),
   r("get", "/health/ready", "Meta", "Readiness check, including the database (503 when it is unreachable)", { auth: "none", response: { schema: z.object({ ok: z.boolean(), service: str, database: str }).passthrough() } }),
   r("get", "/openapi.json", "Meta", "This OpenAPI document", { auth: "none", response: { schema: z.object({}).passthrough() } }),
+
+  // ---- platform partners -------------------------------------------------------------
+  r("get", "/v1/branding", "Partners", "Branding for the current account", { auth: "tenant", requires: "partners", description: "The partner's brand for a partner or one of its customers; A-CARD's otherwise. Use it to theme approvals, emails and the card form.", response: { schema: z.object({ white_label: z.boolean(), partner_id: z.string().nullable(), brand: z.unknown(), powered_by: str }) } }),
+  r("post", "/v1/partner", "Partners", "Become a platform partner", { auth: "tenant", role: "admin", requires: "partners", description: "Turns this account into a partner that can create and act for its own customers. Commercial terms start at the defaults and are set by A-CARD.", response: { status: 201, schema: z.object({}).passthrough() } }),
+  r("get", "/v1/partner", "Partners", "This partner, its brand and terms", { auth: "tenant", requires: "partners", response: { schema: z.object({}).passthrough() } }),
+  r("put", "/v1/partner/brand", "Partners", "Set the white-label brand", { auth: "tenant", role: "admin", requires: "partners", description: "display_name, logo_url (https), primary_color (#RRGGBB), support_email, support_url.", response: { schema: z.object({}).passthrough() } }),
+  r("post", "/v1/partner/customers", "Partners", "Create a customer account", { auth: "tenant", role: "admin", requires: "partners", description: "Creates a full A-CARD account owned by this partner. Act for it on any route with the header `A-Card-Customer: <account_holder_id or external_ref>`, using the partner's own API key.", response: { status: 201, schema: z.object({ customer: z.unknown(), act_as: z.unknown() }) } }),
+  r("get", "/v1/partner/customers", "Partners", "List customers", { auth: "tenant", requires: "partners", response: { schema: z.object({ data: z.array(z.unknown()) }) } }),
+  r("get", "/v1/partner/customers/{id}", "Partners", "One customer, with this month's activity", { auth: "tenant", requires: "partners", description: "`id` is the account holder id or your external_ref.", response: { schema: z.object({}).passthrough() } }),
+  r("get", "/v1/partner/revenue", "Partners", "Monthly revenue-share statement", { auth: "tenant", requires: "partners", description: "`?month=YYYY-MM` (default: this month). Card volume per customer and currency, and A-CARD's fees: volume_bps of volume, per active card, topped up to the monthly minimum. Amounts in minor units.", response: { schema: z.object({}).passthrough() } }),
+  r("post", "/v1/operator/distributors", "Operator", "Add a distribution partner", { auth: "operator", requires: "partners", description: "A-CARD staff only. share_bps is the distributor's share of A-CARD's fees from the partners it introduced.", response: { status: 201, schema: z.object({}).passthrough() } }),
+  r("get", "/v1/operator/distributors", "Operator", "List distribution partners", { auth: "operator", requires: "partners", response: { schema: z.object({ data: z.array(z.unknown()) }) } }),
+  r("get", "/v1/operator/partners", "Operator", "List partners", { auth: "operator", requires: "partners", response: { schema: z.object({ data: z.array(z.unknown()) }) } }),
+  r("put", "/v1/operator/partners/{id}", "Operator", "Set a partner's terms and distributor", { auth: "operator", requires: "partners", response: { schema: z.object({}).passthrough() } }),
+  r("get", "/v1/operator/revenue", "Operator", "All statements and distributor payouts for a month", { auth: "operator", requires: "partners", response: { schema: z.object({}).passthrough() } }),
 
   // ---- onboarding ------------------------------------------------------------------
   r("post", "/v1/signup", "Onboarding", "Create an organization and its first API key", {
@@ -392,6 +407,7 @@ const REQUIRES_TEXT: Record<Requires, string> = {
   compliance: "Mounted when compliance is enabled (ACARD_ENABLE_COMPLIANCE=true).",
   crypto_compliance: "Mounted when crypto compliance is configured. Inert while AFP's crypto rails are sandboxed.",
   workos: "Requires WorkOS SSO to be configured; returns `sso_not_configured` otherwise.",
+  partners: "On unless ACARD_PARTNERS=false. Operator routes also need ACARD_OPERATOR_TOKEN.",
   attached_cards: "Mounted only when a card vault provider and passkey settings are configured (attached cards are a prototype; no live provider yet).",
 };
 
@@ -400,6 +416,7 @@ const SECURITY: Record<Auth, Array<Record<string, string[]>>> = {
   tenant: [{ apiKey: [] }, { session: [] }],
   merchant_session: [{ merchantSession: [] }],
   merchant_key: [{ merchantKey: [] }],
+  operator: [{ operatorToken: [] }],
   issuer_signature: [{ webhookSignature: [] }],
   payfast_itn: [],
   compliance_signature: [],
@@ -515,6 +532,8 @@ export function buildOpenApi(): Record<string, unknown> {
         session: { type: "http", scheme: "bearer", description: "Human session, `sess_…` (or the httpOnly `acard_session` cookie). Permissions follow the user's role." },
         merchantSession: { type: "apiKey", in: "cookie", name: "acard_merchant_session", description: "Merchant portal session (a bearer merchant session token is also accepted)." },
         merchantKey: { type: "http", scheme: "bearer", description: "Merchant machine key, `mk_live_…`. Scoped to one merchant; can never reach a wallet or card." },
+        operatorToken: { type: "http", scheme: "bearer", description: "A-CARD staff token (ACARD_OPERATOR_TOKEN). Never issued to customers." },
+        partnerCustomer: { type: "apiKey", in: "header", name: "A-Card-Customer", description: "Sent with a partner's own API key to act for one of its customers (account holder id or external_ref) on any tenant route." },
         webhookSignature: { type: "apiKey", in: "header", name: "x-acard-signature", description: "`t=<unix>,v1=<hex HMAC-SHA256 of \"t.rawBody\">`" },
       },
       responses: {

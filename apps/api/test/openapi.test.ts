@@ -17,7 +17,7 @@ import * as R from "../src/responses.js";
  *      an undocumented field fails here rather than silently missing from the spec.
  */
 
-const appSource = readFileSync(fileURLToPath(new URL("../src/app.ts", import.meta.url)), "utf8");
+const appSource = ["../src/app.ts", "../src/partners/routes.ts"].map((f) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), "utf8")).join("\n");
 
 function registeredRoutes(): string[] {
   // Every route in app.ts is registered as `app.<method>("<path>"` — including

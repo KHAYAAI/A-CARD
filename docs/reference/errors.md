@@ -125,6 +125,8 @@ Every write that moves money or creates something accepts an `Idempotency-Key` h
 | Code | Status | What it means |
 |---|---|---|
 | `not_found` | 404 | No such resource, or not yours |
+| `not_a_partner` | 404 | This account is not a platform partner yet: `POST /v1/partner` first |
+| `conflict` | 409 | Already exists: this account is already a partner, or that customer `external_ref` is taken |
 | `invalid_state` | 409 | The resource isn't in a state that allows this: approving an approval that was already decided, enabling MFA twice, linking a wallet that is already linked, and so on |
 | `invalid_department` | 400 | Department name missing, budget not a positive integer, or the department belongs to another org |
 | `invalid_policy` | 400 | Policy approval threshold isn't a positive integer |
