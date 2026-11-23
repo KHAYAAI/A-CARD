@@ -147,6 +147,48 @@
         }
       }
     },
+    "/health/ready": {
+      "get": {
+        "operationId": "get_health_ready",
+        "tags": [
+          "Meta"
+        ],
+        "summary": "Readiness check, including the database (503 when it is unreachable)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "database": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "service",
+                    "database"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/openapi.json": {
       "get": {
         "operationId": "get_openapi_json",

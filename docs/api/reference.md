@@ -60,6 +60,20 @@ Health and this document.
 | `ok` | boolean | yes |  |
 | `service` | string | yes |  |
 
+### `GET /health/ready`
+
+**Readiness check, including the database (503 when it is unreachable)**
+
+- **Auth:** none
+
+**Response `200`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `ok` | boolean | yes |  |
+| `service` | string | yes |  |
+| `database` | string | yes |  |
+
 ### `GET /openapi.json`
 
 **This OpenAPI document**
