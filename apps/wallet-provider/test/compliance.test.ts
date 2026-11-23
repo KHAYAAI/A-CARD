@@ -55,7 +55,7 @@ describe("screening and Travel Rule", () => {
 
 describe("mainnet gate", () => {
   it("lists everything missing, and passes only with all of it", () => {
-    expect(mainnetReadiness({ env: {}, keySource: "env", screening: false, travelRule: false, storeIsFile: false })).toHaveLength(7);
-    expect(mainnetReadiness({ env: { PROVIDER_AUDIT_REF: "AUD-2027-01", PROVIDER_LICENCE_REF: "FSCA-12345", PROVIDER_RAMP_PARTNER_REF: "RAMP-MSA-1" }, keySource: "aws-kms", screening: true, travelRule: true, storeIsFile: true })).toEqual([]);
+    expect(mainnetReadiness({ env: {}, keySource: "env", screening: false, travelRule: false, storeIsFile: false })).toHaveLength(8);
+    expect(mainnetReadiness({ env: { PROVIDER_AUDIT_REF: "AUD-2027-01", PROVIDER_LICENCE_REF: "FSCA-12345", PROVIDER_RAMP_PARTNER_REF: "RAMP-MSA-1" }, signer: "aws-kms", keySource: "none", screening: true, travelRule: true, storeIsFile: true })).toEqual([]);
   });
 });

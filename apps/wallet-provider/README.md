@@ -75,7 +75,8 @@ Fund the printed address at faucet.circle.com (Base Sepolia USDC) plus a little 
 
 | Requirement | Setting |
 |---|---|
-| Master key in AWS KMS (envelope encryption) | `PROVIDER_MASTER_KEY_KMS_CIPHERTEXT`, `PROVIDER_KMS_KEY_ID`, `PROVIDER_KMS_REGION`, IAM `kms:Decrypt` |
+| Signing inside AWS KMS: keys never leave | `PROVIDER_SIGNER=aws-kms`, `PROVIDER_KMS_REGION`; IAM `kms:CreateKey`, `kms:TagResource`, `kms:GetPublicKey`, `kms:Sign` |
+| No plain master key | `PROVIDER_MASTER_KEY` unset (use `PROVIDER_MASTER_KEY_KMS_CIPHERTEXT` only to keep older local-key wallets on testnet) |
 | Destination wallet screening, fail-closed | `PROVIDER_SCREENING=didit`, `DIDIT_API_KEY` (account needs a transaction-monitoring provider connected) |
 | Travel Rule details above a threshold | `PROVIDER_TRAVEL_RULE_USDC` (e.g. `1000`); transfers then need `travelRule: {originatorName, beneficiaryName, beneficiaryVasp?}` |
 | Persistent key store | `PROVIDER_STORE_FILE` |
@@ -85,4 +86,6 @@ Fund the printed address at faucet.circle.com (Base Sepolia USDC) plus a little 
 
 The last three are the operator's sworn statement, not something the code can verify. Make the KMS ciphertext once with
 `aws kms generate-data-key --key-id alias/acard-wallet --key-spec AES_256 --query CiphertextBlob --output text`.
-Next step after this: sign inside KMS/an MPC provider so the key never exists in process memory (see `packages/agent-wallet/src/signer`).
+With `PROVIDER_SIGNER=aws-kms`, every new EVM wallet is its own KMS key (`ECC_SECG_P256K1`, `SIGN_VERIFY`, tagged `acard:user`/`acard:chain`). The provider holds only the key id; it sends KMS a 32-byte transaction hash and gets a signature back (normalised to low-s, recovery id found by recovery). Every signature is a CloudTrail event. Wallets made with a local key keep working on testnets but are refused on mainnet. Solana wallets are refused in this mode for now. KMS charges about $1 per key per month plus per-signature fees.
+
+Minimal IAM policy for the provider's role: `kms:CreateKey` and `kms:TagResource` on `*`, and `kms:GetPublicKey` and `kms:Sign` on keys tagged `acard:chain`. Deny `kms:ScheduleKeyDeletion` to this role.

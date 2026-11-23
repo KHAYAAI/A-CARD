@@ -22,7 +22,10 @@ export interface WalletRecord {
   userId: string;
   chain: Chain;
   address: string;
-  sealed: import("./crypto.js").SealedKey;
+  /** Local key, sealed under the master key. Absent for KMS-held keys. */
+  sealed?: import("./crypto.js").SealedKey;
+  /** Key held in KMS; the private key never leaves it. */
+  kms?: { backend: string; keyId: string };
   createdAt: string;
 }
 

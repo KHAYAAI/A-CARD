@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { KeySource } from "./kms.js";
+import { addressForKey, kmsAccount, type SigningBackend } from "./kmsSigner.js";
+import { privateKeyToAccount } from "viem/accounts";
 import { checkTransfer, type ComplianceConfig, type TravelRuleInfo } from "./screening.js";
 import { open, seal, generateKey, toHex } from "./crypto.js";
 import { evmBalance, evmTransfer, isEvmAddress, checksum } from "./evm.js";
@@ -10,7 +12,10 @@ import type { Chain, Network, TransferRecord } from "./types.js";
 import { base58 } from "@scure/base";
 
 export interface ProviderConfig {
-  masterKey: Buffer;
+  /** Needed only for locally generated keys. Not used when `signer` is set. */
+  masterKey?: Buffer;
+  /** When set, new EVM wallets are KMS keys and signing happens inside KMS. */
+  signer?: SigningBackend;
   store: KeyStore;
   networks: Record<Chain, Network>;
   /** Max USDC (base units) in a single transfer. */
@@ -53,7 +58,7 @@ export class ProviderService {
   status() {
     return {
       store: this.cfg.store.kind,
-      keySource: this.cfg.keySource ?? "env",
+      keySource: this.cfg.signer ? `${this.cfg.signer.name}-signing` : (this.cfg.keySource ?? "env"),
       screening: this.cfg.compliance?.screener?.name ?? null,
       travelRuleThreshold: this.cfg.compliance?.travelRuleThreshold?.toString() ?? null,
       networks: Object.values(this.cfg.networks).map((n) => ({ chain: n.chain, network: n.name, testnet: n.testnet, rpc: Boolean(n.rpcUrl), transfers: n.kind === "evm" })),
@@ -67,8 +72,17 @@ export class ProviderService {
     return this.serial(`create:${userId}:${chain}`, async () => {
       const existing = await this.cfg.store.getWallet(userId, chain);
       if (existing) return { address: existing.address, chain, created: false };
+      if (this.cfg.signer) {
+        if (this.network(chain).kind !== "evm") throw new ProviderError(501, "chain_not_supported_by_signer", `${chain} wallets can't be held in ${this.cfg.signer.name} yet`);
+        const keyId = await this.cfg.signer.createKey({ "acard:user": userId, "acard:chain": chain });
+        const address = await addressForKey(this.cfg.signer, keyId);
+        await this.cfg.store.putWallet({ id: randomUUID(), userId, chain, address, kms: { backend: this.cfg.signer.name, keyId }, createdAt: new Date().toISOString() });
+        this.audit("wallet.created", { userId, chain, address, custody: this.cfg.signer.name, keyId });
+        return { address, chain, created: true };
+      }
+      if (!this.cfg.masterKey) throw new ProviderError(500, "no_key_custody", "no master key or signer configured");
       const k = generateKey(chain);
-      const rec = { id: randomUUID(), userId, chain, address: k.address, sealed: seal(this.cfg.masterKey, k.secret, userId, chain, k.address), createdAt: new Date().toISOString() };
+      const rec = { id: randomUUID(), userId, chain, address: k.address, sealed: seal(this.cfg.masterKey!, k.secret, userId, chain, k.address), createdAt: new Date().toISOString() };
       k.secret.fill(0);
       await this.cfg.store.putWallet(rec);
       this.audit("wallet.created", { userId, chain, address: k.address });
@@ -125,12 +139,19 @@ export class ProviderService {
       this.needRpc(n);
       const checks = await checkTransfer(this.cfg.compliance ?? {}, req.chain, req.to, amount, req.travelRule);
 
-      const secret = open(this.cfg.masterKey, wallet.sealed, wallet.userId, wallet.chain, wallet.address);
+      if (!n.testnet && !wallet.kms) throw new ProviderError(403, "local_key_on_mainnet", "this wallet's key was generated outside KMS, so it can't send on mainnet");
       let res: { txHash: string; confirmed: boolean };
-      try {
-        res = await evmTransfer(n, toHex(secret), checksum(req.to), amount, this.cfg.confirmTimeoutMs);
-      } finally {
-        secret.fill(0);
+      if (wallet.kms) {
+        if (!this.cfg.signer || this.cfg.signer.name !== wallet.kms.backend) throw new ProviderError(503, "signer_unavailable", `this wallet's key is in ${wallet.kms.backend}, which is not configured`);
+        res = await evmTransfer(n, kmsAccount(this.cfg.signer, wallet.kms.keyId, checksum(wallet.address)), checksum(req.to), amount, this.cfg.confirmTimeoutMs);
+      } else {
+        if (!this.cfg.masterKey || !wallet.sealed) throw new ProviderError(503, "no_key_custody", "this wallet's key is sealed locally but no master key is configured");
+        const secret = open(this.cfg.masterKey, wallet.sealed, wallet.userId, wallet.chain, wallet.address);
+        try {
+          res = await evmTransfer(n, privateKeyToAccount(toHex(secret)), checksum(req.to), amount, this.cfg.confirmTimeoutMs);
+        } finally {
+          secret.fill(0);
+        }
       }
       const rec: TransferRecord = { key: req.idempotencyKey, fromAddress: wallet.address, chain: req.chain, to: req.to, amount: req.amount, txHash: res.txHash, confirmed: res.confirmed, at: new Date().toISOString() };
       await this.cfg.store.putTransfer(rec);

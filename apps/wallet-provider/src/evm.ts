@@ -1,5 +1,5 @@
 import { createPublicClient, createWalletClient, defineChain, getAddress, http, isAddress, parseAbi } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import type { Account } from "viem";
 import { ProviderError } from "./errors.js";
 import type { Network } from "./types.js";
 
@@ -27,9 +27,8 @@ export async function evmBalance(n: Network, address: string): Promise<bigint> {
  * up in time: the transfer may still land, so the caller must treat it as
  * unknown rather than failed.
  */
-export async function evmTransfer(n: Network, secretHex: `0x${string}`, to: string, amount: bigint, confirmTimeoutMs = 30_000): Promise<{ txHash: string; confirmed: boolean }> {
+export async function evmTransfer(n: Network, account: Account, to: string, amount: bigint, confirmTimeoutMs = 30_000): Promise<{ txHash: string; confirmed: boolean }> {
   const chain = chainFor(n);
-  const account = privateKeyToAccount(secretHex);
   const wallet = createWalletClient({ account, chain, transport: transport(n) });
   let hash: `0x${string}`;
   try {
