@@ -91,4 +91,39 @@ ol,ul{margin:2px 0 0 14px;padding:0}li{margin:0 0 1.5px}
 <li>Fee estimate, timeline, and who on your team does fintech and payments work?</li></ol></div></div>
 <div class="f">Sources (secondary): Prifinance licensing guide; ENS and Legal500 commentary on SARB drafts; SARB payments pages and 2024 starter pack; TechCentral on the PASA transition; Werksmans on payment-service providers. Verify with counsel.</div>
 </div>
+
+<div class="pg">
+<h1>3 · Agent tokens and attached cards: questions for the calls</h1>
+<p class="sub">For the "attach your own card" route: the customer's existing card pays, A-CARD decides first, and the card is released only as a token or single-use credential. This route needs no issuing partner and no funds held by A-CARD, so it may reach real money sooner. Nothing here is verified with the networks yet; what we know comes from public announcements.</p>
+<div class="box" style="margin-bottom:6px"><b>What we know from public sources (Nov 2026):</b> Visa Intelligent Commerce issues a network token to an agent when a cardholder adds a card and grants permission, with step-up (passkey) authentication at issuance and on changes; Visa describes "Intelligent Commerce Connect" as a vault-agnostic on-ramp for agent builders. Mastercard Agent Pay uses "agentic tokens" scoped to one agent, built on its existing tokenisation service. Both show live pilots, mostly in the US and Europe; I found nothing on South Africa.</div>
+<div class="cols">
+<div class="box"><b>To Visa and Mastercard (or their regional teams)</b><ol>
+<li>Is Intelligent Commerce / Agent Pay available for South African cardholders and merchants today? If not, when, and through whom?</li>
+<li>Can a non-bank technology company become an approved agent enabler or token requestor? What are the requirements, costs and timeline?</li>
+<li>Do you require us to hold a licence, a certification (PCI DSS level?) or an issuer or acquirer sponsor first?</li>
+<li>How is a token scoped: per agent, per merchant, per amount, per time window? Can we pass our own spend limits into it?</li>
+<li>What does the cardholder's approval look like (passkey, bank app, 3-D Secure), and can we trigger it per purchase?</li>
+<li>How do disputes and chargebacks work for agent-initiated purchases, and how is liability shared?</li>
+<li>What transaction data do we receive back (merchant, amount, token use) to keep our audit log complete?</li></ol></div>
+<div class="box"><b>To issuers and processors (Paymentology, Union54, Investec)</b><ol start="8">
+<li>Do your cards support Visa or Mastercard agent tokens, or will they? On which BINs?</li>
+<li>Could your cardholders attach their existing card to a third-party agent platform like ours, and would you see it as a token requestor relationship?</li>
+<li>For Investec: can programmable-card code decline charges that are not made with an agent token we issued, so the card only works through A-CARD?</li>
+<li>Would you support both models with us: cards you issue for our programme, and customers' own cards used through tokens?</li></ol></div>
+<div class="box"><b>To PCI-certified card vault providers</b><ol start="12">
+<li>Your PCI DSS level and audit date. Which data and keys stay with you, and what do we ever touch?</li>
+<li>Can you release a card only after our approval call, once, bound to one merchant and amount (or a short expiry)?</li>
+<li>Do you support network tokens (Visa, Mastercard) so we never use raw card numbers?</li>
+<li>How does the credential reach the merchant: a proxy into their payment API, a processor integration, or browser autofill? Which do you recommend?</li>
+<li>Where is data stored (South Africa? EU?), your POPIA position, pricing per card and per release, and exit terms.</li></ol></div>
+<div class="box"><b>Our own red lines</b><ul>
+<li>A-CARD never stores full card numbers. Only a certified vault or a network token.</li>
+<li>No release without A-CARD's rules passing and, above the holder's threshold, the holder's own approval.</li>
+<li>Every release single use, bound to merchant and amount, and short-lived.</li>
+<li>The agent never sees a card number, real or stand-in.</li>
+<li>Counsel confirms the card-data and POPIA position before any real card is attached.</li></ul></div>
+</div>
+<div class="warn"><b>Say plainly:</b> the attached-card flow exists only as a sandbox prototype using test card numbers. No real card has been attached or charged.</div>
+<div class="f">Sources: Visa Intelligent Commerce and Intelligent Commerce Connect announcements; NMI on network tokens for agentic commerce; American Banker on Visa and Mastercard agent payments; Biometric Update on Mastercard Agent Pay for Machines. Verify with each company.</div>
+</div>
 </body></html>

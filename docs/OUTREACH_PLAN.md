@@ -11,6 +11,7 @@ Nothing in this plan has been done yet. Every step marked **You** needs you: sen
 | Day 1 | You | Send the **counsel** enquiry to two or three fintech firms | Draft 3, then the legal brief (page 2 of the pack) | Book scoping calls and get fee estimates. Counsel's answers shape every issuer call |
 | Day 1 | You | Send the **Paymentology** (with Bank Zero) message | Draft 1, issuer page (page 1) | A first call this week or next |
 | Day 1 | You | Send the **Union54** message | Draft 1 | Understand whether they are a faster route to a sponsor, or just another way to the same one |
+| Day 1 to 5 | You | Send the **agent-token** enquiry to Visa and Mastercard regional teams and one or two PCI-certified vault providers | Draft 4, page 3 of the pack | Learn whether the attached-card route is available in South Africa, and on what terms |
 | Day 1 | You | Send the **Investec** message | Draft 2 | Written answers on external calls, data protection and hook limits. Do not start the pilot until you have them |
 | Days 2 to 5 | You | Enable Programmable Banking on your Investec account; create API credentials in Investec's portal | Pilot-day checklist in `docs/integrations/investec-pilot.md` | Be ready to run the simulator. Keep credentials out of chat and the repo |
 | Week 1 to 2 | You | Issuer calls (30 minutes each) | Question list on page 1 of the pack | Fill the comparison table below. Do not agree to anything yet |

@@ -59,6 +59,23 @@ Thanks,
 
 ---
 
+## 4. Card networks or a PCI-certified vault provider (attached cards and agent tokens)
+
+**Subject:** Agent tokens for an AI-agent spending platform: South Africa
+
+Hi [name],
+
+I'm [your name] at A-CARD. We build a control layer for AI agents that spend money: per-agent limits, merchant rules and human approval, decided before any payment is made. Alongside card issuing, we want to let customers use a card they already have, released to an agent only as a token or single-use credential after our rules and the cardholder's approval pass. We never want to store card numbers ourselves.
+
+Today this is a sandbox prototype using test card numbers only. We'd like to understand [Visa Intelligent Commerce / Mastercard Agent Pay / your vault service]: availability in South Africa, what it takes for a technology company like ours to use it, how tokens can be scoped per agent, merchant and amount, and how cardholder approval and disputes work.
+
+Could we have 30 minutes? I can send our questions ahead.
+
+Thanks,
+[name, company, number]
+
+---
+
 ## Before you send any of these
 - Check every claim against what the sandbox actually does.
 - Don't name competitors or partners in a way you can't back up.
