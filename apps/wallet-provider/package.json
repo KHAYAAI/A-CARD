@@ -16,6 +16,7 @@
     "licences": "node ../../packages/agent-wallet/scripts/check-licences.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1175.0",
     "@hono/node-server": "^1.13.0",
     "@noble/curves": "^2.4.0",
     "@scure/base": "^2.3.0",

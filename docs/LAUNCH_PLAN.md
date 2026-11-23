@@ -264,3 +264,13 @@ Order of operations: (1) run the Investec pilot on your own account to test the 
 | **Crypto: stablecoin rail and wallet provider** | Real keys, encrypted storage, signed USDC transfers on test networks (verified against a simulated chain only) | Run on a real testnet first; replace the environment-variable master key with KMS/HSM; audit; the same licensing and Travel Rule work; on-/off-ramp partner for rand |
 | **x402** (pay-per-API) | Real EIP-3009 signer behind explicit flags; governed by card controls | Funded wallet with real custody; licensing as for crypto |
 
+
+### Crypto wallet status (2026-11-23)
+| # | Item | Status |
+|---|---|---|
+| 1 | Real chain | Code ready: Base Sepolia preset + `apps/wallet-provider/scripts/testnet-smoke.ts`. **Run it once with faucet funds** to close. |
+| 2 | Key custody | Done for the master key: AWS KMS envelope encryption, required for mainnet. Next: signing inside KMS/MPC. |
+| 3 | Security audit | Not code. Scope: `apps/wallet-provider`, `packages/agent-wallet` (policy, signer, x402), API wallet routes. Mainnet needs `PROVIDER_AUDIT_REF`. |
+| 4 | Licence | Not code. Counsel: FSCA CASP (SA) / VARA or free-zone (UAE). Mainnet needs `PROVIDER_LICENCE_REF`. |
+| 5 | Screening + Travel Rule | Done in code, fail-closed, required for mainnet. Needs Didit transaction-monitoring provider connected on the account. |
+| 6 | Rand ramp | Not code. Partner conversation. Mainnet needs `PROVIDER_RAMP_PARTNER_REF`. |

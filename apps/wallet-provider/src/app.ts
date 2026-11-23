@@ -49,7 +49,7 @@ export function createProviderApp(svc: ProviderService, opts: { apiKey: string }
     const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     if (!isChain(b.chain)) throw new ProviderError(400, "bad_request", "chain must be ethereum, polygon or solana");
     for (const k of ["from", "to", "amount", "idempotencyKey"]) if (typeof b[k] !== "string") throw new ProviderError(400, "bad_request", `${k} is required`);
-    const r = await svc.transfer({ chain: b.chain, from: b.from as string, to: b.to as string, amount: b.amount as string, idempotencyKey: b.idempotencyKey as string });
+    const r = await svc.transfer({ chain: b.chain, from: b.from as string, to: b.to as string, amount: b.amount as string, idempotencyKey: b.idempotencyKey as string, travelRule: b.travelRule as any });
     return c.json({ ...r, network: svc.network(b.chain).name, testnet: svc.network(b.chain).testnet });
   });
 

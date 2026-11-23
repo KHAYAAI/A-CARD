@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { KeySource } from "./kms.js";
+import { checkTransfer, type ComplianceConfig, type TravelRuleInfo } from "./screening.js";
 import { open, seal, generateKey, toHex } from "./crypto.js";
 import { evmBalance, evmTransfer, isEvmAddress, checksum } from "./evm.js";
 import { ProviderError } from "./errors.js";
@@ -16,6 +18,9 @@ export interface ProviderConfig {
   /** Max USDC (base units) per wallet in any rolling 24 hours. */
   maxDaily: bigint;
   confirmTimeoutMs?: number;
+  /** Screening and Travel Rule, run before any key is opened. */
+  compliance?: ComplianceConfig;
+  keySource?: KeySource;
   log?: (line: string) => void;
 }
 
@@ -48,6 +53,9 @@ export class ProviderService {
   status() {
     return {
       store: this.cfg.store.kind,
+      keySource: this.cfg.keySource ?? "env",
+      screening: this.cfg.compliance?.screener?.name ?? null,
+      travelRuleThreshold: this.cfg.compliance?.travelRuleThreshold?.toString() ?? null,
       networks: Object.values(this.cfg.networks).map((n) => ({ chain: n.chain, network: n.name, testnet: n.testnet, rpc: Boolean(n.rpcUrl), transfers: n.kind === "evm" })),
       testnet: Object.values(this.cfg.networks).every((n) => n.testnet),
       limits: { maxTransfer: this.cfg.maxTransfer.toString(), maxDaily: this.cfg.maxDaily.toString(), unit: "USDC base units (6 decimals)" },
@@ -89,7 +97,7 @@ export class ProviderService {
    * Moves USDC out of a wallet this provider created. Policy is checked before
    * the key is ever opened; the key lives in memory only for the signing call.
    */
-  async transfer(req: { chain: Chain; from: string; to: string; amount: string; idempotencyKey: string }) {
+  async transfer(req: { chain: Chain; from: string; to: string; amount: string; idempotencyKey: string; travelRule?: TravelRuleInfo }) {
     const n = this.network(req.chain);
     if (n.kind !== "evm") solanaTransfer();
     if (!/^[A-Za-z0-9_.:-]{8,128}$/.test(req.idempotencyKey ?? "")) throw new ProviderError(400, "bad_idempotency_key", "idempotencyKey must be 8-128 characters");
@@ -115,6 +123,7 @@ export class ProviderService {
       const spent = (await this.cfg.store.transfersSince(req.chain, req.from, Date.now() - 86_400_000)).reduce((a, t) => a + BigInt(t.amount), 0n);
       if (spent + amount > this.cfg.maxDaily) throw new ProviderError(422, "policy", `over the 24-hour limit of ${Number(this.cfg.maxDaily) / 1e6} USDC`);
       this.needRpc(n);
+      const checks = await checkTransfer(this.cfg.compliance ?? {}, req.chain, req.to, amount, req.travelRule);
 
       const secret = open(this.cfg.masterKey, wallet.sealed, wallet.userId, wallet.chain, wallet.address);
       let res: { txHash: string; confirmed: boolean };
@@ -125,7 +134,7 @@ export class ProviderService {
       }
       const rec: TransferRecord = { key: req.idempotencyKey, fromAddress: wallet.address, chain: req.chain, to: req.to, amount: req.amount, txHash: res.txHash, confirmed: res.confirmed, at: new Date().toISOString() };
       await this.cfg.store.putTransfer(rec);
-      this.audit("transfer", { chain: req.chain, from: wallet.address, to: req.to, amount: req.amount, txHash: res.txHash, confirmed: res.confirmed, network: n.name });
+      this.audit("transfer", { chain: req.chain, from: wallet.address, to: req.to, amount: req.amount, txHash: res.txHash, confirmed: res.confirmed, network: n.name, screening: checks.screening ?? null, travelRule: checks.travelRule ? req.travelRule : null });
       return { txHash: res.txHash, confirmed: res.confirmed, replayed: false };
     });
   }

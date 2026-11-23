@@ -56,3 +56,33 @@ Other env: `PROVIDER_RPC_POLYGON`, `PROVIDER_RPC_SOLANA`, `PROVIDER_NETWORKS_JSO
 Tested here (`npm test -w @acard/wallet-provider`, and `apps/api/test/wallet-provider.test.ts` end to end): key generation and known address vectors, encryption round trip, tamper/wrong-key/moved-record failures, idempotent creation, auth, file permissions, caps, nonce serialisation, idempotent replay, and a full platform signup → intent → execute flow. The chain in those tests is a **fake JSON-RPC node** (`./testing`) that independently decodes the signed transaction, recovers the signer from the signature, and enforces chain id, nonce and balance.
 
 **Not tested here:** a real RPC endpoint, the real Sepolia/Amoy/devnet USDC contracts, gas behaviour on a live network, or any audit. This environment cannot reach chain nodes. Run a transfer on Sepolia with faucet funds before relying on it.
+
+## Real test network (Base Sepolia)
+
+Point the `ethereum` slot at Base Sepolia (Circle's test USDC), then run the smoke script:
+
+```bash
+export PROVIDER_NETWORKS_JSON='[{"chain":"ethereum","kind":"evm","name":"base-sepolia","chainId":84532,"usdc":"0x036CbD53842c5426634e7929541eC2318f3dCF7e","rpcUrl":"https://sepolia.base.org","testnet":true}]'
+PROVIDER_API_KEY=$(openssl rand -hex 16) PROVIDER_MASTER_KEY=$(openssl rand -hex 32) PROVIDER_STORE_FILE=./keys.json npm start
+# second terminal, same PROVIDER_API_KEY:
+PROVIDER_API_KEY=... npx tsx scripts/testnet-smoke.ts
+```
+Fund the printed address at faucet.circle.com (Base Sepolia USDC) plus a little test ETH for gas. Run the script twice: the second run must say REPLAYED.
+
+## Going to mainnet
+
+`PROVIDER_ALLOW_MAINNET=true` refuses to start unless all of these hold:
+
+| Requirement | Setting |
+|---|---|
+| Master key in AWS KMS (envelope encryption) | `PROVIDER_MASTER_KEY_KMS_CIPHERTEXT`, `PROVIDER_KMS_KEY_ID`, `PROVIDER_KMS_REGION`, IAM `kms:Decrypt` |
+| Destination wallet screening, fail-closed | `PROVIDER_SCREENING=didit`, `DIDIT_API_KEY` (account needs a transaction-monitoring provider connected) |
+| Travel Rule details above a threshold | `PROVIDER_TRAVEL_RULE_USDC` (e.g. `1000`); transfers then need `travelRule: {originatorName, beneficiaryName, beneficiaryVasp?}` |
+| Persistent key store | `PROVIDER_STORE_FILE` |
+| Independent security audit | `PROVIDER_AUDIT_REF` |
+| Crypto-asset licence (FSCA CASP / VARA) | `PROVIDER_LICENCE_REF` |
+| Rand on/off-ramp partner | `PROVIDER_RAMP_PARTNER_REF` |
+
+The last three are the operator's sworn statement, not something the code can verify. Make the KMS ciphertext once with
+`aws kms generate-data-key --key-id alias/acard-wallet --key-spec AES_256 --query CiphertextBlob --output text`.
+Next step after this: sign inside KMS/an MPC provider so the key never exists in process memory (see `packages/agent-wallet/src/signer`).
